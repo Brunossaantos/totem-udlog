@@ -1190,3 +1190,88 @@ esta demanda) foram nas ações listadas no escopo original.
 ### Próximo passo
 
 Rodar `/04-commit-e-push`.
+
+## Commit
+
+Data: 2026-09-04
+Commit realizado manualmente pelo usuário (fora do fluxo automatizado do
+orquestrador) — verificação de segurança e integridade feita à posteriori,
+conforme abaixo.
+
+- Hash: `22eeba04da3b9c475421f1105ef1b2657226821c`
+- Mensagem: `feat(recebimento): integra scanner para notas`
+- Branch: `main`
+- Remote: `origin` → `https://github.com/Brunossaantos/totem-udlog.git`
+- Push confirmado: `HEAD` local idêntico a `origin/main` no momento da
+  verificação.
+
+### Verificação de segurança pós-commit (executada pelo orquestrador)
+
+- `git ls-files`: 56 arquivos rastreados, todos legítimos ao escopo do
+  projeto — nenhum `.env`, nenhum arquivo de `storage/atendimentos/`,
+  nenhum arquivo de `docs/evidencias-scanner/`, nenhum arquivo de
+  `vendor/`, nenhum `composer copy.json`.
+- `git status --ignored`: confirma `.env`, `docs/evidencias-scanner/`,
+  `storage/`, `vendor/` corretamente ignorados e fora do commit.
+- `git check-ignore -v` testado individualmente para `.env`, um arquivo
+  real de `storage/atendimentos/`, um arquivo de
+  `docs/evidencias-scanner/` e `vendor/autoload.php` — todos confirmados
+  ignorados pela regra correta do `.gitignore`.
+- `.env.example` confirmado rastreado e sem nenhum valor real preenchido
+  (usuário/senha/chaves de API vazios, apenas a URL pública da Prodesp).
+- Busca de segredos no conteúdo rastreado (`git grep`): nenhuma ocorrência
+  de senha, token, chave privada ou padrão de segredo encontrada.
+- Busca específica pelo token de teste do totem local
+  (`RECEPCAO-01`) e pela senha do MariaDB local usada durante os testes:
+  nenhuma ocorrência em nenhum arquivo rastreado.
+- `git log --all --diff-filter=A --name-only`: confirma que `.env` nunca
+  foi adicionado em nenhum commit do histórico (só existe 1 commit).
+- `php -l` em todos os arquivos `.php` rastreados: sem erros.
+- `node --check` em `public/totem/assets/app.js` rastreado: sem erros.
+
+**Nenhum dado sensível foi incluído no repositório remoto.**
+
+### Resumo final da demanda
+
+- `/02-testes`: **APROVADO COM RESSALVAS** (migration, transições,
+  upload/validação e IDOR do escopo validados via testes reais; scanner
+  físico validado no hardware real após múltiplas rodadas de correção de
+  resolução/proporção/flash).
+- `/03-revisao`: **APROVADO** (revisão cruzada independente confirmou
+  isolamento de escopo, ausência de regressão, e conformidade com o
+  planejado).
+- Scanner físico Netum SD-2000: **validado fisicamente** — reconhecido
+  como dispositivo de vídeo USB (`NETUM Camera`, classe Camera/UVC),
+  captura em 3264×2448, preview/guia em proporção 4:3 correta, sem corte
+  de imagem, sem flash visual, estável em múltiplas entradas/saídas da
+  tela, preview fluido.
+
+### Pendências antes de produção (não bloquearam este commit, mas devem
+ser resolvidas antes de considerar o sistema pronto para produção)
+
+1. **IDOR em `AtendimentoController::selecionarOrdem` e `::finalizar`**
+   — confirmado por leitura direta em `/03-revisao`, fora do escopo desta
+   demanda por decisão explícita do usuário. Parecer formal do
+   `security-especialista`: o sistema como um todo não deve ser
+   considerado seguro para produção enquanto esses dois métodos não
+   receberem a mesma validação de posse (`id_totem`) já aplicada às
+   demais ações.
+2. **Testes físicos restantes do roteiro de 20 itens**: sequência completa
+   de 5 notas via UI, bloqueio da 6ª captura, fluxo completo de "Finalizar
+   digitalização" clicado fisicamente após as últimas correções, "Refazer"
+   no hardware real, cancelar encerrando a câmera fisicamente, desconexão/
+   reconexão do USB, disputa de acesso com o NetumScan Pro aberto.
+3. **JPEG truncado ainda aceito** (`util/UploadHelper.php`) — achado
+   médio, não bloqueante (questão de integridade de dado, não de
+   segurança, confirmado pelo `security-especialista`). Uma nota fiscal
+   truncada pode ser salva como se fosse válida; corrigível de forma
+   simples (checar marcador de fim `FFD9`), mas não implementado nesta
+   demanda.
+4. **Origem da chave de acesso da NF-e na tela `rec_digitaliza`** —
+   decisão de produto ainda pendente (`chave: null` fixo, sem leitor HID
+   substituto na tela de digitalização).
+
+### Próximo passo
+
+Nenhum — demanda encerrada. As pendências acima ficam registradas em
+`ia_development_state.md` seção 5 para tratamento em demandas futuras.

@@ -324,3 +324,16 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   considerado seguro para produção enquanto o IDOR em
   `AtendimentoController::selecionarOrdem`/`::finalizar` não for
   corrigido (ver seção 5). Próximo passo: `/04-commit-e-push`.
+- 2026-09-04 — Demanda `recebimento-scanner-netum-sd2000` encerrada.
+  Commit `22eeba0` (`feat(recebimento): integra scanner para notas`)
+  enviado para `origin/main` (`https://github.com/Brunossaantos/totem-udlog.git`).
+  Verificação pós-commit confirmou: nenhum dado sensível incluído (`.env`,
+  `storage/atendimentos/`, `docs/evidencias-scanner/`, `vendor/` todos
+  corretamente ignorados e ausentes do repositório), `.env.example` sem
+  segredo real, `php -l`/`node --check` sem erros, sem histórico anterior
+  de `.env` commitado. `/02-testes`: aprovado com ressalvas. `/03-revisao`:
+  aprovado. Scanner físico Netum SD-2000 validado no hardware real.
+  Pendências para produção (ver seção 5): IDOR em `selecionarOrdem`/
+  `finalizar`, testes físicos restantes (5 notas completas, bloqueio da
+  6ª, finalizar/cancelar/desconexão fisicamente, NetumScan Pro), JPEG
+  truncado aceito, origem da chave de acesso da NF-e.
