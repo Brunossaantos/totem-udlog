@@ -1,0 +1,25 @@
+# Ambiente / segredos
+.env
+!.env.example
+
+# Dependências (regeneradas via `composer install` no servidor — ver docs/deploy-checklist.md)
+/vendor/
+
+# Dados reais capturados pelo totem (LGPD — nunca versionar documentos/fotos reais)
+# Estrutura de pastas não precisa de .gitkeep: UploadHelper::salvarImagemBase64
+# cria os diretórios dinamicamente via mkdir recursivo.
+storage/atendimentos/
+
+# Evidências de teste/debug com dados reais de documentos
+docs/evidencias-scanner/
+
+# Lixo acidental
+composer copy.json
+
+# SO
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/

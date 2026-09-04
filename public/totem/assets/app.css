@@ -1,0 +1,133 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #fff;
+    color: #0b2a45;
+}
+#app {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+.barra-cancelar {
+    padding: 16px 20px 0;
+    flex-shrink: 0;
+}
+.btn-cancelar {
+    background: none;
+    border: none;
+    color: #5b6b7a;
+    font-size: 15px;
+    cursor: pointer;
+}
+.tela {
+    flex: 1;
+    padding: 20px 28px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 18px;
+}
+.titulo { font-size: 22px; font-weight: 600; text-align: center; }
+.subtitulo { font-size: 15px; color: #5b6b7a; text-align: center; }
+
+.btn-primario, .btn-fantasma, .btn-alerta {
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 18px;
+    padding: 16px 22px;
+    cursor: pointer;
+}
+.btn-primario { background: #0b2a45; color: #fff; border: 2px solid #0b2a45; }
+.btn-fantasma { background: #fff; color: #0b2a45; border: 2px solid #0b2a45; }
+.btn-alerta { background: #fff; color: #a32d2d; border: 2px solid #a32d2d; }
+.btn-primario:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.grupo-botoes { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 340px; margin: 0 auto; }
+.grupo-botoes-linha { display: flex; gap: 12px; justify-content: center; }
+
+.tile { width: 100%; height: 140px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 20px; font-weight: 600; cursor: pointer; }
+.tile-principal { background: #0b2a45; color: #fff; border: 2px solid #0b2a45; }
+.tile-secundaria { background: #fff; color: #0b2a45; border: 2px solid #0b2a45; }
+
+input.campo-texto {
+    font-size: 26px;
+    letter-spacing: 0.06em;
+    text-align: center;
+    padding: 16px 20px;
+    border: 2px solid #0b2a45;
+    border-radius: 10px;
+    color: #0b2a45;
+    width: 100%;
+    max-width: 320px;
+    margin: 0 auto;
+}
+.campo { display: flex; flex-direction: column; gap: 4px; }
+.campo label { font-size: 13px; color: #5b6b7a; font-weight: 600; }
+.campo input {
+    border: 1px solid #cbd5df; border-radius: 8px; padding: 10px 12px;
+    font-size: 16px; color: #0b2a45; background: #fff;
+}
+.grade-campos { display: grid; grid-template-columns: 1fr; gap: 10px; max-width: 420px; margin: 0 auto; width: 100%; }
+@media (min-width: 520px) { .grade-campos { grid-template-columns: 1fr 1fr; } }
+
+.linha-confirma { font-size: 15px; }
+.linha-confirma input { border: none; border-bottom: 1px solid #cbd5df; background: transparent; font-size: 15px; color: #0b2a45; font-weight: 600; width: 160px; padding: 2px 0; }
+
+.caixa-camera { position: relative; width: 100%; max-width: 360px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 4/3; }
+.caixa-camera video { width: 100%; height: 100%; object-fit: cover; }
+.status-leitura { font-size: 13px; color: #5b6b7a; text-align: center; }
+.status-leitura.ok { color: #1d7a5f; font-weight: 600; }
+
+.cartao-oc { text-align: left; background: #f7f9fa; border: 1.5px solid #cbd5df; border-radius: 10px; padding: 14px 16px; cursor: pointer; }
+.cartao-oc .numero { font-size: 16px; font-weight: 600; }
+.cartao-oc .detalhe { font-size: 13px; color: #5b6b7a; margin-top: 2px; }
+
+.lista-sugestoes { border: 1px solid #cbd5df; border-radius: 10px; overflow: hidden; max-width: 420px; margin: 0 auto; width: 100%; }
+.lista-sugestoes .item { padding: 12px 14px; font-size: 15px; border-bottom: 1px solid #e6ebef; cursor: pointer; }
+.lista-sugestoes .item:last-child { border-bottom: none; }
+.lista-sugestoes .item:hover { background: #f4f6f8; }
+
+.miniaturas { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.miniatura { width: 32px; height: 40px; background: #0b2a45; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; overflow: hidden; }
+.miniatura img { width: 100%; height: 100%; object-fit: cover; }
+
+/* aspect-ratio 4/3 e so o fallback ANTES do stream conectar (e antes do primeiro
+   calculo) — 4/3 (horizontal) foi escolhido por ser a proporcao real entregue
+   pelo Netum SD-2000, evitando o "flash" visual de nascer vertical (3/4) e so
+   depois virar horizontal quando o JS calcula a altura real. A propriedade CSS
+   aspect-ratio nao e respeitada de forma confiavel dentro do container
+   flex/column .tela nesse navegador, entao a partir do momento em que a
+   resolucao real do video e conhecida, ajustarProporcaoScanner() (app.js)
+   calcula a altura em PIXELS (clientWidth * videoHeight / videoWidth) e
+   escreve style.height diretamente em #caixaScanner/#previaNota, sobrescrevendo
+   esse fallback (height explicito tem precedencia sobre aspect-ratio). O
+   <video> fica com visibility:hidden (via JS, em abrirStreamScanner) ate a
+   altura real ser aplicada, para nao mostrar frame sem layout correto. */
+.caixa-scanner { position: relative; width: 100%; max-width: 360px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 4/3; flex-shrink: 0; }
+.caixa-scanner video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.guia-scanner { position: absolute; inset: 8%; border: 2px dashed rgba(255,255,255,0.85); border-radius: 8px; pointer-events: none; }
+.previa-nota { width: 100%; max-width: 360px; margin: 0 auto; display: block; border-radius: 12px; object-fit: contain; background: #000; flex-shrink: 0; }
+.status-scanner { font-size: 13px; color: #5b6b7a; text-align: center; }
+.status-scanner.ok { color: #1d7a5f; font-weight: 600; }
+.status-scanner.erro { color: #a32d2d; font-weight: 600; }
+
+.senha-caixa { border: 2px dashed #cbd5df; border-radius: 10px; padding: 16px 32px; text-align: center; margin: 0 auto; }
+.senha-caixa .rotulo { font-size: 12px; color: #5b6b7a; }
+.senha-caixa .valor { font-size: 40px; font-weight: 700; color: #0b2a45; }
+
+.teclado { display: none; flex-shrink: 0; border-top: 1px solid #e2e8ee; background: #eef1f4; padding: 8px; }
+.teclado.aberto { display: block; }
+.linha-teclas { display: flex; gap: 4px; margin-bottom: 4px; justify-content: center; }
+.tecla { flex: 1; max-width: 46px; height: 40px; background: #fff; border: 1px solid #cbd5df; border-radius: 6px; font-size: 14px; color: #0b2a45; cursor: pointer; }
+.tecla-apagar { max-width: 60px; background: #dbe4ea; }
+.tecla-espaco { flex: 3; max-width: 260px; font-size: 12px; }
+.tecla-ok { max-width: 80px; background: #0b2a45; color: #fff; }
+
+.modal-fundo { display: none; position: fixed; inset: 0; background: rgba(11,42,69,0.5); align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+.modal-fundo.aberto { display: flex; }
+.modal-caixa { background: #fff; border-radius: 14px; padding: 24px; max-width: 320px; text-align: center; display: flex; flex-direction: column; gap: 14px; }
+.modal-caixa .titulo { font-size: 17px; }
+.modal-caixa .subtitulo { font-size: 14px; }
