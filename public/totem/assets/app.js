@@ -87,7 +87,7 @@ function apagar() { if (campoAtivo) campoAtivo.value = campoAtivo.value.slice(0,
 // -------------------- inatividade --------------------
 
 let idleTimer = null;
-const IDLE_MS = 45000;
+const IDLE_MS = 180000;
 const IDLE_ABANDONO_MS = 30000;
 
 function reiniciarIdle() {
@@ -173,6 +173,7 @@ function novoAtendimento() {
         ordens: [], dados: {}, notaOrdem: 0, notasImagens: [], previewNotaAtual: null,
         capturaNotaEmAndamento: false, finalizandoDigitalizacao: false, clienteIdentificado: false, ultimaLeituraQr: null,
     });
+    ocrFila = [];
     ir('home');
 }
 
@@ -455,6 +456,7 @@ async function iniciarRecebimento(excedeLimite) {
             state.capturaNotaEmAndamento = false;
             state.finalizandoDigitalizacao = false;
             state.clienteIdentificado = false;
+            ocrFila = [];
             await api('atendimento.php', 'salvar-etapa', { id_atendimento: state.idAtendimento, etapa: 'digitalizacao_notas' });
             ir('rec_digitaliza');
         }
@@ -522,7 +524,7 @@ function mostrarStatusScanner(msg, isErro) {
     if (!el) return;
     el.textContent = msg;
     el.classList.toggle('erro', !!isErro);
-    el.classList.toggle('ok', !isErro && (msg === 'Scanner pronto' || msg === 'Documento salvo'));
+    el.classList.toggle('ok', !isErro && (msg === 'Scanner pronto' || msg === 'Documento salvo' || msg === 'Cliente identificado'));
 }
 
 // CSS aspect-ratio nao e respeitado de forma confiavel dentro do container
@@ -604,6 +606,10 @@ function atualizarBotaoCaptura() {
 }
 
 async function iniciarCameraScanner() {
+    // dispara o carregamento do Worker/modelo de idioma em paralelo ao
+    // motorista posicionando a primeira nota (sem await — nao bloqueia a
+    // abertura da tela nem a conexao com o scanner)
+    iniciarOcrWorker();
     scannerVideoPronto = false;
     if (!window.isSecureContext) {
         mostrarStatusScanner('Esta página precisa ser aberta via HTTPS ou localhost para acessar a câmera.', true);
@@ -966,6 +972,7 @@ async function confirmarUsoImagemNota() {
         state.notaOrdem = ordem;
         state.notasImagens.push(imagem);
         state.previewNotaAtual = null;
+        processarOcrNota(imagem, ordem);
         const contador = document.getElementById('contadorNotas');
         if (contador) contador.textContent = state.notaOrdem;
         const miniaturas = document.getElementById('miniaturas');
@@ -1004,6 +1011,218 @@ async function finalizarDigitalizacao() {
         if (btn) btn.disabled = false;
     }
     state.finalizandoDigitalizacao = false;
+}
+
+// -------------------- recebimento: identificacao de cliente via OCR local (Tesseract.js) --------------------
+// CORRECAO (2026-09-04): o desenho anterior rodava Tesseract.createWorker()
+// de DENTRO de um Web Worker customizado (assets/ocr-worker.js) — mas o
+// Tesseract.js JA GERENCIA seu proprio Worker internamente (e exatamente o
+// que Tesseract.createWorker() faz: cria um Worker dedicado, via blob URL,
+// para rodar o reconhecimento fora da thread principal). Isso resultava num
+// Worker aninhado (Worker dentro de Worker): o worker interno do
+// Tesseract.js tentava importScripts('tesseract/worker.min.js') com caminho
+// relativo, que nao resolve a partir do contexto de um blob worker aninhado
+// (WorkerGlobalScope de um worker criado dinamicamente via blob nao tem a
+// mesma base URL de assets/ocr-worker.js) — confirmado em teste fisico real
+// (SyntaxError: Failed to execute 'importScripts' ... URL
+// 'tesseract/worker.min.js' is invalid), quebrando 100% do OCR em producao.
+// Correcao: Tesseract.createWorker() agora e chamado DIRETAMENTE na thread
+// principal (aqui), com os caminhos relativos resolvendo normalmente a
+// partir da propria pagina (public/totem/index.php). Isso nao bloqueia a UI/
+// captura: Tesseract.createWorker() e worker.recognize() sao Promises,
+// executadas pelo worker INTERNO do Tesseract.js (a parte pesada), chamadas
+// sem await no fluxo de captura (mesmo padrao fire-and-forget de antes). A
+// extracao de candidatos (extrairCandidatos()) e so processamento de string
+// (regex), rapida, sem necessidade de Worker nenhum. A imagem nunca sai do
+// totem/navegador — so os candidatos textuais extraidos (CNPJ/razao social)
+// sao enviados ao backend (nota.php?acao=identificar-cliente). Fila interna
+// processa as notas em ordem (nota por nota); assim que o backend confirma
+// IDENTIFICADA, a fila e esvaziada e nenhuma nota seguinte dispara OCR/
+// chamada de identificacao (early-stop por atendimento).
+//
+// AJUSTE (2026-09-04, diagnostico com imagem real): antes de chamar
+// worker.recognize(), uma copia rotacionada em 270 graus (rotacionarImagem270())
+// e gerada em memoria e usada SO para o OCR — a imagem original, ja salva
+// via confirmarUsoImagemNota(), nunca e alterada. Extracao de chave de
+// acesso (44 digitos) removida do processo (nunca validou em 14 combinacoes
+// testadas) — chave_ocr sempre enviado como null ao backend.
+
+let tesseractWorkerPromise = null;
+let ocrFila = [];
+let ocrProcessando = false;
+
+// CNPJ: 14 digitos, aceitando mascara padrao (99.999.999/9999-99) ou
+// separadores/espacos soltos que o OCR as vezes insere no lugar da mascara.
+const CNPJ_REGEX = /\d{2}[.\s]?\d{3}[.\s]?\d{3}[/\s]?\d{4}[-\s]?\d{2}/g;
+
+// Extraida do antigo ocr-worker.js (mesma logica/heuristica, nao alterada)
+// — so processamento de string, roda direto na thread principal.
+// NOTA (2026-09-04): extracao de chave de acesso (44 digitos) REMOVIDA —
+// diagnostico real (14 combinacoes/2 imagens) mostrou que ela nunca valida
+// via OCR (1 unico digito errado entre 44 ja invalida o resultado), mesmo
+// quando CNPJ solto e razao social ja saem corretos. Chave deixou de fazer
+// parte do processo de identificacao (ver handoff da demanda
+// recebimento-leitura-notas).
+function extrairCandidatos(texto) {
+    const textoSeguro = texto || '';
+
+    // CNPJs candidatos (dedupe, mantendo ordem de aparicao no texto).
+    const cnpjsCandidatos = [];
+    let m;
+    CNPJ_REGEX.lastIndex = 0;
+    while ((m = CNPJ_REGEX.exec(textoSeguro)) !== null) {
+        const digitos = m[0].replace(/\D/g, '');
+        if (digitos.length === 14) cnpjsCandidatos.push(digitos);
+    }
+    const cnpjsUnicos = [...new Set(cnpjsCandidatos)];
+
+    // Razao social candidata: heuristica simples (ver observacao no
+    // cabecalho do arquivo) — primeira linha reconhecida, entre as 20
+    // primeiras, predominantemente alfabetica (sem digitos, tamanho
+    // plausivel para um nome de empresa), onde costuma aparecer o nome do
+    // emitente no layout padrao de DANFE.
+    const linhas = textoSeguro.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    let razaoSocialCandidata = null;
+    for (const linha of linhas.slice(0, 20)) {
+        const letras = (linha.match(/[A-Za-zÀ-ÖØ-öø-ÿ]/g) || []).length;
+        const digitosNaLinha = (linha.match(/\d/g) || []).length;
+        if (linha.length >= 6 && linha.length <= 80 && digitosNaLinha === 0 && letras >= linha.length * 0.6) {
+            razaoSocialCandidata = linha;
+            break;
+        }
+    }
+
+    return { cnpjsCandidatos: cnpjsUnicos, razaoSocialCandidata };
+}
+
+// Gera uma COPIA rotacionada em 270 graus da imagem, usada exclusivamente
+// para o OCR/Tesseract.js — NUNCA persistida nem enviada ao backend como a
+// "nota" (a imagem original, ja salva via confirmarUsoImagemNota(), segue
+// intocada). Rotacao fixa: diagnostico real (2 imagens diferentes, 4
+// rotacoes cada) confirmou que 0/90/180 graus nunca produzem CNPJ valido, e
+// 270 graus sempre produz. 270/90 graus trocam largura/altura — por isso o
+// canvas de destino usa img.height/img.width invertidos.
+function rotacionarImagem270(imagemDataUrl) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.height;
+            canvas.height = img.width;
+            const ctx = canvas.getContext('2d');
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(270 * Math.PI / 180);
+            ctx.drawImage(img, -img.width / 2, -img.height / 2);
+            resolve(canvas);
+        };
+        img.onerror = () => reject(new Error('Falha ao carregar imagem para rotacao de OCR'));
+        img.src = imagemDataUrl;
+    });
+}
+
+// Cria (uma unica vez) e reaproveita o worker interno do Tesseract.js —
+// evita recarregar o modelo de idioma a cada nota. Chamado diretamente na
+// thread principal (nao ha mais Worker customizado — ver comentario acima).
+// Chamado a partir de iniciarCameraScanner() pra comecar a carregar o
+// modelo de idioma em paralelo ao motorista posicionando a primeira nota.
+function iniciarOcrWorker() {
+    if (!tesseractWorkerPromise) {
+        try {
+            // oem=1 (LSTM_ONLY) — coerente com so termos vendorizado as
+            // variantes de core "*-lstm" (sem o core legado). Caminhos
+            // relativos a propria pagina (public/totem/index.php), onde
+            // assets/tesseract/tesseract.min.js ja e carregado via <script>.
+            tesseractWorkerPromise = Tesseract.createWorker('por', 1, {
+                workerPath: 'assets/tesseract/worker.min.js',
+                corePath: 'assets/tesseract',
+                langPath: 'assets/tesseract',
+                gzip: true,
+            });
+        } catch (e) {
+            console.warn('[OCR] falha ao iniciar Tesseract.js', e);
+            tesseractWorkerPromise = null;
+        }
+    }
+    return tesseractWorkerPromise;
+}
+
+// Enfileira uma nota para OCR — chamado logo apos confirmarUsoImagemNota()
+// salvar a imagem com sucesso, sem await (fire-and-forget do ponto de vista
+// da UI, nao bloqueia a captura da proxima nota).
+function processarOcrNota(imagem, ordem) {
+    if (state.clienteIdentificado) return; // early-stop: cliente ja identificado neste atendimento
+    ocrFila.push({ imagem, ordem, idAtendimento: state.idAtendimento });
+    processarProximaOcrDaFila();
+}
+
+// Processa a fila nota por nota (nao dispara reconhecimentos em paralelo —
+// evita competir por CPU/memoria). Mesmo em caso de erro real de OCR
+// (imagem ilegivel, falha ao baixar o modelo de idioma, worker indisponivel
+// etc.) chama identificarClienteNota com candidatos vazios, para a nota
+// sempre sair de PENDENTE (o backend ja trata candidatos vazios como
+// NAO_IDENTIFICADA, sem erro) — corrige o bug de nota presa em PENDENTE.
+async function processarProximaOcrDaFila() {
+    if (ocrProcessando) return;
+    if (state.clienteIdentificado) { ocrFila = []; return; }
+    const proxima = ocrFila.shift();
+    if (!proxima) return;
+    ocrProcessando = true;
+    const deAtendimentoAtual = proxima.idAtendimento === state.idAtendimento;
+    try {
+        const workerPromise = iniciarOcrWorker();
+        if (!workerPromise) throw new Error('Tesseract.js indisponivel');
+        const worker = await workerPromise;
+        // rotacao fixa de 270 graus, so na copia em memoria usada pro OCR —
+        // a imagem original (proxima.imagem) ja foi salva intocada por
+        // confirmarUsoImagemNota() antes desta chamada.
+        const imagemRotacionada = await rotacionarImagem270(proxima.imagem);
+        const resultado = await worker.recognize(imagemRotacionada);
+        const texto = (resultado && resultado.data && resultado.data.text) || '';
+        const { cnpjsCandidatos, razaoSocialCandidata } = extrairCandidatos(texto);
+        if (deAtendimentoAtual && !state.clienteIdentificado) {
+            identificarClienteNota(proxima.ordem, cnpjsCandidatos, razaoSocialCandidata);
+        }
+    } catch (e) {
+        console.warn('[OCR] falha ao processar nota via Tesseract.js', e);
+        if (deAtendimentoAtual && !state.clienteIdentificado) {
+            identificarClienteNota(proxima.ordem, [], null);
+        }
+    } finally {
+        ocrProcessando = false;
+        processarProximaOcrDaFila();
+    }
+}
+
+// Chama o endpoint de identificacao. Retry simples (2 tentativas extras,
+// backoff curto) so para falha de rede (TypeError do fetch) — nunca para
+// resposta de negocio (NAO_IDENTIFICADA/ERRO), que e tratada como
+// "segue sem identificar automaticamente", sem alarme ao motorista.
+async function identificarClienteNota(ordem, cnpjsCandidatos, razaoSocialCandidata) {
+    const backoffMs = [1000, 2000];
+    for (let tentativa = 0; tentativa <= backoffMs.length; tentativa++) {
+        try {
+            const resultado = await api('nota.php', 'identificar-cliente', {
+                id_atendimento: state.idAtendimento,
+                ordem,
+                chave_ocr: null, // extracao de chave removida do processo (ver extrairCandidatos)
+                cnpjs_candidatos: cnpjsCandidatos,
+                razao_social_candidata: razaoSocialCandidata,
+            });
+            if ((resultado.status === 'IDENTIFICADA' || resultado.ja_identificado_no_atendimento) && !state.clienteIdentificado) {
+                state.clienteIdentificado = true;
+                ocrFila = [];
+                mostrarStatusScanner('Cliente identificado');
+            }
+            return;
+        } catch (e) {
+            const erroDeRede = e instanceof TypeError;
+            if (!erroDeRede || tentativa === backoffMs.length) {
+                if (erroDeRede) console.warn('[OCR] falha de rede ao identificar cliente, tentativas esgotadas', e);
+                return; // tratado como equivalente a NAO_IDENTIFICADA/ERRO, sem alarme ao motorista
+            }
+            await new Promise(resolve => setTimeout(resolve, backoffMs[tentativa]));
+        }
+    }
 }
 
 // -------------------- recebimento: confirmacao do cliente (autocomplete) --------------------

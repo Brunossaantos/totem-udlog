@@ -154,9 +154,21 @@ class AtendimentoController
             Resposta::erro('Limite de 5 notas fiscais excedido para esse atendimento');
         }
 
-        $algumaIdentificada = $this->notaDao->algumaIdentificada($idAtendimento);
+        // Duas fontes de verdade coexistem e precisam ser unidas (OR logico):
+        // - algumaIdentificada(): fluxo ANTIGO de chave de acesso, que ainda
+        //   pode gravar cliente_identificado=1/cnpj_emitente e depende de
+        //   JOIN com tb_cliente LOCAL (nao removido, continua funcionando).
+        // - algumaNotaComStatusIdentificada(): fluxo NOVO de OCR client-side,
+        //   baseado em status_ocr = 'IDENTIFICADA' em tb_atendimento_nota, que
+        //   NAO depende de tb_cliente local (origem/sincronizacao de
+        //   tb_cliente e pendencia de produto separada, nao resolvida aqui).
+        // Bug corrigido: antes so o metodo antigo era consultado, entao uma
+        // nota identificada via OCR (sem CNPJ correspondente em tb_cliente
+        // local) nunca pulava para rec_cnh.
+        $identificadoViaOcr = $this->notaDao->algumaNotaComStatusIdentificada($idAtendimento);
+        $identificadoViaChaveAntiga = $this->notaDao->algumaIdentificada($idAtendimento);
 
-        if ($algumaIdentificada) {
+        if ($identificadoViaOcr || $identificadoViaChaveAntiga) {
             $etapa = 'cnh';
             $proximaTela = 'rec_cnh';
         } else {

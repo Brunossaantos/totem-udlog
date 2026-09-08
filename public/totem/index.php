@@ -27,6 +27,7 @@ if (!$totem) {
 </head>
 <body data-totem-token="<?= htmlspecialchars($totem['token_api'], ENT_QUOTES, 'UTF-8') ?>" data-totem-nome="<?= htmlspecialchars($totem['nome'], ENT_QUOTES, 'UTF-8') ?>">
 <div id="app"></div>
+<script src="assets/tesseract/tesseract.min.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

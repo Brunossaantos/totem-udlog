@@ -60,4 +60,61 @@ class AtendimentoNotaDao
         $stmt->execute(['id' => $idAtendimento]);
         return (bool) $stmt->fetch();
     }
+
+    /**
+     * Busca a nota de uma ordem especifica dentro de um atendimento —
+     * usado para validar posse (IDOR) antes de aceitar o resultado de
+     * identificar-cliente: a nota (id_atendimento + ordem) precisa existir
+     * e pertencer ao atendimento do totem autenticado.
+     */
+    public function buscarPorAtendimentoEOrdem(int $idAtendimento, int $ordem): ?array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT * FROM tb_atendimento_nota WHERE id_atendimento = :id AND ordem = :ordem LIMIT 1
+        ');
+        $stmt->execute(['id' => $idAtendimento, 'ordem' => $ordem]);
+        $nota = $stmt->fetch();
+        return $nota ?: null;
+    }
+
+    /**
+     * Novo (demanda recebimento-leitura-notas): checa se o ATENDIMENTO ja
+     * tem alguma nota com status_ocr = IDENTIFICADA, baseado inteiramente na
+     * nova coluna status_ocr — NAO reaproveita algumaIdentificada() acima,
+     * que depende de JOIN com tb_cliente local (fonte diferente, pendencia
+     * de produto em aberto). Retorna a nota (id_nota, cnpj_emitente) para o
+     * short-circuit do endpoint identificar-cliente, ou null se nenhuma.
+     */
+    public function algumaNotaComStatusIdentificada(int $idAtendimento): ?array
+    {
+        $stmt = $this->pdo->prepare('
+            SELECT id_nota, cnpj_emitente FROM tb_atendimento_nota
+            WHERE id_atendimento = :id AND status_ocr = "IDENTIFICADA"
+            LIMIT 1
+        ');
+        $stmt->execute(['id' => $idAtendimento]);
+        $nota = $stmt->fetch();
+        return $nota ?: null;
+    }
+
+    /**
+     * Persiste o resultado da identificacao de cliente (status_ocr,
+     * processado_em, e os campos ja existentes cnpj_emitente/
+     * cliente_identificado, reaproveitados sem nova coluna) via PDO
+     * prepared statement.
+     */
+    public function atualizarResultadoOcr(int $idNota, string $statusOcr, ?string $cnpjEmitente, bool $clienteIdentificado): void
+    {
+        $stmt = $this->pdo->prepare('
+            UPDATE tb_atendimento_nota
+            SET status_ocr = :status, processado_em = NOW(), cnpj_emitente = :cnpj, cliente_identificado = :identificado
+            WHERE id_nota = :id_nota
+        ');
+        $stmt->execute([
+            'status'       => $statusOcr,
+            'cnpj'         => $cnpjEmitente,
+            'identificado' => $clienteIdentificado ? 1 : 0,
+            'id_nota'      => $idNota,
+        ]);
+    }
 }

@@ -5,10 +5,12 @@
 # Dependências (regeneradas via `composer install` no servidor — ver docs/deploy-checklist.md)
 /vendor/
 
-# Dados reais capturados pelo totem (LGPD — nunca versionar documentos/fotos reais)
-# Estrutura de pastas não precisa de .gitkeep: UploadHelper::salvarImagemBase64
-# cria os diretórios dinamicamente via mkdir recursivo.
-storage/atendimentos/
+# Dados reais capturados/cacheados pelo totem (LGPD e dados de terceiro —
+# nunca versionar documentos/fotos reais nem cache de clientes da carteira
+# UDLOG). Estrutura de pastas não precisa de .gitkeep: UploadHelper::
+# salvarImagemBase64 e ClienteApiClient criam os diretórios dinamicamente
+# via mkdir recursivo.
+storage/
 
 # Evidências de teste/debug com dados reais de documentos
 docs/evidencias-scanner/
