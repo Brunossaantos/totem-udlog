@@ -7,19 +7,40 @@ use Util\Conexao;
 use Util\Auth;
 use Util\Resposta;
 use App\Dao\AtendimentoDao;
+use App\Dao\VioCacheDao;
+use App\Dao\RateLimitVioStatusDao;
+use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
 
 $dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
 $dotenv->load();
 
 $pdo = Conexao::obter();
-Auth::validarTotem($pdo);
+$totem = Auth::validarTotem($pdo);
 
-$controller = new DocumentoController(new AtendimentoDao($pdo));
+$documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo));
+$controller = new DocumentoController(new AtendimentoDao($pdo), $documentoRn, $pdo, new RateLimitVioStatusDao($pdo));
 $entrada = json_decode(file_get_contents('php://input'), true) ?? [];
+$idTotem = (int) $totem['id_totem'];
 
-if (($_GET['acao'] ?? '') === 'upload') {
-    $controller->upload($entrada);
-} else {
-    Resposta::erro('Acao invalida', 404);
+switch ($_GET['acao'] ?? '') {
+    case 'upload':
+        $controller->upload($entrada, $idTotem);
+        break;
+    case 'iniciar-processamento':
+        $controller->iniciarProcessamento($entrada, $idTotem);
+        break;
+    case 'validar-qr':
+        // Alias de compatibilidade do ciclo sincrono anterior — mesma logica
+        // de iniciar-processamento (ver DocumentoController::validarQr).
+        $controller->validarQr($entrada, $idTotem);
+        break;
+    case 'status-processamento':
+        $controller->statusProcessamento($entrada, $idTotem);
+        break;
+    case 'preencher-manual':
+        $controller->preencherManual($entrada, $idTotem);
+        break;
+    default:
+        Resposta::erro('Acao invalida', 404);
 }

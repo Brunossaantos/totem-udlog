@@ -4,7 +4,10 @@ namespace App\Controller;
 
 use App\Rn\AtendimentoRn;
 use App\Rn\TalentRn;
+use App\Rn\DocumentoRn;
 use App\Dao\AtendimentoNotaDao;
+use App\Dao\TotemDao;
+use App\Dao\EmpresaDao;
 use Util\Resposta;
 use Util\UploadHelper;
 
@@ -13,7 +16,10 @@ class AtendimentoController
     public function __construct(
         private AtendimentoRn $atendimentoRn,
         private TalentRn $talentRn,
-        private AtendimentoNotaDao $notaDao
+        private AtendimentoNotaDao $notaDao,
+        private ?DocumentoRn $documentoRn = null,
+        private ?TotemDao $totemDao = null,
+        private ?EmpresaDao $empresaDao = null
     ) {}
 
     public function iniciar(int $idTotem, array $entrada): void
@@ -74,19 +80,89 @@ class AtendimentoController
 
         switch ($etapa) {
             case 'confirmacao':
+                // Corrigido IDOR critico (achado do security-especialista,
+                // 2026-09-09): antes nao validava posse/tipo/status/etapa,
+                // permitindo que um totem sobrescrevesse motorista_nome/
+                // motorista_cpf de atendimento alheio. Espelha exatamente o
+                // padrao ja usado no case 'digitalizacao_notas' abaixo.
+                // A tela de confirmacao (exp_confirma/rec_confirma) e a
+                // ULTIMA etapa persistida em tb_atendimento antes do ajudante
+                // — nem 'confirmacao' nem 'ajudante' chamam atualizarEtapa(),
+                // entao a etapa_atual esperada aqui e a mesma dos dois casos:
+                // 'exp_confirmacao'/'rec_confirmacao' (gravada por
+                // avancarEtapaDocumentos() no gate final).
+                $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+
+                if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
+                    Resposta::erro('Atendimento nao encontrado', 404);
+                }
+                if ($atendimento['status'] !== 'em_andamento') {
+                    Resposta::erro('Atendimento nao esta em andamento');
+                }
+                $etapaEsperadaConfirmacao = $atendimento['tipo'] === 'expedicao' ? 'exp_confirmacao' : 'rec_confirmacao';
+                if ($atendimento['etapa_atual'] !== $etapaEsperadaConfirmacao) {
+                    Resposta::erro('Atendimento nao esta na etapa esperada para confirmar os dados');
+                }
+
                 $this->atendimentoRn->salvarDadosMotorista($idAtendimento, $dados);
                 break;
             case 'cliente':
+                // Identificacao MANUAL do cliente no Recebimento (atendente confirma
+                // nome/cnpj). Deve avancar etapa_atual para 'rec_cnh_frente', a mesma
+                // proxima etapa usada pelo fluxo AUTOMATICO via OCR em
+                // concluirDigitalizacao() (expedicao-vio-cnh-crlv, 2026-09-09) —
+                // mantendo as duas fontes de identificacao de cliente consistentes
+                // entre si. Sem isso, etapa_atual ficava presa em 'cliente' e o
+                // primeiro upload de rec_cnh_frente falhava na checagem de etapa em
+                // DocumentoController::upload().
+                //
+                // Corrigido IDOR critico (achado do security-especialista,
+                // 2026-09-09): antes nao validava posse/tipo/status/etapa,
+                // permitindo sobrescrever cliente_nome/cliente_cnpj de
+                // atendimento alheio e forcar a transicao para
+                // 'rec_cnh_frente'. So existe na etapa 'cliente' (gravada por
+                // concluirDigitalizacao() quando nenhuma nota identifica o
+                // cliente automaticamente), e so no Recebimento.
+                $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+
+                if ($atendimento['tipo'] !== 'recebimento') {
+                    Resposta::erro('Atendimento nao encontrado', 404);
+                }
+                if ($atendimento['status'] !== 'em_andamento') {
+                    Resposta::erro('Atendimento nao esta em andamento');
+                }
+                if ($atendimento['etapa_atual'] !== 'cliente') {
+                    Resposta::erro('Atendimento nao esta na etapa esperada para identificar o cliente');
+                }
+
                 $this->atendimentoRn->salvarCliente($idAtendimento, $dados['nome'] ?? '', $dados['cnpj'] ?? null);
+                $this->atendimentoRn->atualizarEtapa($idAtendimento, 'rec_cnh_frente');
                 break;
             case 'ajudante':
+                // Corrigido IDOR critico (achado do security-especialista,
+                // 2026-09-09): antes nao validava posse/tipo/status/etapa,
+                // permitindo sobrescrever ajudante_nome/ajudante_cpf de
+                // atendimento alheio. Mesma etapa esperada de 'confirmacao'
+                // (ver comentario acima) — nenhum dos dois persiste
+                // transicao de etapa_atual.
+                $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+
+                if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
+                    Resposta::erro('Atendimento nao encontrado', 404);
+                }
+                if ($atendimento['status'] !== 'em_andamento') {
+                    Resposta::erro('Atendimento nao esta em andamento');
+                }
+                $etapaEsperadaAjudante = $atendimento['tipo'] === 'expedicao' ? 'exp_confirmacao' : 'rec_confirmacao';
+                if ($atendimento['etapa_atual'] !== $etapaEsperadaAjudante) {
+                    Resposta::erro('Atendimento nao esta na etapa esperada para informar o ajudante');
+                }
+
                 $this->atendimentoRn->salvarAjudante($idAtendimento, $dados['nome'] ?? null, $dados['cpf'] ?? null);
                 break;
             case 'digitalizacao_notas':
                 // marca a etapa formal da digitalizacao de notas do recebimento;
                 // NotaController::processar exige essa etapa antes de aceitar qualquer nota.
-                // Validacao de posse/tipo/status/etapa-anterior restrita a este case
-                // (nao replicada para 'confirmacao'/'cliente'/'ajudante' — fora de escopo).
                 $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
                 if ($atendimento['tipo'] !== 'recebimento') {
@@ -154,6 +230,14 @@ class AtendimentoController
             Resposta::erro('Limite de 5 notas fiscais excedido para esse atendimento');
         }
 
+        // ATENCAO: a etapa/tela quando um cliente e identificado mudou de
+        // 'cnh'/'rec_cnh' para 'rec_cnh_frente' nesta demanda
+        // (expedicao-vio-cnh-crlv, REPLANEJAMENTO 2026-09-09) — Recebimento
+        // agora tambem valida CNH/CRLV via VIO Decode, com a mesma maquina de
+        // estados assincrona da Expedicao (rec_cnh_frente -> rec_cnh_verso ->
+        // rec_crlv -> rec_aguarde_documentos -> rec_confirmacao), ver
+        // avancarEtapaDocumentos() abaixo.
+        //
         // Duas fontes de verdade coexistem e precisam ser unidas (OR logico):
         // - algumaIdentificada(): fluxo ANTIGO de chave de acesso, que ainda
         //   pode gravar cliente_identificado=1/cnpj_emitente e depende de
@@ -169,8 +253,8 @@ class AtendimentoController
         $identificadoViaChaveAntiga = $this->notaDao->algumaIdentificada($idAtendimento);
 
         if ($identificadoViaOcr || $identificadoViaChaveAntiga) {
-            $etapa = 'cnh';
-            $proximaTela = 'rec_cnh';
+            $etapa = 'rec_cnh_frente';
+            $proximaTela = 'rec_cnh_frente';
         } else {
             $etapa = 'cliente';
             $proximaTela = 'rec_cliente';
@@ -181,25 +265,259 @@ class AtendimentoController
         Resposta::sucesso(['proxima_tela' => $proximaTela, 'etapa' => $etapa]);
     }
 
-    public function finalizar(array $entrada): void
+    /**
+     * Sequencia REAL e autorizada pelo backend para CNH/CRLV da Expedicao
+     * (demanda expedicao-vio-cnh-crlv; REPLANEJAMENTO 2026-09-09 tornou o
+     * processamento assincrono do lado do navegador):
+     *   dados_encontrados -> exp_cnh -> exp_crlv -> exp_aguarde_documentos
+     *   -> exp_confirmacao -> impressao.
+     * exp_cnh -> exp_crlv e exp_crlv -> exp_aguarde_documentos exigem so que
+     * a FOTO tenha sido enviada (upload feito) — NAO que a validacao VIO ja
+     * tenha terminado (ela roda em segundo plano no front-end). A aprovacao
+     * efetiva (VIO_TRIAL/VIO_VALIDADO/MANUAL) so e OBRIGATORIA no gate final
+     * exp_aguarde_documentos -> exp_confirmacao e revalidada de novo em
+     * exp_confirmacao -> impressao (nunca confia so na etapa ja alcancada).
+     */
+    private const SEQUENCIA_EXPEDICAO = [
+        'dados_encontrados'        => ['proxima_etapa' => 'exp_cnh', 'proxima_tela' => 'exp_cnh', 'gate' => null],
+        'exp_cnh'                  => ['proxima_etapa' => 'exp_crlv', 'proxima_tela' => 'exp_crlv', 'gate' => 'upload_cnh'],
+        'exp_crlv'                 => ['proxima_etapa' => 'exp_aguarde_documentos', 'proxima_tela' => 'exp_aguarde_documentos', 'gate' => 'upload_crlv'],
+        'exp_aguarde_documentos'   => ['proxima_etapa' => 'exp_confirmacao', 'proxima_tela' => 'exp_confirma', 'gate' => 'ambos_aprovados'],
+        'exp_confirmacao'          => ['proxima_etapa' => 'impressao', 'proxima_tela' => 'impressao', 'gate' => 'ambos_aprovados'],
+    ];
+
+    /**
+     * Mesma logica para Recebimento (mesma demanda, escopo expandido no
+     * REPLANEJAMENTO 2026-09-09): rec_cnh_frente -> rec_cnh_verso ->
+     * rec_crlv -> rec_aguarde_documentos -> rec_confirmacao. Diferenca
+     * intencional em relacao a Expedicao: CNH frente/verso sao etapas
+     * SEPARADAS (2 uploads), nao uma unica etapa exp_cnh — especificado
+     * explicitamente, nao e divergencia a corrigir.
+     */
+    private const SEQUENCIA_RECEBIMENTO_DOCUMENTOS = [
+        'rec_cnh_frente'         => ['proxima_etapa' => 'rec_cnh_verso', 'proxima_tela' => 'rec_cnh_verso', 'gate' => 'upload_cnh_frente'],
+        'rec_cnh_verso'          => ['proxima_etapa' => 'rec_crlv', 'proxima_tela' => 'rec_crlv', 'gate' => 'upload_cnh_verso'],
+        'rec_crlv'               => ['proxima_etapa' => 'rec_aguarde_documentos', 'proxima_tela' => 'rec_aguarde_documentos', 'gate' => 'upload_crlv'],
+        'rec_aguarde_documentos' => ['proxima_etapa' => 'rec_confirmacao', 'proxima_tela' => 'rec_confirma', 'gate' => 'ambos_aprovados'],
+    ];
+
+    /**
+     * Maquina de estados GENERALIZADA (Expedicao E Recebimento) para as
+     * etapas de CNH/CRLV — substitui a versao anterior restrita a Expedicao,
+     * reaproveitando a MESMA logica de gate (App\Rn\DocumentoRn::
+     * cnhAprovada/crlvAprovado, ja agnostico de tipo) sem duplicar regra de
+     * negocio entre os dois fluxos. O front-end NUNCA decide sozinho mudar
+     * de tela — toda transicao passa por aqui, com posse/tipo/status/regra
+     * de negocio revalidados no backend a cada chamada.
+     */
+    public function avancarEtapaDocumentos(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
-        $atendimento = $this->atendimentoRn->buscar($idAtendimento);
 
-        if (!$atendimento) {
-            Resposta::erro('Atendimento nao encontrado', 404);
+        if (!$idAtendimento) {
+            Resposta::erro('Dados incompletos');
         }
 
-        $notas = $this->notaDao->listarPorAtendimento($idAtendimento);
-        $payload = $this->talentRn->montarPayload($atendimento, $notas);
+        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
-        try {
-            $resultado = $this->talentRn->enviar($payload);
-            Resposta::sucesso(['senha' => $resultado['senha'], 'protocolo' => $resultado['protocolo']]);
-        } catch (\Throwable $e) {
-            $this->talentRn->registrarFalhaParaReenvio($idAtendimento, $e->getMessage());
-            // 202: aceito, mas ainda sendo processado — o totem mostra "aguarde" e o cron finaliza depois
-            Resposta::erro('Nao foi possivel enviar agora — sua senha sera processada em instantes', 202);
+        if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
+            Resposta::erro('Atendimento nao encontrado', 404);
+        }
+        if ($atendimento['status'] !== 'em_andamento') {
+            Resposta::erro('Atendimento nao esta em andamento');
+        }
+        if ($this->documentoRn === null) {
+            // dependencia opcional nao injetada (uso fora do endpoint HTTP) —
+            // nao ha como validar CNH/CRLV com seguranca, falha fechada.
+            Resposta::erro('Nao foi possivel avancar a etapa agora', 500);
+        }
+
+        $sequencia = $atendimento['tipo'] === 'expedicao'
+            ? self::SEQUENCIA_EXPEDICAO
+            : self::SEQUENCIA_RECEBIMENTO_DOCUMENTOS;
+
+        $transicao = $sequencia[$atendimento['etapa_atual']] ?? null;
+        if ($transicao === null) {
+            Resposta::erro('Atendimento nao esta em uma etapa valida para avancar');
+        }
+
+        if (!$this->gateDeTransicaoLiberado($atendimento, $transicao['gate'])) {
+            Resposta::erro('Nao foi possivel avancar a etapa agora — documentos pendentes');
+        }
+
+        $this->atendimentoRn->atualizarEtapa($idAtendimento, $transicao['proxima_etapa']);
+        Resposta::sucesso(['proxima_tela' => $transicao['proxima_tela'], 'etapa' => $transicao['proxima_etapa']]);
+    }
+
+    /**
+     * Alias de compatibilidade — nome/rota anterior (ciclo sincrono,
+     * restrito a Expedicao) do que hoje e avancarEtapaDocumentos(), ja
+     * generalizado para os dois tipos de atendimento.
+     */
+    public function avancarEtapaExpedicao(array $entrada, int $idTotem): void
+    {
+        $this->avancarEtapaDocumentos($entrada, $idTotem);
+    }
+
+    /**
+     * Avalia o "gate" de uma transicao: null = sem restricao; upload_* =
+     * confere que o ARQUIVO da foto foi de fato salvo em disco (nao exige
+     * que a validacao VIO ja tenha terminado — e o que viabiliza liberar a
+     * etapa seguinte imediatamente, com a validacao rodando em segundo
+     * plano); ambos_aprovados = CNH E CRLV precisam estar em estado terminal
+     * ACEITAVEL (VIO_TRIAL/VIO_VALIDADO/MANUAL com dados validos — mesma
+     * checagem ja usada no gate final de impressao, sem nenhuma
+     * flexibilizacao).
+     */
+    private function gateDeTransicaoLiberado(array $atendimento, ?string $gate): bool
+    {
+        return match ($gate) {
+            null => true,
+            'upload_cnh' => $this->arquivoDoDocumentoExiste($atendimento, 'cnh_frente.jpg')
+                && $this->arquivoDoDocumentoExiste($atendimento, 'cnh_verso.jpg'),
+            'upload_cnh_frente' => $this->arquivoDoDocumentoExiste($atendimento, 'cnh_frente.jpg'),
+            'upload_cnh_verso' => $this->arquivoDoDocumentoExiste($atendimento, 'cnh_verso.jpg'),
+            'upload_crlv' => $this->arquivoDoDocumentoExiste($atendimento, 'crlv.jpg'),
+            'ambos_aprovados' => $this->documentoRn->cnhAprovada($atendimento) && $this->documentoRn->crlvAprovado($atendimento),
+            default => false,
+        };
+    }
+
+    /**
+     * Confere no sistema de arquivos (STORAGE_PATH + pasta_documentos, fora
+     * do webroot publico) se a foto do documento ja foi salva por
+     * DocumentoController::upload() — usado so para o gate de "upload
+     * feito", nunca para decidir aprovacao (isso e sempre
+     * App\Rn\DocumentoRn::cnhAprovada/crlvAprovado, calculado a partir de
+     * tb_atendimento).
+     */
+    private function arquivoDoDocumentoExiste(array $atendimento, string $nomeArquivo): bool
+    {
+        $pasta = $atendimento['pasta_documentos'] ?? null;
+        $storagePath = rtrim($_ENV['STORAGE_PATH'] ?? '', '/');
+
+        if (!$pasta || $storagePath === '') {
+            return false;
+        }
+
+        return is_file($storagePath . '/' . $pasta . '/' . $nomeArquivo);
+    }
+
+    /**
+     * Finalizacao do atendimento — envio do check-in ao Talent
+     * (Portaria/Checkin). Corrigido IDOR CRITICO nesta demanda
+     * (integracao-talent-portaria-checkin, 2026-09-09): antes usava
+     * atendimentoRn->buscar() puro, sem validar posse/tipo/status/etapa —
+     * qualquer totem autenticado podia disparar o check-in (com CPF/CNH/
+     * anexos) de um atendimento de OUTRO totem.
+     *
+     * Sequencia de validacao (correcao de comentario apos revisao do
+     * security-especialista e qa-testes — a checagem 1 usa mensagem
+     * generica de proposito para nunca revelar posse/existencia a outro
+     * totem; as checagens 2-5 ja operam sobre um atendimento CONFIRMADO
+     * como do totem autenticado, entao podem ter mensagens distintas entre
+     * si sem constituir vazamento de informacao entre totens — mesmo
+     * padrao ja usado nos demais `case` de salvarEtapa() neste controller):
+     *   1. posse (buscarAtendimentoDoTotem) — mensagem generica
+     *      'Atendimento nao encontrado', NUNCA revela se o id existe ou
+     *      pertence a outro totem (cobre tanto "nao existe" quanto
+     *      "existe mas e de outro totem")
+     *   2. tipo expedicao|recebimento — tambem 'Atendimento nao encontrado'
+     *      (coincide com a mensagem da checagem 1, mas por motivo diferente:
+     *      aqui e so validacao de dado, nao ocultacao de IDOR)
+     *   3. status em_andamento — 'Atendimento nao esta em andamento'
+     *   4. etapa_atual = etapa de confirmacao esperada (exp_confirmacao/
+     *      rec_confirmacao) — 'Atendimento nao esta na etapa esperada para
+     *      finalizar'
+     *   5. documentos obrigatorios aprovados (cnhAprovada && crlvAprovado)
+     *      — 'Documentos obrigatorios pendentes/invalidos'
+     *   6. cnpjArmazem resolvivel (totem tem id_empresa valido) — mensagem
+     *      PROPRIA aqui, nao e um caso de IDOR (nao revela nada sobre outro
+     *      atendimento, so sobre a configuracao do PROPRIO totem)
+     *   7. idempotencia (CAS de talent_checkin_status) — ULTIMA checagem,
+     *      imediatamente antes de ler qualquer anexo do disco/montar payload
+     */
+    public function finalizar(array $entrada, int $idTotem): void
+    {
+        $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
+        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+
+        if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
+            Resposta::erro('Atendimento nao encontrado', 404);
+        }
+        if ($atendimento['status'] !== 'em_andamento') {
+            Resposta::erro('Atendimento nao esta em andamento');
+        }
+        $etapaEsperadaFinalizar = $atendimento['tipo'] === 'expedicao' ? 'exp_confirmacao' : 'rec_confirmacao';
+        if ($atendimento['etapa_atual'] !== $etapaEsperadaFinalizar) {
+            Resposta::erro('Atendimento nao esta na etapa esperada para finalizar');
+        }
+        if ($this->documentoRn === null || !$this->documentoRn->cnhAprovada($atendimento) || !$this->documentoRn->crlvAprovado($atendimento)) {
+            Resposta::erro('Documentos obrigatorios pendentes/invalidos');
+        }
+
+        if ($this->totemDao === null || $this->empresaDao === null) {
+            Resposta::erro('Nao foi possivel processar o check-in agora', 500);
+        }
+
+        $totemAtual = $this->totemDao->buscarPorId($idTotem);
+        $idEmpresa = $totemAtual['id_empresa'] ?? null;
+        $empresa = $idEmpresa !== null ? $this->empresaDao->buscarPorId((int) $idEmpresa) : null;
+
+        if ($empresa === null) {
+            // Nunca assume empresa default — totem sem vinculo configurado
+            // falha explicitamente (decisao de produto, ver
+            // docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md).
+            Resposta::erro('Totem sem empresa/armazem configurado para envio ao Talent', 500);
+        }
+
+        // TRAVA TEMPORARIA (extensao integracao-talent-portaria-checkin,
+        // 2026-09-10) — NAO E uma falha transitoria deste atendimento, e uma
+        // lacuna de implementacao que afeta TODOS os atendimentos: teste real
+        // em Producao confirmou (HTTP 400) que `doctos[]` e obrigatorio no
+        // Checkin do Talent, mas a semantica de `nrDocto`/`doctos[].tipo`
+        // continua indefinida (nao presumir). Enquanto isso nao for
+        // implementado, a chamada ao Talent fica SEMPRE bloqueada aqui,
+        // ANTES do CAS de idempotencia — nenhum payload e montado, nenhuma
+        // chamada a TalentRn::processarCheckin() ocorre, talent_checkin_status
+        // permanece NAO_ENVIADO indefinidamente (nenhuma tentativa
+        // registrada). Ver docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md,
+        // secao "Terceira tentativa — CAUSA RAIZ ENCONTRADA". Remover esta
+        // trava somente quando doctos[] for implementado numa demanda futura.
+        Resposta::erro('Envio ao Talent temporariamente indisponivel (TALENT_DOCTOS_PENDENTE)', 501);
+
+        $notas = $this->notaDao->listarPorAtendimento($idAtendimento);
+
+        // CAS de idempotencia (5 estados) — ULTIMO portao antes de ler
+        // anexos do disco/montar payload. App\Rn\TalentRn::processarCheckin
+        // orquestra a maquina de estados inteira (marcar obsoleto -> checar
+        // estado atual -> CAS -> montar payload/anexos -> chamar o Talent ->
+        // gravar resultado).
+        $resultado = $this->talentRn->processarCheckin($atendimento, $empresa, $notas);
+
+        switch ($resultado['status']) {
+            case 'ENVIADO':
+            case 'JA_ENVIADO':
+                Resposta::sucesso(['senha' => $resultado['senha'], 'protocolo' => $resultado['protocolo']]);
+                return;
+            case 'EM_ANDAMENTO':
+                Resposta::erro('Seu check-in ja esta sendo processado, aguarde', 409);
+                return;
+            case 'INDETERMINADO_PENDENTE_MANUAL':
+                Resposta::erro('Nao foi possivel confirmar seu check-in — procure um atendente', 500);
+                return;
+            case 'ERRO_REPROCESSAVEL':
+                $this->talentRn->registrarFalhaParaReenvio($idAtendimento, $resultado['erro_categoria'] ?? 'erro_desconhecido');
+                // 202: aceito, mas ainda sendo processado — o totem mostra "aguarde" e o cron finaliza depois
+                Resposta::erro('Nao foi possivel enviar agora — sua senha sera processada em instantes', 202);
+                return;
+            case 'ENVIO_INDETERMINADO':
+                // Nao enfileirado para retry automatico (por design) — exige
+                // conferencia manual no painel do Talent.
+                Resposta::erro('Nao foi possivel confirmar seu check-in — procure um atendente', 500);
+                return;
+            default:
+                Resposta::erro('Nao foi possivel processar o check-in agora', 500);
         }
     }
 
