@@ -8,7 +8,7 @@
 > Este arquivo é atualizado ao final de cada ciclo de implementação
 > (etapa 01-implementacao e 04-commit-e-push do workflow).
 
-Última atualização: 2026-09-08
+Última atualização: 2026-09-11
 
 ---
 
@@ -116,7 +116,7 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
 
 | Item | Onde impacta | Status |
 |---|---|---|
-| URL, autenticação e formato de resposta da API de ordens de coleta | `app/Rn/OrdemColetaClient.php` | Aguardando `docs/db_gestao_coletas.md` (parte de ordens de coleta ainda vazia) |
+| ~~URL, autenticacao e formato de resposta da API de ordens de coleta~~ | `app/Rn/OrdemColetaClient.php` | IMPLEMENTADA em 2026-09-11 (demanda `expedicao-consulta-ordem-coleta-teste`) — nunca existiu API REST real para essa consulta; usuario autorizou acesso direto de leitura E escrita ao banco externo de gestao de coletas. `OrdemColetaClient` delega a `App\Dao\OrdemColetaDao`/`Util\ConexaoGestaoColetas` (conexao PDO propria e separada, `PDO::ATTR_TIMEOUT` curto, conexao so aberta no momento real da consulta — nunca no bootstrap), consultando `tb_ordens_coleta INNER JOIN tb_clientes` por `placa_prevista` (normalizada exclusivamente no backend) com `tb_ordens_coleta.status='ATIVA'` e `tb_clientes.status='ATIVO'`. Testado com sucesso (17/17 asserções) — ver seção 7. **RECONCILIADO em 2026-09-11**: o achado anterior de schema divergente era causado por um banco `udlogo59_db_gestao_coletas` ERRADO que existia neste XAMPP local (schema `status ENUM('PENDENTE','LIBERADA','EM_ATENDIMENTO','CONCLUIDA','CANCELADA')`, incompatível). O usuário apagou esse banco errado e reimportou o dump correto (`docs/udlogo59_db_gestao_coletas.sql`, 70 queries) sob o nome real `udlogo59_db_gestao_coletas` — confirmado ao vivo (`SHOW CREATE TABLE`) que o schema bate com o dump verbatim, sem coluna de status até a migration desta demanda ser (re)aplicada com sucesso contra ele. `GESTAO_COLETAS_DB_NAME=udlogo59_db_gestao_coletas` atualizado no `.env` local. O banco antigo sem prefixo (`db_gestao_coletas`) usado como precaução na rodada anterior **não existe mais** neste ambiente (confirmado via `SHOW DATABASES`) — o usuário já o removeu. Bateria de 17 asserções e as 3 suítes de regressão (`teste_avancar_etapa_expedicao.php`, `teste_talent_trava_doctos_pendente.php`, `teste_rebaixamento_manual.php`) reexecutadas com sucesso (17/17, 10/10, 16/16, 45/45) contra o banco correto, incluindo as 7 ordens reais novas (dados de motorista tratados como sensíveis, nunca logados/exibidos por nome). Pendência remanescente: reconfirmar em Produção (Hostgator) se o nome do banco lá é de fato `udlogo59_db_gestao_coletas` (o prefixo `udlogo59_` é o prefixo cPanel local — pode ou não ser o mesmo em produção) antes de aplicar a migration externa lá. |
 | ~~API de clientes externa~~ usada em `identificar-cliente` | `app/Rn/ClienteApiClient.php` | SUBSTITUÍDA em 2026-09-08 por consulta local a `tb_cliente` (demanda `recebimento-clientes-tabela-local`) — `ClienteApiClient.php` mantido no código como morto/documentado, sem uso de produção; `CLIENTES_API_TOKEN` removido do `.env.example` |
 | ~~URL, autenticação e formato de resposta da API do Talent~~ | `app/Rn/TalentClient.php` | PARCIALMENTE RESOLVIDA em 2026-09-09 — contrato oficial confirmado via `MANUAL_TALENT_WMS.pdf` lido na íntegra: endpoint real é `POST https://api.talentcs.com.br/Portaria/Checkin` (o placeholder anterior `/atendimentos` nunca existiu no manual). Documentado em `docs/manual_talent.md`. **Ainda não confirmado**: formato do retorno de sucesso/erro deste endpoint específico (não documentado no manual) — bloqueia saber como preencher `talent_senha`/`talent_protocolo` corretamente. Handoff: `docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md` |
 | Viabilidade/convênio da API Prodesp (CNH/CRLV) | `app/Rn/ProdespClient.php` | Não confirmado — pode nunca ser viável; QR da CNH digital é payload assinado, QR do CRLV-e costuma ser só link de validação |
@@ -128,7 +128,7 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
 | Tratamento de exceção de banco (`PDOException`) em `NotaController::buscarAtendimentoDoTotem`/`processar`/`algumaIdentificada` sem handler global | `app/Controller/NotaController.php` | Reportado pelo security-especialista — comportamento em falha de banco depende de configuração de `display_errors` do PHP no Hostgator, não confirmada |
 | Confirmação de que `storage/` fica fora do document root real em produção (Hostgator) | Configuração do cPanel | Consistente na estrutura do repositório, mas não verificável só por leitura de código — depende de configuração real do domínio |
 | Persistência de permissão de câmera por origem no Chromium kiosk / política `VideoCaptureAllowedUrls` | Ambiente do mini PC Windows | Não validado na prática — ver `docs/deploy-checklist.md` |
-| IDOR em `selecionarOrdem` (ação `selecionar-ordem`) e `finalizar` (ação `finalizar`, envio ao Talent) — mesmo padrão já corrigido em outras ações | `app/Controller/AtendimentoController.php` | Identificado pelo security-especialista, NÃO corrigido — fora do escopo desta rodada. `finalizar` tem maior risco por disparar efeito colateral em sistema externo (Talent) para atendimento de outro totem |
+| ~~IDOR em `selecionarOrdem`~~ (ação `selecionar-ordem`) | `app/Controller/AtendimentoController.php` | CORRIGIDA em 2026-09-11 (demanda `expedicao-consulta-ordem-coleta-teste`) — agora valida posse/tipo/status/etapa do atendimento (mesmo padrão já usado em outras ações) e RECONSULTA as ordens reais para a placa do atendimento, só aceitando a seleção se o `numero` enviado bater com uma ordem realmente retornada; dados gravados (`cliente_nome`/`cliente_cnpj`) vêm sempre do servidor, nunca do que o front enviou. Testado (múltiplas asserções dedicadas, incluindo tentativa de ordem forjada e IDOR clássico de totem alheio). `finalizar` (ação `finalizar`, envio ao Talent) tinha o mesmo tipo de IDOR mas já foi corrigido em 2026-09-09 (ver linha "IMPLEMENTADA em 2026-09-09" mais abaixo) — a menção anterior desta linha estava desatualizada. |
 | Ausência de lock/transação em `concluirDigitalizacao` contra corrida (cliques quase simultâneos em "Finalizar digitalização") | `app/Controller/AtendimentoController.php` | Severidade baixa segundo o security-especialista — não bloqueante, registrado para decisão futura |
 | Retomada de atendimento ao recarregar a página (contador de notas em `state` não é sincronizado com o banco) | `public/totem/assets/app.js` | Limitação pré-existente do projeto (sem mecanismo de sessão/retomada) — não criado nesta demanda, apenas confirmado que não existe |
 | JPEG truncado (sem marcador de fim) é aceito pela validação atual (`getimagesizefromstring()` não detecta truncamento) | `util/UploadHelper.php` | Achado médio dos testes reais de `/02-testes` — pode comprometer integridade de nota fiscal como evidência; decisão pendente se vale a pena validação adicional |
@@ -679,3 +679,325 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
 - 2026-09-10 — Nova rodada de `/01-implementacao` da demanda `integracao-talent-portaria-checkin`, em resposta direta ao achado real do teste controlado em Producao (HTTP 400 confirmando `doctos`/`veiculo.rntc`/`veiculo.tipo` como obrigatorios). Acionados backend, frontend, security e QA. **Implementado**: `veiculo.rntc` (extraido de `data.rntrc` do CRLV via VIO — grafia real confirmada no manual VIO, diferente do nome usado no lado Talent) e `veiculo.tipo` (extraido de `data.tipo`), com schema/migration idempotente (`sql/migrations/010_talent_rntc_tipo_veiculo.sql`), validacao/rejeicao de placeholder, cache incompleto tratado, rebaixamento para MANUAL estendido, preenchimento manual que reaproveita valor ja aprovado pelo VIO quando so outro campo falta, e inclusao no payload do Talent somente apos aprovacao completa (com defesa em profundidade). Campos de front-end (RNTC, Tipo de veiculo — texto livre, sem enum documentado) adicionados ao formulario manual e a tela de confirmacao dos dois fluxos. **Bloqueio incondicional `TALENT_DOCTOS_PENDENTE`** adicionado em `AtendimentoController::finalizar()` (HTTP 501), impedindo qualquer chamada real ao Talent enquanto `doctos[]` continuar sem semantica de `nrDocto` confirmada — posicionado apos todas as checagens de posse/tipo/status/etapa/documentos/empresa e antes do CAS de idempotencia; `doctos` nunca e enviado vazio ou inventado (a chamada simplesmente nao acontece). **Seguranca**: revisao independente encontrou 0 achados criticos/altos/medios — trava confirmada blindada, sem IDOR no reaproveitamento de preenchimento manual, rebaixamento e cache incompleto corretos, SQL sempre parametrizado, migration idempotente. **QA**: 347/347 asserções passando (324 pre-existentes + 23 novas dedicadas a RNTC/tipo), 0 falhas, 0 chamada de rede real; bloqueio `TALENT_DOCTOS_PENDENTE` confirmado explicitamente (talent_checkin_status permanece NAO_ENVIADO). Resíduo pre-existente do teste real anterior (atendimento 731, pasta de teste, linha antiga em tb_fila_envio) reobservado mas nao alterado — decisao de limpeza cabe ao usuario. `doctos[]` continua pendencia bloqueante aberta (mitigada, nao resolvida) ate decisao de produto sobre `nrDocto`/`doctos[].tipo`. `docs/manual_talent.md` e handoff atualizados. Nenhum commit/push. Nenhuma chamada real ao Talent/VIO nesta rodada. Handoff: `docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md`, secao "Nova rodada de /01-implementacao (2026-09-10)".
 
 - 2026-09-10 — `/03-revisao` da demanda `integracao-talent-portaria-checkin`. **Limpeza autorizada dos resíduos do teste real anterior**: atendimento de teste `id_atendimento=731` (e sua única nota dependente, `id_nota=600`) excluído em transação única (respeitando FK), pasta `storage/atendimentos/teste_prep_producao_2dc56209/` e seus 4 arquivos removidos via caminho absoluto individual (sem recursão/curinga) — identificação prévia confirmou pasta exclusiva e ausência de divergência antes de qualquer exclusão; evidência mascarada (ID, horários das 3 tentativas reais, HTTP, estado final) preservada no handoff, sem CPF/CNH/imagens/PDFs/corpo bruto. Resíduo pré-existente e não relacionado (`tb_fila_envio.id_fila=2`, atendimento 160, de 2026-09-08) confirmado intocado, fora do escopo autorizado. **Revisão independente completa** (instâncias novas de security-especialista e qa-testes, sem depender de autorrelato anterior): segurança confirmou 12/12 itens do checklist sem nenhuma divergência (mapeamento VIO->Talent de rntc/tipo, validação/cache/preenchimento manual/rebaixamento, ambos os fluxos, ausência de IDOR/SQL injection/vazamento em log, migration idempotente, trava `TALENT_DOCTOS_PENDENTE` confirmada intransponível com `Resposta::erro()` sempre encerrando a execução, `talent_checkin_status` impossível de mudar pela trava, `doctos` nunca contornado); QA re-executou toda a suíte (17 suítes + 1 teste novo dedicado `teste_talent_trava_doctos_pendente.php`, 16/16 asserções, provando com credenciais reais do `.env` e um espião que nenhuma chamada de rede real ocorre) com 100% de sucesso (1 falha intermitente de timing em `teste_status_processamento.php`, não-regressão, confirmada ao reexecutar 9/9). Migrations 001-010 validadas limpas do zero. **Nenhum defeito encontrado — /03-revisao aprovado sem necessidade de nova rodada de implementação.** `doctos[]` continua pendência bloqueante em aberto. Handoff: `docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md`, seções "/03-revisao (2026-09-10) — limpeza autorizada" e "Revisão independente final (2026-09-10)". Nenhum commit/push. Nenhuma chamada real ao Talent/VIO.
+
+- 2026-09-11 — `/00-planejamento` da nova demanda
+  `expedicao-consulta-ordem-coleta-teste`: confirmado que nunca existiu API
+  REST real para "buscar ordens de coleta por placa" (secao permanecia
+  vazia em `docs/db_gestao_coletas.md`). Usuario autorizou explicitamente
+  acesso de LEITURA direto ao banco externo `udlogo59_db_gestao_coletas`
+  (mesmo servidor/credencial do totem, so muda `DB_NAME`) e forneceu o
+  dump completo do schema real em `docs/db_gestao_coletas.sql`.
+  **Achado de confiabilidade**: uma primeira investigacao do `explorer`
+  (antes do dump ser fornecido) relatou detalhes que se confirmaram
+  incorretos/inventados ao comparar com o DDL verbatim (coluna de status
+  em `tb_ordens_coleta` que nao existe; tabelas `tb_atendimentos`/
+  `tb_ajudantes`/`tb_documentos` que nao existem nesse banco) — coincidiu
+  com um aviso de seguranca automatico do ambiente sobre as acoes desse
+  sub-agente; os achados dela foram descartados e substituidos pelo dump
+  verbatim real. Schema real confirmado: `tb_ordens_coleta` (sem coluna de
+  status, `email_recebido_id` NOT NULL, unico `(cliente_id,
+  numero_ordem_coleta)`), `tb_clientes`, `tb_motoristas`,
+  `tb_emails_recebidos`. Ja existem 3 ordens de teste reais
+  (`OC-TESTE-001`/`OC-TESTE-NOVA-003`/`OC-TESTE-NOVA-004`, `cliente_id=8`,
+  placa `ABC1D23`). Plano consolidado (backend-especialista,
+  security-especialista, qa-testes): `OrdemColetaClient` passa a delegar a
+  uma nova `OrdemColetaDao`/`Util\ConexaoGestaoColetas` (conexao PDO
+  dedicada, timeout curto, prepared statement, erro generico ao totem,
+  nunca vaza SQL/credencial), consultando `tb_ordens_coleta INNER JOIN
+  tb_clientes` por `placa_prevista` normalizada no backend, sem filtro de
+  status. Dado de teste desenhado (SQL pronto, NAO EXECUTADO):
+  `numero_ordem_coleta='OC-TESTE-005'`, `placa_prevista='TST0A01'`,
+  reaproveitando fixtures existentes (`cliente_id=8`,
+  `email_recebido_id=1`), zero dado pessoal novo. Achados novos
+  registrados: `tb_atendimento.ordem_coleta` VARCHAR(30) menor que
+  `numero_ordem_coleta` real VARCHAR(50) (migration proposta, nao
+  implementada); filtro morto de status em
+  `AtendimentoRn::consultarOrdensAbertas()` a remover; recomendacao do
+  `security-especialista` de credencial de banco dedicada/somente-leitura
+  em vez de reaproveitar o `DB_USER` do totem (pendente de decisao de
+  arquitetura). Nenhum codigo implementado, nenhuma escrita real no banco
+  externo, nenhum commit/push. Handoff:
+  `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.
+  Proximo passo: usuario decidir as pendencias de UX/seguranca listadas e
+  autorizar `/01-implementacao`.
+- 2026-09-11 — `/01-implementacao` da demanda
+  `expedicao-consulta-ordem-coleta-teste` concluida. `OrdemColetaClient`
+  reescrito para delegar a `App\Dao\OrdemColetaDao` (nova), que consulta
+  `tb_ordens_coleta INNER JOIN tb_clientes` no banco externo via
+  `Util\ConexaoGestaoColetas` (nova — conexao PDO propria e separada de
+  `Util\Conexao`, `PDO::ATTR_TIMEOUT` curto, conexao aberta so no momento
+  real da consulta, nunca no bootstrap de `atendimento.php`, para nao afetar
+  acoes que nao precisam consultar ordem de coleta se o banco externo cair).
+  Filtro `tb_clientes.status='ATIVO' AND tb_ordens_coleta.status='ATIVA'`
+  aplicado na query SQL; `AtendimentoRn::consultarOrdensAbertas()` perdeu o
+  filtro morto de status em array PHP (nunca existiu de fato na fonte real).
+  Normalizacao de placa exclusivamente no backend
+  (`OrdemColetaClient::normalizarPlaca`). Corrigido IDOR critico em
+  `AtendimentoController::selecionarOrdem()` (achado antigo do
+  security-especialista): agora valida posse/tipo/status/etapa do
+  atendimento (mesmo padrao das demais acoes) e RECONSULTA as ordens reais
+  para a placa do atendimento antes de aceitar a selecao — so aceita se o
+  `numero` enviado bater com uma ordem realmente retornada; grava sempre com
+  os dados vindos do servidor, nunca `cliente_nome`/`cliente_cnpj` do front.
+  `.env`/`.env.example`: `GESTAO_COLETAS_DB_NAME` adicionada,
+  `ORDEM_COLETA_API_URL`/`ORDEM_COLETA_API_KEY` removidas (sem uso).
+  `sql/migrations/011_ampliar_ordem_coleta.sql` amplia
+  `tb_atendimento.ordem_coleta` para VARCHAR(50) — aplicada com sucesso no
+  banco de dev local (`udlog_totem`); `sql/schema.sql` atualizado para
+  instalacoes novas. `sql/migrations_gestao_coletas/001_status_ordem_coleta.sql`
+  (pasta NOVA, separada de `sql/migrations/`, com aviso explicito de que
+  pertence exclusivamente ao banco externo) adiciona
+  `status ENUM('ATIVA','INATIVA') DEFAULT 'ATIVA'` + indice
+  `(placa_prevista, status)` em `tb_ordens_coleta` — aplicada com sucesso
+  contra o banco externo local `db_gestao_coletas` (coluna/indice
+  confirmados via `INFORMATION_SCHEMA`, as 3 ordens de teste ja existentes
+  ficaram `ATIVA` pelo default, sem UPDATE necessario).
+
+  **Achado critico de ambiente (nao inventado, verificado por consulta
+  real)**: o banco `udlogo59_db_gestao_coletas` — nome que seria o real de
+  Producao — JA EXISTE neste XAMPP local, mas com um schema DIVERGENTE do
+  dump oficial fornecido pelo usuario (`docs/db_gestao_coletas.sql`): ja
+  possui uma coluna `status` propria em `tb_ordens_coleta`, só que com
+  `ENUM('PENDENTE','LIBERADA','EM_ATENDIMENTO','CONCLUIDA','CANCELADA')`,
+  incompatível com o `ENUM('ATIVA','INATIVA')` desta demanda. Esse banco NAO
+  foi tocado. A migration externa e o fixture de teste foram aplicados
+  contra `db_gestao_coletas` (sem prefixo), que bate exatamente com o dump
+  verbatim. `.env` local aponta `GESTAO_COLETAS_DB_NAME=db_gestao_coletas`,
+  com o achado documentado em comentario no proprio arquivo. Pendencia nova:
+  investigar a origem de `udlogo59_db_gestao_coletas` local antes de
+  qualquer deploy real, e reconfirmar o nome exato do banco em Producao no
+  Hostgator antes de aplicar `sql/migrations_gestao_coletas/001_status_ordem_coleta.sql`
+  la (a migration usa `DATABASE()` dinamicamente, entao funciona contra
+  qualquer nome, desde que a conexao aponte para o banco certo).
+
+  Fixture de teste: validado em tempo real (via script temporario,
+  descartado ao final, sem log de credencial) que `cliente_id=8` existe
+  ATIVO, `email_recebido_id=1` existe, `OC-TESTE-005` nao existia — so entao
+  inserido `numero_ordem_coleta='OC-TESTE-005'`, `cliente_id=8`,
+  `email_recebido_id=1`, `placa_prevista='TST0A01'`, `status='ATIVA'`
+  (demais campos NULL, zero dado pessoal novo) contra `db_gestao_coletas`.
+  DELETE de limpeza documentado, NAO executado ainda (fica para depois que
+  os testes desta demanda terminarem):
+  `DELETE FROM tb_ordens_coleta WHERE numero_ordem_coleta = 'OC-TESTE-005';`
+  contra `db_gestao_coletas`.
+
+  Testes reais executados (`tests/manual/teste_consulta_ordem_coleta.php`,
+  novo, mais 3 subprocessos auxiliares novos e 6 arquivos de teste
+  pre-existentes corrigidos por causa da mudanca de assinatura do
+  construtor de `OrdemColetaClient`): 17/17 asserções passaram — placa sem
+  ordens bloqueia; placa com 1 ordem (`TST0A01`) avanca direto com dados
+  reais do banco (inclusive normalizacao de placa minuscula/hifenizada);
+  placa com multiplas ordens (`ABC1D23`, 3 ordens reais) retorna tela de
+  selecao; selecionar-ordem legitimo grava os dados REAIS e ignora
+  `cliente_nome`/`cliente_cnpj` forjados pelo front; tentativa de
+  selecionar ordem com numero forjado/inexistente para a placa e bloqueada
+  (nada gravado); IDOR classico de totem invasor tentando selecionar ordem
+  de atendimento alheio bloqueado; ordem com fixture propria `INATIVA`
+  (criada e removida pelo proprio teste) corretamente excluida da consulta;
+  indisponibilidade do banco externo (host/porta simulados so na chamada de
+  teste, nunca no `.env` real) retorna erro generico HTTP 502 sem vazar
+  host/porta/credencial. Cenario de cliente `INATIVO` registrado como NAO
+  TESTAVEL — nenhum cliente real com esse status existe nos fixtures
+  disponiveis, e alterar um cliente real so para o teste nao foi
+  autorizado. Regressao confirmada sem quebra:
+  `teste_avancar_etapa_expedicao.php` (10/10),
+  `teste_talent_trava_doctos_pendente.php` (16/16),
+  `teste_rebaixamento_manual.php` (45/45). `php -l` OK em todos os arquivos
+  novos/alterados.
+
+  Nao alterado: Recebimento; `finalizar()` continua bloqueado por
+  `TALENT_DOCTOS_PENDENTE` (nao mexido). Nenhum commit/push feito (fora do
+  escopo desta etapa). Handoff original:
+  `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.
+- 2026-09-11 — Reconciliacao de nome de banco (mesma demanda
+  `expedicao-consulta-ordem-coleta-teste`): o usuario apagou os bancos
+  errados existentes neste XAMPP local e reimportou o schema/dados corretos
+  sob o nome real `udlogo59_db_gestao_coletas` (dump em
+  `docs/udlogo59_db_gestao_coletas.sql`, 10 ordens reais, incluindo dados
+  pessoais reais de motorista nas linhas id 4-10 — tratados como sensiveis,
+  nunca logados/exibidos). Confirmado ao vivo via `SHOW DATABASES`/
+  `SHOW CREATE TABLE` que o banco antigo sem prefixo (`db_gestao_coletas`,
+  usado como precaucao na rodada anterior) nao existe mais neste ambiente, e
+  que `udlogo59_db_gestao_coletas` agora tem o schema verbatim esperado
+  (sem coluna `status` ate a migration ser aplicada). `.env` atualizado
+  (`GESTAO_COLETAS_DB_NAME=udlogo59_db_gestao_coletas`). Migration
+  `sql/migrations_gestao_coletas/001_status_ordem_coleta.sql` aplicada com
+  sucesso contra o banco correto (idempotencia confirmada por segunda
+  execucao sem erro). Precondicoes do fixture revalidadas ao vivo
+  (`cliente_id=8` ATIVO, `email_recebido_id=1` existe, `OC-TESTE-005` nao
+  existia) antes de inserir `OC-TESTE-005`/`TST0A01`/`ATIVA`. Bateria de 17
+  asserções (`teste_consulta_ordem_coleta.php`) e as 3 suites de regressao
+  (`teste_avancar_etapa_expedicao.php` 10/10,
+  `teste_talent_trava_doctos_pendente.php` 16/16,
+  `teste_rebaixamento_manual.php` 45/45) reexecutadas com sucesso contra o
+  banco correto — nenhuma das 7 ordens reais novas colide com a placa
+  `ABC1D23` usada no cenario de "multiplas ordens" (continua batendo
+  exatamente 3, todas de teste). Nenhum commit/push feito.
+
+- 2026-09-11 — `/01-implementacao` da demanda
+  `expedicao-consulta-ordem-coleta-teste` concluida. `OrdemColetaClient`
+  deixou de ser cliente HTTP placeholder e passou a consultar
+  diretamente, em leitura, o banco externo `udlogo59_db_gestao_coletas`
+  (mesmo servidor/credencial do totem, nome do banco em variavel propria
+  `.env`), via nova `Util\ConexaoGestaoColetas` + `App\Dao\OrdemColetaDao`
+  (PDO prepared statement, timeout curto, erro generico ao totem).
+  Placa normalizada exclusivamente no backend. Consulta filtra
+  `tb_clientes.status='ATIVO'` e `tb_ordens_coleta.status='ATIVA'` (nova
+  coluna real, adicionada via migration idempotente separada
+  `sql/migrations_gestao_coletas/001_status_ordem_coleta.sql`, pasta
+  isolada e claramente identificada como pertencente ao banco externo,
+  nao ao do totem). `tb_atendimento.ordem_coleta` ampliada para
+  VARCHAR(50) (`sql/migrations/011_ampliar_ordem_coleta.sql`).
+  `ORDEM_COLETA_API_URL`/`ORDEM_COLETA_API_KEY` removidas do
+  `.env`/`.env.example` (sem uso). **Corrigido IDOR critico** em
+  `AtendimentoController::selecionarOrdem()`: agora valida posse/tipo/
+  status/etapa pelo totem autenticado e RECONSULTA as ordens reais antes
+  de aceitar a selecao, descartando `cliente_nome`/`cliente_cnpj`
+  enviados pelo front — so os dados vindos do servidor sao gravados.
+  **Achado critico resolvido durante a implementacao**: confusao real
+  entre dois bancos (`udlogo59_db_gestao_coletas` antigo, schema
+  divergente/incompativel, vs. `db_gestao_coletas` sem prefixo, usado por
+  precaucao numa primeira rodada) — o usuario apagou o banco errado e
+  reimportou o schema correto em `udlogo59_db_gestao_coletas`
+  (`docs/udlogo59_db_gestao_coletas.sql`, 10 ordens reais). Implementacao
+  reconciliada e testada contra o banco correto (o unico que resta).
+  Fixture de teste `OC-TESTE-005`/placa `TST0A01`/`id=11`/`status=ATIVA`
+  inserido apos validar pre-condicoes ao vivo (reaproveitando
+  `cliente_id=8`/`email_recebido_id=1`, zero dado pessoal novo) — AINDA
+  NAO REMOVIDO (SQL de limpeza documentado no handoff, aguardando fim dos
+  testes). Testes reais: 17/17 (`teste_consulta_ordem_coleta.php`,
+  incluindo zero/uma/multiplas ordens, normalizacao de placa, selecao
+  legitima vs. forjada, IDOR classico, indisponibilidade do banco
+  externo) + regressao 10/10 + 16/16 + 45/45 (expedicao/Talent/
+  rebaixamento manual). Cliente INATIVO nao testado (sem fixture real
+  disponivel, nao autorizado alterar dado real para criar um). Revisao de
+  seguranca (security-especialista): sem achados criticos; 1 achado de
+  atencao corrigido na mesma rodada (aspas duplas em literais SQL de
+  status trocadas por aspas simples, reconfirmado 17/17); 1 achado de
+  atencao NAO corrigido (credencial `root` compartilhada com o banco do
+  totem usada tambem para o banco externo — recomendado credencial
+  dedicada/somente-leitura antes de producao, pendencia de arquitetura
+  para `devops-especialista`). **Alerta de privacidade registrado, nao
+  resolvido**: `docs/udlogo59_db_gestao_coletas.sql` contem nome
+  completo e numero de CNH reais de motoristas (ordens id 4-10) — arquivo
+  ainda untracked no git, decisao pendente do usuario sobre
+  remover/mascarar/manter fora de versionamento antes de qualquer
+  commit. Nenhuma alteracao em Recebimento. `finalizar()` continua
+  bloqueado por `TALENT_DOCTOS_PENDENTE`. Nenhum commit/push realizado.
+  Handoff: `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.
+  Proximo passo: `/02-testes` formal e/ou `/03-revisao`, decisao do
+  usuario sobre as pendencias listadas.
+
+- 2026-09-11 — `/02-testes` da demanda `expedicao-consulta-ordem-coleta-teste`,
+  restrito SOMENTE a etapa inicial da Expedicao (placa digitada ate
+  confirmar/selecionar ordem — CNH/CRLV/Talent fora do escopo desta
+  rodada, por instrucao explicita do usuario). Decisoes confirmadas antes
+  do teste: coluna `status` (`ATIVA`/`INATIVA`) em `tb_ordens_coleta`
+  autorizada (ja implementada); nomes/CNH ja existentes no dump
+  (`docs/udlogo59_db_gestao_coletas.sql`, ordens id 4-10) confirmados
+  FICTICIOS pelo usuario; regra de negocio confirmada mas NAO
+  implementada ainda (ordem so viraria INATIVA apos Talent confirmar
+  check-in com sucesso; erro/timeout/cancelamento/ENVIO_INDETERMINADO
+  nunca inativam a ordem). **Achado adicional de privacidade/seguranca**
+  no dump (alem do `token_hash` de producao ja registrado): `tb_api_logs`
+  contem IPs publicos reais, incluindo provavel IP fixo do servidor n8n
+  de producao (`179.125.31.177`) — arquivo continua untracked/nao
+  versionado, decisao do usuario pendente. `qa-testes` executou de forma
+  independente (nao so revisou o autorrelato do backend): zero ordens
+  bloqueia, uma ordem (`TST0A01`/`OC-TESTE-005`) avanca direto, multiplas
+  ordens (`ABC1D23`) lista para escolha, ordem INATIVA (fixture temporario
+  `OC-TESTE-006`, criado e removido nesta rodada) excluida corretamente,
+  cliente INATIVO (cliente+ordem temporarios `OC-TESTE-007`, criados e
+  removidos nesta rodada) excluido corretamente mesmo com ordem ativa,
+  normalizacao de placa correta, selecao forjada rejeitada, IDOR
+  bloqueado, indisponibilidade do banco externo com erro generico (nunca
+  vaza host/credencial). Suite automatizada 17/17 antes e depois.
+  **`OC-TESTE-005` (id=11, placa `TST0A01`, status ATIVA) confirmada
+  intacta e MANTIDA de proposito** (sera usada em teste fisico futuro,
+  instrucao explicita de nao remover). **Veredito: APROVADO** para esta
+  etapa especifica. Nenhuma falha encontrada, nenhuma correcao
+  necessaria, nao avancado para `/03-revisao` geral (a demanda continua
+  parcial — so a etapa inicial da Expedicao foi testada). Nenhum
+  commit/push. Handoff atualizado:
+  `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.
+  Proximo passo: teste fisico com o fixture mantido; decisao do usuario
+  sobre o arquivo do dump antes de qualquer commit; continuacao do fluxo
+  (CNH/CRLV/Talent) em demanda/rodada futura.
+
+- 2026-09-11 — Validacao FISICA (real, conduzida passo a passo com o
+  usuario) da etapa inicial da Expedicao da demanda
+  `expedicao-consulta-ordem-coleta-teste`, no ambiente real
+  (`http://localhost:8000/totem/index.php?totem=RECEPCAO-01`). Todos os
+  9 passos do roteiro confirmados: Expedicao -> digitar `TST0A01` -> sem
+  erro JSON/HTML -> banco retorna somente `OC-TESTE-005` -> tela exibe
+  dados da ordem (Cliente AKRO-PLASTIC DO BRASIL, CNPJ
+  `20200104000238`, Placa `TST0A01`) pedindo confirmacao -> confirmar
+  avanca para `exp_cnh` sem erro -> vinculo placa/ordem confirmado por
+  consulta real ao banco do totem (`id_atendimento=1185`,
+  `ordem_coleta='OC-TESTE-005'`, `cliente_cnpj='20200104000238'`,
+  batendo com a tela) -> teste parado exatamente na tela de CNH, sem
+  avancar para CRLV/Talent -> fixture externo `OC-TESTE-005` (id=11)
+  confirmado `status='ATIVA'`/`placa_prevista='TST0A01'` inalterado
+  apos o teste. **Veredito: APROVADA.** Nenhum codigo alterado durante o
+  teste. Registrado para limpeza controlada em `/03-revisao` (NAO
+  executado agora): `id_atendimento=1185` (atendimento de teste criado
+  por este teste fisico, em `em_andamento`/`exp_cnh`); observacoes
+  adicionais pre-existentes e nao tocadas (`id_atendimento=1184`,
+  `1125`, `1126`, de sessoes de teste anteriores, sem relacao com esta
+  demanda). Fixture `OC-TESTE-005` mantido intacto, conforme instrucao
+  explicita (uso continuado em testes fisicos futuros). Nenhum
+  commit/push. Handoff atualizado:
+  `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.
+  Proximo passo: `/03-revisao`, incluindo a limpeza controlada dos
+  atendimentos de teste registrados acima.
+
+- 2026-09-11 — A pedido do usuario, criado um segundo fixture de teste
+  na demanda `expedicao-consulta-ordem-coleta-teste`, antes da limpeza
+  planejada para `/03-revisao`: placa nova `TST0B01` com DUAS ordens
+  ativas (`OC-TESTE-008`/`OC-TESTE-009`, ambas `status='ATIVA'`),
+  reaproveitando o mesmo `cliente_id=8`/`email_recebido_id=1` ja usados
+  em `OC-TESTE-005` (zero dado pessoal novo), para teste manual/fisico
+  do cenario "multiplas ordens ativas para a mesma placa" (ate entao so
+  testado automaticamente com `ABC1D23`). Validado ao vivo antes de
+  inserir (sem colisao de placa/numero, cliente ativo, e-mail existente).
+  `OC-TESTE-005` confirmada intacta. SQL de remocao documentado, NAO
+  executado (`OC-TESTE-008`/`009` ficam pendentes de limpeza controlada
+  junto com `OC-TESTE-005` e o atendimento `id_atendimento=1185`, no
+  `/03-revisao`). Nenhum commit/push. Handoff atualizado.
+
+- 2026-09-11 — `/03-revisao` da demanda `expedicao-consulta-ordem-coleta-teste`
+  concluida. Revisao de seguranca independente (10 pontos pedidos pelo
+  usuario): **APROVADO**, sem achados bloqueantes — confirmado por
+  leitura do codigo real (nao so do handoff) que a conexao dedicada nao
+  vaza credencial/DSN, SQL sempre via prepared statement, normalizacao
+  de placa no backend, comportamento 0/1/multiplas ordens correto sem
+  selecao automatica indevida, `selecionarOrdem()` reconsulta e valida
+  posse/tipo/status/etapa (IDOR e selecao forjada rejeitados), migrations
+  idempotentes e isoladas por banco, **ausencia confirmada** de logica
+  automatica ATIVA->INATIVA, `.gitignore` protegendo o dump sensivel, e
+  nenhuma alteracao fora do escopo (Recebimento/CNH/CRLV/Talent
+  intocados). Teste fisico registrado formalmente como aprovado:
+  `TST0A01->OC-TESTE-005` e `TST0B01->OC-TESTE-008/009` (lista exibida
+  corretamente, sem selecao automatica, vinculo confirmado). **Limpeza
+  controlada executada** (transacional, por `id_atendimento` exato):
+  removidos do banco do totem `id_atendimento` 1185 (TST0A01, autorizado),
+  1186 (TST0B01, etapa `placa`, capturado pelo filtro autorizado de
+  identificacao) e 1188 (TST0B01/OC-TESTE-009, autorizado, com pasta de
+  documentos removida); 0 dependentes em `tb_atendimento_nota`/
+  `tb_fila_envio`. Removidas do banco externo as 3 linhas
+  `OC-TESTE-005`/`008`/`009` (contagem 3->0 confirmada); coluna `status`
+  e migration `001_status_ordem_coleta.sql` preservadas. **Achados
+  NOVOS fora do escopo autorizado, NAO tocados** (o backend-especialista
+  parou corretamente ao encontra-los, sem improvisar remocao):
+  `id_atendimento=1187` (expedicao, TST0A01/OC-TESTE-005, cancelado,
+  outra tentativa do mesmo teste) e `id_atendimento=1189` (tipo
+  RECEBIMENTO, fora desta demanda, com 5 notas fiscais reais
+  digitalizadas em disco). `id_atendimento` 1125 e 1126 (expedicao,
+  TST0A01, sem ordem, `status=em_andamento` ha dias, criados em
+  2026-09-10) consultados por leitura apenas, origem exata nao
+  determinavel pelos dados disponiveis, permanecem intocados. **Veredito
+  final: APROVADO** — demanda pronta para `/04-commit-e-push` quando o
+  usuario autorizar, apos decidir sobre 1187/1189/1125/1126 (nenhum
+  bloqueia a aprovacao, sao residuos/atendimentos independentes achados
+  durante a limpeza). Nenhum commit/push realizado. Handoff atualizado:
+  `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.

@@ -55,17 +55,67 @@ class AtendimentoController
         Resposta::sucesso(['id_atendimento' => $idAtendimento, 'proxima_tela' => 'quantidade_notas']);
     }
 
-    public function selecionarOrdem(array $entrada): void
+    /**
+     * Corrigido IDOR (achado do security-especialista, registrado em
+     * ia_development_state.md; corrigido nesta demanda
+     * expedicao-consulta-ordem-coleta-teste, 2026-09-11): antes aceitava "no
+     * escuro" o objeto 'ordem' inteiro enviado pelo front-end, sem nenhuma
+     * validacao de posse/tipo/status/etapa nem confirmacao de que a ordem
+     * pertencia de fato ao resultado consultado para aquele atendimento —
+     * um totem podia gravar cliente_nome/cliente_cnpj/ordem_coleta
+     * arbitrarios em tb_atendimento.
+     *
+     * Correcao: valida posse do atendimento pelo totem autenticado (mesmo
+     * padrao ja usado em outras acoes deste controller), confere tipo/
+     * status/etapa, e RECONSULTA as ordens reais para a placa do atendimento
+     * — so aceita a selecao se o 'numero' enviado pelo front bater com uma
+     * das ordens realmente retornadas. Os dados gravados em tb_atendimento
+     * vem SEMPRE do resultado reconsultado no servidor, nunca do que o front
+     * enviou (cliente_nome/cliente_cnpj do front sao ignorados).
+     */
+    public function selecionarOrdem(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
-        $ordem = $entrada['ordem'] ?? null;
+        $ordemRecebida = $entrada['ordem'] ?? null;
 
-        if (!$idAtendimento || !$ordem) {
+        if (!$idAtendimento || !is_array($ordemRecebida) || empty($ordemRecebida['numero'])) {
             Resposta::erro('Dados incompletos');
         }
 
-        $this->atendimentoRn->selecionarOrdem($idAtendimento, $ordem);
-        Resposta::sucesso(['proxima_tela' => 'dados_encontrados', 'dados' => $ordem]);
+        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+
+        if ($atendimento['tipo'] !== 'expedicao') {
+            Resposta::erro('Atendimento nao encontrado', 404);
+        }
+        if ($atendimento['status'] !== 'em_andamento') {
+            Resposta::erro('Atendimento nao esta em andamento');
+        }
+        // 'placa' e a etapa inicial (definida por AtendimentoDao::criar) e
+        // permanece assim ate a ordem ser efetivamente selecionada — quando
+        // ha so 1 ordem, AtendimentoController::iniciar() ja seleciona
+        // sozinho e avanca para 'dados_encontrados', entao esta acao so faz
+        // sentido enquanto o atendimento ainda estiver em 'placa'.
+        if ($atendimento['etapa_atual'] !== 'placa') {
+            Resposta::erro('Atendimento nao esta na etapa esperada para selecionar a ordem');
+        }
+
+        $ordensReais = $this->atendimentoRn->consultarOrdensAbertas($atendimento['placa']);
+        $numeroRecebido = (string) $ordemRecebida['numero'];
+
+        $ordemReal = null;
+        foreach ($ordensReais as $o) {
+            if ((string) ($o['numero'] ?? '') === $numeroRecebido) {
+                $ordemReal = $o;
+                break;
+            }
+        }
+
+        if ($ordemReal === null) {
+            Resposta::erro('Ordem de coleta invalida para essa placa');
+        }
+
+        $this->atendimentoRn->selecionarOrdem($idAtendimento, $ordemReal);
+        Resposta::sucesso(['proxima_tela' => 'dados_encontrados', 'dados' => $ordemReal]);
     }
 
     public function salvarEtapa(array $entrada, int $idTotem): void

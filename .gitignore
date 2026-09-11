@@ -25,3 +25,7 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
+
+# Dumps de banco externo com dado sensível (hash de token de API de
+# produção, IPs reais) — nunca versionar
+/docs/udlogo59_db_gestao_coletas.sql

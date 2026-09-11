@@ -16,6 +16,7 @@ use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
 use App\Rn\AtendimentoRn;
+use App\Dao\OrdemColetaDao;
 use App\Rn\OrdemColetaClient;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
@@ -32,7 +33,7 @@ $pdo = Conexao::obter();
 $idTotem = (int) ($argv[1] ?? 0);
 $idAtendimento = (int) ($argv[2] ?? 0);
 
-$atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient('', ''));
+$atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient(new OrdemColetaDao()));
 $talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
 $documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo));
 

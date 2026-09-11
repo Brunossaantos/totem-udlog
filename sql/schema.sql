@@ -53,7 +53,7 @@ CREATE TABLE tb_atendimento (
     status            ENUM('em_andamento','concluido','cancelado','bloqueado') NOT NULL DEFAULT 'em_andamento',
 
     placa             VARCHAR(8) NULL,
-    ordem_coleta      VARCHAR(30) NULL,
+    ordem_coleta      VARCHAR(50) NULL,
     cliente_nome      VARCHAR(150) NULL,
     cliente_cnpj      VARCHAR(20) NULL,
 

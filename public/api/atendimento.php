@@ -12,6 +12,7 @@ use App\Dao\FilaEnvioDao;
 use App\Dao\VioCacheDao;
 use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
+use App\Dao\OrdemColetaDao;
 use App\Rn\AtendimentoRn;
 use App\Rn\OrdemColetaClient;
 use App\Rn\TalentRn;
@@ -25,7 +26,10 @@ $dotenv->load();
 $pdo = Conexao::obter();
 $totem = Auth::validarTotem($pdo);
 
-$ordemColetaClient = new OrdemColetaClient($_ENV['ORDEM_COLETA_API_URL'] ?? '', $_ENV['ORDEM_COLETA_API_KEY'] ?? '');
+// App\Dao\OrdemColetaDao so conecta ao banco externo de gestao de coletas
+// (Util\ConexaoGestaoColetas — nunca reaproveita $pdo, que e do banco do
+// totem) no momento real da consulta, nao aqui na instanciacao.
+$ordemColetaClient = new OrdemColetaClient(new OrdemColetaDao());
 $atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), $ordemColetaClient);
 
 $talentClient = new TalentClient($_ENV['TALENT_API_URL'] ?? '', $_ENV['TALENT_API_KEY'] ?? '');
@@ -53,7 +57,7 @@ switch ($acao) {
         $controller->iniciar((int) $totem['id_totem'], $entrada);
         break;
     case 'selecionar-ordem':
-        $controller->selecionarOrdem($entrada);
+        $controller->selecionarOrdem($entrada, (int) $totem['id_totem']);
         break;
     case 'salvar-etapa':
         $controller->salvarEtapa($entrada, (int) $totem['id_totem']);

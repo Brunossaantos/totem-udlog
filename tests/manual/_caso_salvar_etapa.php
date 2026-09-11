@@ -24,6 +24,7 @@ use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\FilaEnvioDao;
 use App\Rn\AtendimentoRn;
+use App\Dao\OrdemColetaDao;
 use App\Rn\OrdemColetaClient;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
@@ -39,7 +40,7 @@ $idAtendimento = (int) ($argv[2] ?? 0);
 $etapa = $argv[3] ?? '';
 $dados = json_decode(base64_decode($argv[4] ?? '', true) ?: '{}', true) ?? [];
 
-$atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient('', ''));
+$atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient(new OrdemColetaDao()));
 $talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
 $controller = new AtendimentoController($atendimentoRn, $talentRn, new AtendimentoNotaDao($pdo));
 

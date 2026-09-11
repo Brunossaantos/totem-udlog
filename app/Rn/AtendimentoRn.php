@@ -16,12 +16,17 @@ class AtendimentoRn
         return $this->atendimentoDao->criar($idTotem, $tipo, $placa);
     }
 
+    /**
+     * Filtro morto removido em 2026-09-11 (demanda
+     * expedicao-consulta-ordem-coleta-teste): o campo 'status' nunca existiu
+     * de fato na fonte real de dados (era presumido pelo placeholder HTTP
+     * antigo). O filtro de status/cliente ativo agora acontece na propria
+     * consulta SQL (App\Dao\OrdemColetaDao::buscarPorPlacaNormalizada), nao
+     * mais em array PHP aqui.
+     */
     public function consultarOrdensAbertas(string $placa): array
     {
-        $ordens = $this->ordemColetaClient->buscarPorPlaca($placa);
-
-        // so considera ordens que ainda nao foram concluidas
-        return array_values(array_filter($ordens, fn($o) => ($o['status'] ?? '') !== 'concluido'));
+        return $this->ordemColetaClient->buscarPorPlaca($placa);
     }
 
     public function selecionarOrdem(int $idAtendimento, array $ordem): void

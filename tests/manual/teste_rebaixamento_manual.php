@@ -41,6 +41,7 @@ use Util\Conexao;
 use App\Dao\VioCacheDao;
 use App\Dao\AtendimentoDao;
 use App\Rn\AtendimentoRn;
+use App\Dao\OrdemColetaDao;
 use App\Rn\OrdemColetaClient;
 use App\Rn\DocumentoRn;
 use App\Rn\VioDecodeClient;
@@ -97,7 +98,7 @@ $atendimentoDao->atualizarEtapa($idAtendimento, 'exp_cnh');
 
 $vioCacheDao = new VioCacheDao($pdo);
 $documentoRn = new DocumentoRn($vioCacheDao, $atendimentoDao);
-$atendimentoRn = new AtendimentoRn($atendimentoDao, new OrdemColetaClient('', ''));
+$atendimentoRn = new AtendimentoRn($atendimentoDao, new OrdemColetaClient(new OrdemColetaDao()));
 
 function limpar(PDO $pdo, int $idTotem, int $idAtendimento): void
 {

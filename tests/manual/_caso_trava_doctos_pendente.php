@@ -24,6 +24,7 @@ use App\Dao\FilaEnvioDao;
 use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
 use App\Rn\AtendimentoRn;
+use App\Dao\OrdemColetaDao;
 use App\Rn\OrdemColetaClient;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
@@ -57,7 +58,7 @@ class TalentRnEspiao extends TalentRn
 // reais validas, nao por falta de configuracao.
 $talentClient = new TalentClient($_ENV['TALENT_API_URL'] ?? '', $_ENV['TALENT_API_KEY'] ?? '');
 
-$atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient('', ''));
+$atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient(new OrdemColetaDao()));
 $talentRnEspiao = new TalentRnEspiao($talentClient, new FilaEnvioDao($pdo), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
 $documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo));
 

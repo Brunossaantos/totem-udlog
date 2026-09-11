@@ -2,40 +2,52 @@
 
 namespace App\Rn;
 
+use App\Dao\OrdemColetaDao;
+
 /**
- * Adaptador para a API de ordens de coleta.
- * TODO: ajustar URL, autenticacao e mapeamento de campos assim que a
- * documentacao real da API estiver disponivel. O formato abaixo eh um
- * chute razoavel pra nao travar o resto do sistema.
+ * Consulta de ordens de coleta por placa. Ate 2026-09-11 era um adaptador
+ * HTTP placeholder (nenhuma API REST real chegou a existir/ser documentada
+ * — ver docs/db_gestao_coletas.md). Demanda
+ * expedicao-consulta-ordem-coleta-teste substituiu por acesso direto ao
+ * banco externo `udlogo59_db_gestao_coletas` (mesmo servidor/credencial do
+ * totem, autorizado explicitamente pelo usuario), via App\Dao\OrdemColetaDao
+ * (Util\ConexaoGestaoColetas — conexao PDO propria, nunca compartilhada com
+ * o banco do totem).
+ *
+ * Nome da classe/metodo publico preservados (buscarPorPlaca) para nao
+ * quebrar App\Rn\AtendimentoRn nem o restante do fluxo de Expedicao.
+ *
+ * Mapeamento de campos (fonte real, sem coluna de "veiculo"):
+ *   numero        <- tb_ordens_coleta.numero_ordem_coleta
+ *   cliente_nome  <- tb_clientes.razao_social
+ *   cliente_cnpj  <- tb_clientes.cnpj
+ *   data          <- tb_ordens_coleta.criado_em (data de cadastro da ordem,
+ *                    nao data prevista de coleta — decisao do usuario,
+ *                    2026-09-11)
+ *   veiculo       <- omitido nesta rodada (sem fonte real confirmada)
  */
 class OrdemColetaClient
 {
-    public function __construct(
-        private string $baseUrl = '',
-        private string $apiKey = ''
-    ) {}
+    public function __construct(private OrdemColetaDao $ordemColetaDao) {}
 
     public function buscarPorPlaca(string $placa): array
     {
-        $ch = curl_init(rtrim($this->baseUrl, '/') . '/ordens-coleta?placa=' . urlencode($placa));
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => ["Authorization: Bearer {$this->apiKey}"],
-            CURLOPT_TIMEOUT => 8,
-        ]);
-        $resposta = curl_exec($ch);
-        $codigoHttp = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        $placaNormalizada = self::normalizarPlaca($placa);
 
-        if ($codigoHttp !== 200 || $resposta === false) {
-            throw new \RuntimeException("Falha ao consultar API de ordens de coleta (HTTP {$codigoHttp})");
+        if ($placaNormalizada === '') {
+            return [];
         }
 
-        $dados = json_decode($resposta, true);
+        return $this->ordemColetaDao->buscarPorPlacaNormalizada($placaNormalizada);
+    }
 
-        // formato esperado (AJUSTAR conforme retorno real):
-        // { "ordens": [{ "numero": "OC-88213", "status": "aberto", "data": "2026-09-03",
-        //                "cliente_nome": "...", "cliente_cnpj": "...", "veiculo": "..." }] }
-        return $dados['ordens'] ?? [];
+    /**
+     * Normalizacao EXCLUSIVAMENTE no backend — maiusculas, remove espaco/
+     * hifen/qualquer caractere que nao seja alfanumerico. Nunca confia em
+     * normalizacao feita pelo front-end.
+     */
+    public static function normalizarPlaca(string $placa): string
+    {
+        return strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $placa));
     }
 }
