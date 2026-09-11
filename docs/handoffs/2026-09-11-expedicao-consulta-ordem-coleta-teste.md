@@ -525,3 +525,14 @@ demanda, sao apenas residuos/atendimentos independentes encontrados
 durante a limpeza.
 
 Nenhum commit/push realizado nesta etapa.
+
+## Commit
+
+- Hash: `bdc8d91a92a3a45a4664aee7148a17dda3ba776b`
+- Mensagem: `feat(expedicao): consulta real de ordem de coleta por placa`
+- Push: `main` -> `origin/main` (`89b8b5d..bdc8d91`)
+- Arquivos deliberadamente EXCLUIDOS deste commit por nao pertencerem a
+  esta demanda (pre-existentes/nao relacionados): 
+  `docs/handoffs/2026-09-08-recebimento-clientes-tabela-local.md`
+  (modificacao anterior nao relacionada) e
+  `tests/manual/_diagnostico_talent_731.php` (arquivo solto anterior).

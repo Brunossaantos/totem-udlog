@@ -1001,3 +1001,27 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   bloqueia a aprovacao, sao residuos/atendimentos independentes achados
   durante a limpeza). Nenhum commit/push realizado. Handoff atualizado:
   `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.
+
+- 2026-09-11 — `/04-commit-e-push` da demanda
+  `expedicao-consulta-ordem-coleta-teste` concluido. Commit
+  `bdc8d91a92a3a45a4664aee7148a17dda3ba776b` (`feat(expedicao): consulta
+  real de ordem de coleta por placa`), push para `origin/main` realizado
+  com sucesso. Staged seletivamente (nao `git add -A`): excluidos do
+  commit `docs/handoffs/2026-09-08-recebimento-clientes-tabela-local.md`
+  (modificacao pre-existente nao relacionada a esta demanda) e
+  `tests/manual/_diagnostico_talent_731.php` (arquivo solto anterior,
+  tambem nao relacionado). `docs/udlogo59_db_gestao_coletas.sql`
+  confirmado fora do commit (protegido por `.gitignore`, como ja
+  validado). Demanda `expedicao-consulta-ordem-coleta-teste` encerrada
+  com sucesso: OrdemColetaClient substituido por consulta real ao banco
+  externo, IDOR corrigido, 88 testes automatizados + teste fisico +
+  revisao de seguranca aprovados. Pendencias remanescentes registradas
+  para o futuro (nao bloqueiam o encerramento desta demanda): credencial
+  dedicada somente-leitura para o banco externo; confirmar nome do banco
+  em producao Hostgator antes de aplicar a migration externa la; decisao
+  sobre versionar/mascarar `docs/udlogo59_db_gestao_coletas.sql`;
+  atendimentos `1187`/`1189`/`1125`/`1126` deixados para decisao/testes
+  futuros (usuario optou por nao remover agora); continuacao do fluxo de
+  Expedicao (CNH/CRLV/Talent) fica para demanda futura, fora do escopo
+  desta. Handoff fechado:
+  `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.
