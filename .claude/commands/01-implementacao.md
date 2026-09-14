@@ -23,5 +23,11 @@ Argumento (se houver): $ARGUMENTS
 6. Atualize o handoff da etapa 00 (mesmo arquivo) acrescentando uma seção
    "## Resultado da implementação" com o que foi feito e as pendências
    restantes.
+7. Delegue ao `trello-especialista` (usando o `card_id` já salvo no
+   handoff — nunca procure o cartão pelo título se o `card_id` existir):
+   comentar no cartão o resumo da implementação, arquivos alterados/
+   criados e pendências. Se falhar, registre o bloqueio no handoff e
+   continue — falha do Trello nunca desfaz nem bloqueia a implementação
+   real já feita.
 
 Não pule para testes ou revisão — isso é `/02-testes` e `/03-revisao`.

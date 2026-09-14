@@ -36,6 +36,7 @@ PHP 8 MVC + MariaDB + front-end vanilla JS, hospedado na Hostgator
 | `devops-especialista` | Ambiente Hostgator, cron, `.env`, deploy |
 | `security-especialista` | Revisão de autenticação, SQL injection, exposição de pasta |
 | `qa-testes` | Roteiro e execução de testes |
+| `trello-especialista` | Integração do workflow com o Trello (quadro Infraestrutura - Matriz) |
 
 Delegação e resposta seguem sempre o contrato em
 `docs/contratos-comunicacao.md`.

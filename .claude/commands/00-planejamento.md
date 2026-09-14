@@ -29,6 +29,14 @@ Execute o planejamento desta demanda, nesta ordem:
 6. Ao final do relatório, escreva o `chatgpt_handoff` seguindo o template
    abaixo e salve em `docs/handoffs/AAAA-MM-DD-<slug-da-demanda>.md`
    (use a data real de hoje).
+7. Delegue ao `trello-especialista`: localizar (por `card_id` de uma
+   demanda relacionada anterior, se existir) ou criar o cartão na lista
+   "Sprint Bruno - Fazendo [Semanal]" com o título
+   `Bruno: sistema totem - <descrição da atividade>`, e comentar nele o
+   resumo do planejamento. Registre o `card_id` retornado no campo
+   "Trello" do handoff. Se o Trello falhar por qualquer motivo, registre
+   o bloqueio no handoff e continue normalmente — falha do Trello nunca
+   impede o planejamento de seguir.
 
 ## Template do chatgpt_handoff
 
@@ -53,8 +61,13 @@ Etapa: 00-planejamento
 ## Pendências conhecidas
 <lista, ou "nenhuma">
 
+## Trello
+card_id: <id retornado pelo trello-especialista, ou "N/A - Trello indisponível/não configurado">
+
 ## Próximo passo
 Rodar /01-implementacao para executar este plano.
 ```
 
-Não implemente nada nesta etapa — só planeje e documente.
+Não implemente nada nesta etapa — só planeje e documente (a criação/
+atualização do cartão do Trello não conta como implementação do domínio
+do totem, é só registro de acompanhamento).

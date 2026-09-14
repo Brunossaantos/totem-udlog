@@ -1034,6 +1034,48 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   desta. Handoff fechado:
   `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.
 
+- 2026-09-11 — Criado o sub-agente `trello-especialista` e implementada a
+  integracao real do workflow de 5 etapas com o Trello (quadro
+  "Infraestrutura - Matriz", `TRELLO_BOARD_ID=654015c3d29cc34bc1b881f6`).
+  Novo cliente `App\Rn\TrelloClient` (curl puro, mesmo padrao de
+  `TalentClient`/`VioDecodeClient`, timeout 8s, erros sempre traduzidos
+  para `TrelloClientException` com categoria fechada — nunca vaza key/
+  token/URL) com `validarConexao`, `buscarListaPorNome` (exige
+  correspondencia EXATA e UNICA, nunca aproxima nem inventa ID),
+  `criarCartao` (sempre no topo da lista, `pos=top` por padrao),
+  `consultarCartao`, `adicionarComentario`, `moverCartao`,
+  `marcarConcluida` (define `due`/`dueComplete=true`, selo de data com
+  check verde visivel no cartao). CLI `tools/trello-cli.php` com
+  subcomandos correspondentes. IDs de lista resolvidos AO VIVO contra o
+  board real (nunca hardcoded/adivinhados):
+  `TRELLO_LISTA_FAZENDO_ID=654015f94854311ccf1895b1` ("Sprint Bruno -
+  Fazendo [Semanal]"), `TRELLO_LISTA_FEITO_ID=654015fb256ea4b83b4a8816`
+  ("Sprint - Feito") — gravados no `.env` real, `.env.example` atualizado
+  (so `TRELLO_BOARD_ID` com valor real, resto vazio). Os 5 comandos do
+  workflow (`.claude/commands/00-planejamento.md` a
+  `04-commit-e-push.md`) atualizados para localizar/criar cartao em
+  `/00` (registrando `card_id` no handoff), comentar progresso em
+  `/01`/`/02`/`/03`, e em `/04` — somente apos confirmar
+  `HEAD == origin/main` — comentar hash+data de conclusao, mover para
+  "Feito" e marcar a data de conclusao no cartao. Falha do Trello em
+  qualquer etapa NUNCA bloqueia/desfaz o trabalho real do totem — so fica
+  registrada como pendencia no handoff, cartao permanece em "Fazendo".
+  **Achado de seguranca durante o teste**: o token inicialmente
+  configurado so tinha escopo de leitura (escrita retornava HTTP 401);
+  usuario gerou um token novo com escopo leitura+escrita, resolvendo o
+  bloqueio — validado ponta a ponta com sucesso (criar/comentar/
+  consultar/mover/marcar concluida), incluindo cartoes de teste
+  descartaveis que o usuario removeu manualmente. `docs/trello-
+  integracao.md` criado/atualizado com toda a configuracao, IDs
+  resolvidos (nao sensiveis) e uso do CLI. Nenhuma credencial exposta em
+  nenhum arquivo/log/documentacao. **Pendencia**: o novo tipo de agente
+  `trello-especialista` so fica disponivel para o `Agent tool` a partir
+  da PROXIMA sessao (o harness carrega tipos de agente no inicio da
+  sessao) — nesta sessao, a implementacao foi feita via
+  `backend-especialista` seguindo as mesmas regras documentadas no
+  arquivo do novo agente. Nenhum commit/push realizado (fora do escopo
+  pedido).
+
 - 2026-09-11 — `/00-planejamento` da nova demanda
   `impressao-etiqueta-teste`: objetivo e testar impressao fisica no mini
   PC Windows com etiqueta de teste ("ETIQUETA DE TESTE - NAO UTILIZAR",

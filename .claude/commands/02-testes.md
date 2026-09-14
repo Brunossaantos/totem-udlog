@@ -18,5 +18,9 @@ Argumento (se houver): $ARGUMENTS
    precisa voltar para `/01-implementacao` antes de seguir.
 5. Acrescente ao handoff uma seção "## Resultado dos testes" com o que foi
    validado e o que falhou, se algo falhou.
+6. Delegue ao `trello-especialista` (usando o `card_id` do handoff):
+   comentar no cartão o resultado dos testes e as falhas encontradas, se
+   houver. Falha do Trello não bloqueia nem reverte o resultado real dos
+   testes — só registre o bloqueio no handoff e continue.
 
 Não avance para `/03-revisao` se houver falha crítica pendente.

@@ -19,5 +19,9 @@ Argumento (se houver): $ARGUMENTS
    pontual — não corrija diretamente nesta etapa.
 5. Acrescente ao handoff uma seção "## Resultado da revisão" com a
    conclusão (aprovado / precisa de ajuste, e qual).
+6. Delegue ao `trello-especialista` (usando o `card_id` do handoff):
+   comentar no cartão a conclusão da revisão (aprovado ou bloqueios).
+   Falha do Trello não bloqueia a conclusão real da revisão — só
+   registre o bloqueio no handoff e continue.
 
 Só siga para `/04-commit-e-push` se o resultado for "aprovado".
