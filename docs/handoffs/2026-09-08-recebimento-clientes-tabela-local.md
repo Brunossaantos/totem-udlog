@@ -848,3 +848,13 @@ Tesseract.js), `sql/migrations/002_status_ocr_atendimento_nota.sql`,
 arquivos), `util/CnpjValidador.php`, `util/RazaoSocialMatcher.php`.
 
 Nenhum arquivo de Expedição, CNH, CRLV, Talent ou scanner Netum incluso.
+
+## Commit
+
+Data: 2026-09-08
+Hash: `b6ab1b09e91b9e1b0df1b85e0332bfeeb450a370`
+Mensagem: `feat(recebimento): identifica clientes via base local`
+31 arquivos alterados (4930 insercoes, 26 remocoes).
+Enviado para `origin/main` (`https://github.com/Brunossaantos/totem-udlog.git`),
+avanco `ae7f162..b6ab1b0`. Sem `--amend`, sem force push. `HEAD` local
+confirmado identico a `origin/main` apos o push. Demanda encerrada.
