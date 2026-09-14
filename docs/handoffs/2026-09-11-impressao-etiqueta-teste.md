@@ -1080,3 +1080,59 @@ fisicamente.
 ### VEREDITO FINAL DA DEMANDA: APROVADO.
 
 Pronta para `/04-commit-e-push`.
+
+## Commit
+
+Commit criado e enviado com sucesso pelo orquestrador (2026-09-14):
+
+- **Hash completo**: `44ec8961fc308de0ec2918029dfde8b784537e21`
+- **Hash curto**: `44ec896`
+- **Mensagem**: `feat(impressao): adiciona servico local para etiquetas`
+- **Arquivos incluídos**: 30 (4796 inserções, 2 remoções) — só arquivos
+  desta demanda: `app/Controller/ImpressaoTesteController.php`,
+  `public/api/impressao-teste.php`,
+  `public/totem/assets/diagnostico-impressao.js`,
+  `public/totem/assets/app.css`/`app.js` (trecho do hotspot),
+  `public/totem/index.php` (tag do script), `servico-impressao-local/`
+  completo (código-fonte, `.gitignore`, `README.md`,
+  `config/config.example.json`, `package.json`/`package-lock.json`,
+  scripts de instalação do Serviço do Windows), `docs/deploy-checklist.md`
+  (seção nova), `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md`
+  (novo), 3 scripts de teste manual criados durante a demanda
+  (`tests/manual/_preload-mock-execFile.js`,
+  `tests/manual/_teste_auth_token_timing.js`,
+  `tests/manual/teste_timeout_kill_isolado.js`), e os trechos
+  correspondentes (só as linhas desta demanda, isolados via
+  `git hash-object`/`git update-index --cacheinfo`, linha a linha) de
+  `.env.example` e `ia_development_state.md`.
+- **Excluído deliberadamente do commit** (preservado como não commitado no
+  working tree, pertence à demanda `trello-integracao`, ainda em
+  andamento em paralelo): `.claude/agents/orquestrador.md`,
+  `.claude/commands/*.md`, `CLAUDE.md`,
+  `.claude/agents/trello-especialista.md`, `app/Rn/TrelloClient.php`,
+  `app/Rn/TrelloClientException.php`, `docs/trello-integracao.md`,
+  `tools/`, `docs/handoffs/2026-09-08-recebimento-clientes-tabela-local.md`,
+  `tests/manual/_diagnostico_talent_731.php`, o bloco `TRELLO_*` de
+  `.env.example`, e a entrada de log do `trello-especialista` em
+  `ia_development_state.md`.
+- **Validações antes do commit**: `git diff --cached --check` limpo (sem
+  whitespace/conflito); `php -l` e `node --check` limpos em todos os
+  arquivos alterados/novos; grep confirmou ausência de token real, CPF ou
+  outro dado sensível no diff staged; `servico-impressao-local/.gitignore`
+  confirmado cobrindo `node_modules/`, `config/config.json`, `*.log`,
+  `daemon/` (nenhum desses foi versionado).
+- **Regressão automatizada executada e aprovada**: as 3 suítes de
+  regressão do projeto (`teste_avancar_etapa_expedicao.php` 10/10,
+  `teste_talent_trava_doctos_pendente.php` 16/16,
+  `teste_rebaixamento_manual.php` 45/45 — 71/71 no total) e o teste
+  isolado de timeout/kill com processo mock
+  (`teste_timeout_kill_isolado.js`, timeout disparou corretamente, kill
+  exclusivo por PID confirmado, módulo não travou após o timeout).
+- **Push**: `git fetch` sem divergência (0 commits atrás de
+  `origin/main`, 1 à frente); push feito sem `--amend`/rebase/force;
+  confirmado `git rev-parse HEAD == git rev-parse origin/main`
+  (`44ec8961fc308de0ec2918029dfde8b784537e21`) após o push.
+- **Nenhuma impressão física foi feita nesta etapa.**
+- **Trello**: comentário com hash/resumo e movimentação do cartão para
+  "Sprint - Feito" delegados ao `trello-especialista` — ver resultado
+  registrado pelo orquestrador na resposta final ao usuário.
