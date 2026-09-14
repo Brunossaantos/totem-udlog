@@ -1,0 +1,26 @@
+{
+  "_comentario": "Copie este arquivo para config.json (mesma pasta) e preencha os valores reais. config.json NUNCA vai para o controle de versao (ver .gitignore) porque contem o token de autenticacao do servico.",
+
+  "porta": 4747,
+
+  "_comentario_token": "Token proprio deste servico (diferente de qualquer token do totem/Trello/Talent). Gerar com: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\". O mesmo valor deve ser colocado em IMPRESSAO_LOCAL_TOKEN no .env do backend PHP (fora deste repositorio de servico), que e quem informa esse token ao front-end do totem.",
+  "token": "SUBSTITUA_POR_UM_TOKEN_ALEATORIO_LONGO_GERADO_COM_CRYPTO",
+
+  "_comentario_max_bytes": "Tamanho maximo, em BYTES, do PDF ja decodificado do base64 (nao do base64 em si). Requisicoes com PDF maior que isso sao rejeitadas antes de chegar na impressora.",
+  "maxPdfBytesDecodificado": 2097152,
+
+  "_comentario_origens": "Lista de origens (Origin exato, com protocolo, sem barra final) autorizadas a chamar este servico via navegador (CORS + Private Network Access). PENDENCIA: a URL real de producao/dev do totem ainda nao foi fixada no projeto (ver docs do totem) -- preencher aqui assim que existir. Enquanto a lista estiver vazia, o servico rejeita (fail-closed) toda requisicao de navegador com cabecalho Origin, mas continua respondendo chamadas locais sem Origin (ex.: script de diagnostico via curl/PowerShell no proprio mini PC).",
+  "origensPermitidas": [],
+
+  "_comentario_idempotencia": "Controle de deduplicacao de impressao por identificador (enviado pelo backend PHP a cada job). ttlMs = por quanto tempo um identificador ja impresso e lembrado (impedindo reimpressao do mesmo job); maxEntries = limite de identificadores guardados em memoria (o mais antigo e descartado quando o limite e atingido, mesmo antes do TTL expirar).",
+  "idempotencia": {
+    "ttlMs": 600000,
+    "maxEntries": 500
+  },
+
+  "_comentario_impressoras_permitidas": "Allowlist OBRIGATORIA (fail-closed, sem default) de impressoras FISICAS autorizadas a imprimir -- nome exato como aparece no driver do Windows (mesmo valor devolvido por getPrinters()). Nunca inclua impressoras virtuais/interativas (Microsoft Print to PDF, Microsoft XPS Document Writer, Fax, OneNote, etc.) -- essa lista e usada tanto para filtrar o que o front-end enxerga em GET /impressoras quanto para revalidar (defesa em profundidade) toda chamada a POST /imprimir, mesmo que o front so ofereca as permitidas.",
+  "impressorasPermitidas": ["EPSON TM-T88VII Receipt"],
+
+  "_comentario_timeout": "Tempo maximo, em MILISSEGUNDOS, que um job de impressao pode rodar antes de ser encerrado a forca (taskkill /PID <pid especifico do job> /T /F -- nunca por nome de processo). Campo OPCIONAL: se ausente, o servico usa o default 30000 (30s). Ao atingir o timeout, o resultado do job fica marcado como indeterminado (nao sabemos se a etiqueta saiu ou nao) e uma nova tentativa exige um identificador novo gerado pelo backend PHP.",
+  "timeoutMs": 30000
+}

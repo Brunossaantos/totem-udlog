@@ -131,3 +131,14 @@ input.campo-texto {
 .modal-caixa { background: #fff; border-radius: 14px; padding: 24px; max-width: 320px; text-align: center; display: flex; flex-direction: column; gap: 14px; }
 .modal-caixa .titulo { font-size: 17px; }
 .modal-caixa .subtitulo { font-size: 14px; }
+
+/* ponto de acesso discreto ao diagnostico de impressao de teste (toque longo)
+   — ver public/totem/assets/diagnostico-impressao.js. Invisivel de proposito,
+   nao e uma decisao de UX confirmada, so a sugestao registrada no handoff de
+   planejamento reaproveitada nesta implementacao. */
+.diag-hotspot { position: fixed; bottom: 0; right: 0; width: 56px; height: 56px; }
+
+.diag-overlay { position: fixed; inset: 0; background: rgba(11,42,69,0.6); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 70; }
+.diag-caixa { background: #fff; border-radius: 14px; max-width: 420px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; }
+.diag-cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #e2e8ee; font-size: 13px; color: #5b6b7a; font-weight: 600; }
+.diag-corpo { padding: 24px 20px; display: flex; flex-direction: column; gap: 18px; }

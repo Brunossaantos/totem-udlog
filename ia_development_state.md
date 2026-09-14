@@ -8,7 +8,7 @@
 > Este arquivo é atualizado ao final de cada ciclo de implementação
 > (etapa 01-implementacao e 04-commit-e-push do workflow).
 
-Última atualização: 2026-09-11
+Última atualização: 2026-09-14
 
 ---
 
@@ -122,6 +122,14 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
 | Viabilidade/convênio da API Prodesp (CNH/CRLV) | `app/Rn/ProdespClient.php` | Não confirmado — pode nunca ser viável; QR da CNH digital é payload assinado, QR do CRLV-e costuma ser só link de validação |
 | Origem/sincronização de `tb_cliente` para clientes futuros (além dos 38 já inseridos) | Autocomplete do recebimento + casamento por CNPJ + novo OCR local | Parcialmente resolvida em 2026-09-08: `tb_cliente` agora tem 38 clientes reais (razão social + CNPJ validados, coluna nova `razao_social_normalizada`), usados deliberadamente pelos 3 fluxos (autocomplete, chave de acesso antiga, OCR novo). Não resolvido: processo de manutenção para adicionar clientes novos no futuro (continua manual, via migration de dado) |
 | Paleta de cores oficial da UDLOG | Todo o front-end | Usando navy/branco como placeholder |
+| Origens CORS/PNA permitidas do servico local de impressao (`servico-impressao-local/config`) ainda vazias | `servico-impressao-local/config/config.example.json` | Falta preencher com a URL real de producao/dev do totem quando definida — enquanto vazia, o servico rejeita fail-closed qualquer chamada de navegador com Origin (comportamento seguro, mas bloqueia uso real ate ser preenchido) |
+| Ponto de acesso a tela de diagnostico de impressao (toque longo na tela inicial) | `public/totem/assets/app.js` (`#diagHotspot`) | Implementado em 2026-09-14 como escolha de implementacao, reaproveitando sugestao anterior — NAO e decisao de UX/produto formalmente confirmada pelo usuario |
+| Sucesso do spooler do Windows (`pdf-to-printer`) nao confirma fisicamente que a impressao ocorreu — e fire-and-forget por natureza da API do Windows | `servico-impressao-local/src/routes/imprimir.js`, `public/totem/assets/diagnostico-impressao.js` (tela "concluido") | Achado do `qa-testes` em 2026-09-14 — neste teste especifico houve confirmacao humana direta da impressao fisica, mas o mecanismo em si pode gerar falso positivo de UX se a impressora falhar silenciosamente apos o HTTP 200; decisao de mitigar (ou nao) pendente |
+| **[BLOQUEIO DE AMBIENTE — CORRECOES VALIDADAS TECNICAMENTE, TESTE FISICO PENDENTE]** `/02-testes` de 2026-09-14 havia concluido **PRECISA DE AJUSTE** para a demanda `impressao-etiqueta-teste` — usuario classificou o achado critico de processo (impressao fisica ocorrida durante simulacao, antes de autorizacao formal) como bloqueante: selecionar impressora virtual/interativa pode travar o processo/tela do totem indefinidamente, risco entao sem mitigacao no servico local Node | `servico-impressao-local/` (rotas `impressoras`/`imprimir`, `src/lib/imprimirComTimeout.js`), `public/totem/assets/diagnostico-impressao.js`, `app/Controller/ImpressaoTesteController.php` | Nova rodada de `/01-implementacao` em 2026-09-14 implementou e validou as 10 correcoes obrigatorias: (1) allowlist configuravel de impressoras fisicas (fail-closed); (2) `EPSON TM-T88VII Receipt` liberada inicialmente; (3) impressoras virtuais (Print to PDF, XPS, Fax, OneNote etc.) bloqueadas como consequencia da allowlist; (4) timeout configuravel via `config.timeoutMs`/`IMPRESSAO_TIMEOUT_MS`, implementado em novo modulo `imprimirComTimeout.js` (chamada direta ao SumatraPDF via `execFile`, pois `pdf-to-printer` nao expunha o PID); (5) no timeout, kill exclusivo por PID+arvore de processos (`taskkill /PID <pid> /T /F`), nunca por nome; (6) mutex/lock e arquivo temporario liberados em `finally`; (7) `identificador` marcado como `indeterminado` no timeout, sem retry automatico/duplicidade; (8) resposta HTTP 504 sanitizada (`codigo:'IMPRESSAO_TIMEOUT'`); (9) front-end com timeout proprio via `AbortController` e novo estado de tela `'indeterminado'`, sem retry automatico; (10) mecanismo de timeout testado pelo `qa-testes` com processo MOCK controlado, nunca impressora virtual/fisica real. `security-especialista` encontrou e o `backend-especialista` corrigiu, na mesma rodada, 3 achados de atencao: corrida entre liberacao do mutex e confirmacao do `taskkill` (corrigida aguardando confirmacao antes de liberar), e vazamento de `erro.message` bruto em `routes/impressoras.js` e `server.js` (sanitizados). `qa-testes` aprovou os 8 criterios do teste mock de timeout. **Retestagem em 2026-09-14**: nova rodada de `/02-testes` validou tecnicamente as correcoes (17 itens sem impressao: 16 PASSOU + 1 N/A, zero achados bloqueantes; revisao de seguranca de confirmacao: os 3 achados anteriores confirmados corrigidos, zero achados novos bloqueantes, 1 observacao de baixa severidade sem necessidade de acao). O teste fisico autorizado (ate 2 etiquetas: 1 impressao normal + 1 teste de idempotencia) **NAO PODE SER EXECUTADO** por ausencia de `servico-impressao-local/config/config.json` real nesta maquina (so existe o template `config.example.json`) — 0 requisicoes de impressao enviadas, 0 etiquetas impressas, 0 do orcamento de 2 etiquetas restantes consumido. Esta e uma pendencia de PROVISIONAMENTO DE AMBIENTE (gerar `config.json` real na maquina fisica do totem/mini PC, ou definir maquina/sessao alternativa para o teste), nao uma falha de implementacao — nao retorna para `/01-implementacao`. `/02-testes` permanece EM ABERTO ate o teste fisico ser executado. **ATUALIZACAO 2026-09-14 (2a tentativa)**: apos o `devops-especialista` provisionar `config.json` real + variaveis no `.env` real, o bloqueio mudou de natureza — NAO E MAIS ausencia de `config.json`, e sim um ERRO DE SINTAXE no `.env` real desta maquina: a linha `IMPRESSORAS_PERMITIDAS=EPSON TM-T88VII Receipt` (linha 58) tem valor com espaco SEM aspas, o que faz `vlucas/phpdotenv` (`Dotenv::createImmutable()->load()`) lancar `InvalidFileException: Encountered unexpected whitespace`, quebrando o carregamento do `.env` INTEIRO (reproduzido isoladamente via `php -r`). **IMPACTO SISTEMICO**: como esse `load()` roda antes de qualquer autenticacao/rota, TODO endpoint PHP do projeto que dependa do `.env` fica com erro fatal nesta maquina enquanto essa linha nao for corrigida — nao e falha do servico de impressao em si, nem isolado a esta demanda. `qa-testes` parou imediatamente (0 requisicoes `POST /imprimir`, 0 etiquetas impressas, 0 do orcamento de 2 consumido, seguem 2 de 6 disponiveis) e NAO alterou `.env`/codigo, por instrucao explicita do usuario. `/02-testes` retorna para `/01-implementacao` — correcao pontual necessaria (adicionar aspas: `IMPRESSORAS_PERMITIDAS="EPSON TM-T88VII Receipt"`), mas fica para o orquestrador/usuario decidir quando/quem aplica, dado que o `.env` real nao e versionado nem visivel fora desta maquina. Ver `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md`, seções "Resultado da implementação — correção do bloqueio (2026-09-14)", "Resultado dos testes — retestagem pós-correção (2026-09-14)" e "Teste físico — bloqueado por erro no .env (2026-09-14)". **ATUALIZACAO 2026-09-14 (RESOLVIDO)**: o `.env` real foi corrigido (linha 58 confirmada com aspas, `IMPRESSORAS_PERMITIDAS="EPSON TM-T88VII Receipt"`, verificado por leitura direta do arquivo pelo `qa-testes`). O teste fisico autorizado foi executado nesta rodada (relatado pelo orquestrador, que executou pessoalmente — ver nota de transparencia abaixo e no handoff): 2 impressoes reais aprovadas pelo usuario (impressao normal + teste de idempotencia com o mesmo identificador, que corretamente NAO reimprimiu). Orcamento da demanda totalmente consumido (6 de 6 etiquetas). Rodada de `/02-testes` concluida com veredito **APROVADO**. **ATUALIZACAO 2026-09-14 (`/03-revisao` = APROVADO COM RESSALVA)**: revisao cruzada independente (seguranca/UX/devops) confirmou que a implementacao corresponde ao planejado, sem desvio de escopo, com as evidencias fisicas acima reconfirmadas (nenhuma nova impressao autorizada nesta etapa). Bloqueio principal (allowlist/timeout/mutex/indeterminado) aprovado e validado. Fechamento da demanda INTERROMPIDO por 4 pontos pontuais pendentes, que retornam para uma rodada curta de `/01-implementacao`: (1) `servico-impressao-local/src/middleware/auth.js` linha 19 — migrar comparacao de token de `!==` para `crypto.timingSafeEqual` (constant-time); (2) `.env.example` linha 96 — adicionar aspas (`IMPRESSORAS_PERMITIDAS="EPSON TM-T88VII Receipt"`); (3) `docs/deploy-checklist.md` — nova secao cobrindo instalacao/configuracao/inicializacao automatica/diagnostico/validacao da impressora fisica do servico Node no mini PC de producao; (4) `servico-impressao-local/README.md` — nova instrucao operacional explicita para parada MANUAL do servico (sempre `taskkill /PID <pid> /T /F`, nunca `taskkill /IM node.exe`), com lembrete espelhado em `docs/deploy-checklist.md`. `origensPermitidas` (item 3 do pedido original de revisao do usuario) confirmado como NAO precisando de acao nesta demanda — pendencia de produto (URL real de producao), comportamento fail-closed atual seguro. **ATUALIZACAO 2026-09-14 (rodada curta de `/01-implementacao` = 4 ressalvas CORRIGIDAS)**: as 4 correcoes pontuais foram implementadas e testadas nesta rodada curta: (1) `servico-impressao-local/src/middleware/auth.js` — comparacao de token migrada para constant-time (SHA-256 dos dois lados + `crypto.timingSafeEqual`), testada com mock em 6 cenarios (correto, incorreto mesmo comprimento, mais curto, mais longo, ausente, vazio) — todos PASSOU, resposta HTTP 401 identica em todos os cenarios de falha; (2) `.env.example` linha 96 corrigida com aspas (`IMPRESSORAS_PERMITIDAS="EPSON TM-T88VII Receipt"`); (3) `docs/deploy-checklist.md` ganhou a secao "1.X Servico local de impressao (mini PC Windows)", cobrindo instalacao/configuracao/inicializacao automatica/diagnostico, com `origensPermitidas` documentado explicitamente como permanecendo vazio/fail-closed (pendencia de produto, nao resolvida); (4) `servico-impressao-local/README.md` ganhou a subsecao "4.6. Parar o servico manualmente (teste/depuracao)", instruindo `taskkill /PID <pid especifico> /T /F`, nunca `taskkill /IM node.exe`, espelhado em `docs/deploy-checklist.md`. `security-especialista` confirmou implementacao correta, sem vazamento novo. Nenhuma nova impressao fisica foi feita nem necessaria (orcamento 6/6 ja consumido). Verificado por leitura direta do codigo/documentacao pelo `qa-testes`. **ATUALIZACAO 2026-09-14 (CONFIRMACAO FINAL = APROVADO)**: nova rodada de `/02-testes` de confirmacao concluida com **7/7 itens PASSOU**, incluindo as 3 suites de regressao automatizada (10/10, 16/16, 45/45 — 71/71 asserções somadas, zero regressao). Revisao de seguranca final: zero achados novos, sem regressao em nenhum ponto ja revisado, `origensPermitidas` confirmado intocado, Talent/atendimento/ordem de coleta confirmados intocados em TODA a demanda. Documentacao de implantacao (`docs/deploy-checklist.md` + `servico-impressao-local/README.md`) confirmada suficiente para configuracao do zero num mini PC novo, sem lacunas. As 4 ressalvas do `/03-revisao` anterior estao definitivamente encerradas. Nenhuma impressao fisica feita nesta rodada (orcamento 6/6 permanece esgotado). **VEREDITO FINAL DA DEMANDA: APROVADO** — pronta para `/04-commit-e-push`. Ver secao "Confirmação final — /02-testes e /03-revisao (2026-09-14)" em `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` |
+| **[ACHADO SISTEMICO — ERRO DE SINTAXE NO `.env` REAL QUEBRA CARREGAMENTO INTEIRO — PERSISTE APOS 2ª TENTATIVA — RESOLVIDO EM 2026-09-14]** `.env` real desta maquina (raiz do projeto, linha 58) tinha `IMPRESSORAS_PERMITIDAS=EPSON TM-T88VII Receipt` sem aspas ao redor de um valor com espacos — `vlucas/phpdotenv` rejeitava essa sintaxe e falhava ao carregar o `.env` INTEIRO (`InvalidFileException: Encountered unexpected whitespace`), nao so essa variavel | `.env` (raiz do projeto, nao versionado) — impactava QUALQUER endpoint PHP do projeto que dependa do `.env`, nesta maquina, nao so `impressao-etiqueta-teste` | Achado do `qa-testes` em 2026-09-14 durante retestagem fisica da demanda `impressao-etiqueta-teste`; reproduzido isoladamente via `php -r` chamando so `Dotenv::createImmutable(__DIR__)->load()`. Correcao pontual conhecida (adicionar aspas: `IMPRESSORAS_PERMITIDAS="EPSON TM-T88VII Receipt"`) nao aplicada nas 2 primeiras tentativas por instrucao explicita do usuario para aquelas rodadas. **ATUALIZACAO 2026-09-14 (RESOLVIDO)**: a linha 58 foi corrigida com aspas — confirmado por leitura direta do `.env` real pelo `qa-testes` nesta rodada (`IMPRESSORAS_PERMITIDAS="EPSON TM-T88VII Receipt"`). O `.env.example` (linha 96) tem o mesmo padrao sem aspas — ver pendencia dedicada abaixo |
+| Regra de processo: teste de `POST /imprimir` exige autorizacao previa explicita do usuario sempre que houver driver/impressora real no ambiente de teste | Processo de `/02-testes`/`qa-testes` | Adotada em 2026-09-14 apos impressao fisica real ter ocorrido durante uma simulacao antes da autorizacao formal planejada — usuario confirmou o resultado, mas a regra fica registrada para nao se repetir sem aviso previo |
+| Comparacao de token nao constant-time (`!==`) em `servico-impressao-local/src/middleware/auth.js` (linha 19) | `servico-impressao-local/src/middleware/auth.js` | Achado do `security-especialista` em 2026-09-14, severidade OBSERVACAO (baixa), NAO bloqueante — risco pratico considerado baixo porque o servico so escuta em `127.0.0.1`. Registrado para avaliacao futura, sem correcao aplicada nesta rodada |
+| `.env.example` (linha 96) tem o mesmo padrao sem aspas do `.env` real que causou o achado sistemico acima — `IMPRESSORAS_PERMITIDAS=EPSON TM-T88VII Receipt` sem aspas ao redor de valor com espacos | `.env.example` | Confirmado por leitura direta do arquivo pelo `qa-testes` em 2026-09-14. NAO bloqueante porque `.env.example` nunca e carregado em runtime, mas vale corrigir por precaucao para prevenir o mesmo bug em provisionamentos futuros (adicionar aspas: `IMPRESSORAS_PERMITIDAS="EPSON TM-T88VII Receipt"`) |
 | Nome final do banco de dados no Hostgator | `.env` | cPanel provavelmente prefixa com o usuário da conta |
 | Origem da chave de acesso da NF-e na tela `rec_digitaliza` sem o leitor HID | `public/totem/assets/app.js` (payload de `nota.php` envia `chave: null` fixo) | Não decidido — o leitor Netum antigo (HID) foi removido só dessa tela; não há substituto definido (não é OCR, não é leitura automática) |
 | Validação física do Netum SD-2000 como `videoinput` no Windows/Chromium (label real, se aparece de fato, resolução suportada) | `public/totem/assets/app.js` (`iniciarCameraScanner`) | Não realizado — sem hardware físico disponível neste ambiente de desenvolvimento; roteiro de diagnóstico em `docs/deploy-checklist.md` |
@@ -1025,3 +1033,355 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   Expedicao (CNH/CRLV/Talent) fica para demanda futura, fora do escopo
   desta. Handoff fechado:
   `docs/handoffs/2026-09-11-expedicao-consulta-ordem-coleta-teste.md`.
+
+- 2026-09-11 — `/00-planejamento` da nova demanda
+  `impressao-etiqueta-teste`: objetivo e testar impressao fisica no mini
+  PC Windows com etiqueta de teste ("ETIQUETA DE TESTE - NAO UTILIZAR",
+  sem dado pessoal), enquanto o retorno real de etiqueta do Talent
+  continua indocumentado. Confirmado (explorer): hoje NAO existe
+  nenhuma impressao fisica real no projeto (`processarImpressao()` so
+  exibe a senha em HTML); precedente de `localStorage` para preferencia
+  de dispositivo ja existe (`totem_scanner_deviceId`, scanner Netum);
+  flags do Chromium kiosk e topologia HTTPS real de producao continuam
+  indocumentadas (pendencias preexistentes, nao criadas agora);
+  `setasign/fpdf` ja instalado e reaproveitavel. Plano consolidado
+  (devops/frontend/backend/security/qa): endpoint isolado
+  `public/api/impressao-teste.php` (sem tocar
+  AtendimentoRn/TalentRn/TalentClient/OrdemColetaClient), telas/estados
+  novos e exclusivos no front (`diag_menu`/`diag_impressao_teste`,
+  maquina de estados preparando/imprimindo/concluido/erro), contrato de
+  dados evolutivo pensado pro retorno real futuro do Talent. Confirmado
+  que `window.print()` sozinho (mesmo com `--kiosk-printing`) nao atende
+  o requisito de escolher/persistir impressora especifica — arquitetura
+  provavelmente precisa de um servico local no Windows (4 opcoes de
+  stack mapeadas pelo devops, NENHUMA decidida/instalada, aguardando
+  aprovacao explicita do usuario). Achado critico de seguranca: CORS/PNA
+  sozinhos nao protegem um servico local que aceita comando de
+  impressao — recomendada autenticacao propria (token) alem de CORS, e
+  bind exclusivo em `127.0.0.1`. Pendencias registradas, nao inventadas:
+  modelo de impressora, tamanho/orientacao de etiqueta, flags reais do
+  Chromium kiosk, topologia HTTPS real, texto simples vs. PDF real para
+  o teste, ponto de acesso a tela de diagnostico (proposta, nao
+  decidida), stack do servico local, mecanismo de autenticacao dele.
+  Nenhum codigo implementado, nenhuma impressao real, nenhuma chamada ao
+  Talent, nenhum commit/push. Handoff:
+  `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md`. Proximo passo:
+  usuario decidir as pendencias antes de `/01-implementacao`.
+- 2026-09-14 — `/01-implementacao` da demanda `impressao-etiqueta-teste`
+  concluída: backend PHP (`app/Controller/ImpressaoTesteController.php`
+  + `public/api/impressao-teste.php`, endpoint isolado protegido por
+  `Util\Auth::validarTotem()`, gera etiqueta de teste em PDF real via
+  FPDF com dimensão/orientação/corte configuráveis via `.env`
+  `ETIQUETA_LARGURA_MM`/`ETIQUETA_COMPRIMENTO_MM`/`ETIQUETA_ORIENTACAO`/
+  `ETIQUETA_CORTE_APOS_IMPRESSAO`, sem dado pessoal); serviço local
+  Node.js standalone `servico-impressao-local/` (mini PC Windows, fora
+  do Hostgator, compatível Node v22.17.1, bind exclusivo `127.0.0.1`,
+  token próprio distinto de totem/Trello/Talent, CORS+PNA restritos a
+  origens configuráveis — hoje vazia/fail-closed —, endpoints
+  saúde/impressoras/imprimir, validação de PDF/base64/tamanho máximo/
+  idempotência por identificador, nunca aceita caminho de arquivo,
+  documentação de instalação do Node/Epson Advanced Printer Driver 6/
+  autostart/diagnóstico); front-end (`public/totem/assets/
+  diagnostico-impressao.js` + trechos mínimos em `app.js`/`app.css`/
+  `index.php`, tela de diagnóstico isolada das telas reais, acessada por
+  toque longo — implementação não formalmente confirmada como decisão de
+  UX —, máquina de estados conectando/selecionar_impressora/preparando/
+  imprimindo/concluído/erro, seleção obrigatória de impressora na 1ª
+  vez, persistida em `localStorage['totem_impressora_nome']`
+  reaproveitando o padrão de `totem_scanner_deviceId`, reuso automático,
+  botão "Trocar impressora", limpeza automática se a impressora salva
+  falhar/sumir). Testes estáticos e simulados (`qa-testes`): aprovado
+  com ressalvas — contratos batem nome-a-nome entre os 3 lados, `php -l`/
+  `node --check` limpos, PDF real confirmado com dimensão exata
+  50mm×297mm sem dado sensível, CORS/PNA fail-closed confirmado, tokens
+  nunca cruzados entre sistemas, zero toque em
+  Talent/`finalizar`/`talent_checkin_status`/atendimento real. **Achado
+  crítico de processo**: durante a simulação (antes da autorização
+  explícita de impressão física planejada separadamente), descobriu-se
+  que a impressora `EPSON TM-T88VII Receipt` estava de fato instalada e
+  fisicamente conectada/ligada no ambiente de teste, e uma impressão
+  real ocorreu (`HTTP 200` do spooler). Usuário confirmou visualmente:
+  impressora estava ligada, impressão ocorreu de verdade, saiu
+  corretamente "ETIQUETA DE TESTE — NÃO UTILIZAR", resultado físico
+  aprovado. Registrado que sucesso do spooler isoladamente não comprova
+  impressão física (é fire-and-forget), mas houve confirmação humana
+  direta neste caso. Regra adotada: qualquer novo teste de
+  `POST /imprimir` exige autorização prévia explícita sempre que houver
+  driver/impressora real no ambiente de teste. Nenhum commit/push feito.
+  Handoff: `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md`
+  (seção "Resultado da implementação"). Próximo passo: `/02-testes`.
+- 2026-09-14 — `/02-testes` da demanda `impressao-etiqueta-teste`
+  concluída: usuário confirmou fisicamente as 4 etiquetas impressas na
+  etapa anterior (conteúdo, IDs, dimensão 50×297 mm, orientação e corte
+  corretos, sem dado pessoal). Apesar disso, o usuário classificou o
+  achado crítico de processo já registrado (impressão física ocorrida
+  durante simulação, antes da autorização formal) como BLOQUEANTE, pelo
+  risco de a seleção de impressora virtual/interativa travar o
+  processo/tela do totem indefinidamente — risco hoje sem mitigação no
+  serviço local Node. Veredito final: **PRECISA DE AJUSTE** (não
+  aprovado). Retorna para nova rodada de `/01-implementacao` restrita a:
+  allowlist configurável de impressoras físicas; permitir inicialmente
+  `EPSON TM-T88VII Receipt`; ocultar/bloquear impressoras virtuais
+  (Print to PDF, XPS, Fax, OneNote etc.); timeout configurável no
+  processo de impressão; ao estourar o timeout, encerrar só o processo e
+  subprocessos; liberar fila/lock/temporários; marcar resultado como
+  indeterminado (sem retry automático/duplicidade); erro sanitizado ao
+  frontend; tirar a tela do carregamento com recuperação segura; testar
+  trava com mock, sem abrir impressora virtual real. Nenhum código
+  alterado, nenhuma impressão executada, nenhum commit/push nesta etapa.
+  Handoff: `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` (seção
+  "Resultado dos testes (2026-09-14)"). Próximo passo: nova rodada de
+  `/01-implementacao` restrita a essas correções.
+- 2026-09-14 — Nova rodada de `/01-implementacao` da demanda
+  `impressao-etiqueta-teste`, restrita à correção do bloqueio técnico
+  identificado no `/02-testes` anterior. Registro explícito, a pedido do
+  usuário, de que existem **dois problemas distintos** neste histórico:
+  (a) o **incidente de processo** (impressão física real ocorrida durante
+  uma simulação de teste, antes de autorização formal prévia) já estava
+  resolvido desde a rodada anterior, com a "Regra adotada" de exigir
+  autorização explícita sempre que houver driver/impressora real no
+  ambiente de teste — questão de PROCESSO, sem relação técnica com o
+  bloqueio corrigido agora; (b) o **bloqueio técnico** que motivou o
+  veredito PRECISA DE AJUSTE (ausência de timeout no processo de
+  impressão e possibilidade de selecionar impressora virtual/interativa,
+  podendo travar o processo/tela do totem indefinidamente) — questão de
+  IMPLEMENTAÇÃO, corrigida nesta rodada. As 10 correções obrigatórias
+  foram implementadas e confirmadas item a item: allowlist fail-closed de
+  impressoras físicas (`EPSON TM-T88VII Receipt` liberada inicialmente,
+  bloqueando impressoras virtuais como Print to PDF/XPS/Fax/OneNote);
+  timeout configurável (`config.timeoutMs`/`IMPRESSAO_TIMEOUT_MS`) via
+  novo módulo `servico-impressao-local/src/lib/imprimirComTimeout.js`
+  (chamada direta ao SumatraPDF via `execFile`, já que `pdf-to-printer`
+  não expunha o PID do processo filho necessário para o kill seletivo);
+  no timeout, kill exclusivo por PID + árvore de processos (nunca por
+  nome); mutex/lock e arquivo temporário liberados em `finally`;
+  `identificador` marcado como `indeterminado` no timeout (sem retry
+  automático/duplicidade); resposta HTTP 504 sanitizada
+  (`codigo:'IMPRESSAO_TIMEOUT'`); front-end
+  (`public/totem/assets/diagnostico-impressao.js`) com timeout próprio via
+  `AbortController` e novo estado de tela `'indeterminado'`, sem retry
+  automático; mecanismo de timeout testado pelo `qa-testes` com processo
+  MOCK controlado (`tests/manual/_preload-mock-execFile.js` +
+  `tests/manual/teste_timeout_kill_isolado.js`), nunca impressora
+  virtual/física real. `security-especialista` encontrou 3 achados de
+  atenção (não críticos), todos corrigidos na mesma rodada: condição de
+  corrida entre liberação do mutex e confirmação do `taskkill` (corrigida
+  aguardando confirmação antes de liberar) e vazamento de `erro.message`
+  bruto em `routes/impressoras.js`/`server.js` (sanitizados, log completo
+  só no servidor). `qa-testes` revalidou o teste mock após as correções
+  de segurança — comportamento intacto, 8/8 critérios aprovados.
+  `devops-especialista` atualizou `servico-impressao-local/README.md`
+  (seções 2.5, 2.5.1, 4.4.1) e `docs/deploy-checklist.md`. Nenhuma
+  impressão real feita em nenhuma etapa desta rodada, nenhum código do
+  Talent/atendimento/ordem de coleta tocado, nenhum commit/push.
+  Pendências remanescentes: `origensPermitidas` do serviço Node continua
+  vazia (pré-existente); teste físico formal do timeout com hardware real
+  ainda não realizado. Handoff:
+  `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` (seção
+  "Resultado da implementação — correção do bloqueio (2026-09-14)").
+- 2026-09-14 — Nova rodada de `/02-testes` (retestagem pós-correção) da
+  demanda `impressao-etiqueta-teste`: validação sem impressão dos 17 itens
+  pedidos pelo usuário (allowlist, timeout, kill por PID, liberação de
+  mutex, limpeza de temporários, resposta sanitizada, idempotência,
+  concorrência, front-end sem retry automático, config centralizada,
+  regressão, isolamento do Talent) concluída com 16 PASSOU + 1 N/A, zero
+  achados bloqueantes. Revisão de segurança de confirmação: os 3 achados
+  de atenção da rodada anterior (corrida mutex/`taskkill`, vazamento de
+  `erro.message` em `routes/impressoras.js`/`server.js`) confirmados
+  corrigidos, zero achados novos bloqueantes, 1 observação de baixa
+  severidade (`return` redundante) registrada sem necessidade de ação.
+  Teste físico autorizado (máximo 2 etiquetas, do orçamento de 6 totais,
+  4 já usadas) **NÃO EXECUTADO**: bloqueado por ausência de
+  `servico-impressao-local/config/config.json` real nesta máquina (só o
+  template `config.example.json` existe) — seguindo instrução explícita
+  de parar e alertar em vez de gerar um config de produção, nenhuma
+  requisição de impressão foi enviada, nenhuma etiqueta foi impressa,
+  nenhuma do orçamento de 2 etiquetas restantes foi consumida. Veredito:
+  correções validadas tecnicamente (mock + segurança + regressão), mas
+  `/02-testes` não pode ser considerada concluída/aprovada até o teste
+  físico ser executado — pendência de PROVISIONAMENTO DE AMBIENTE, não de
+  código; não retorna para `/01-implementacao`. Nenhum código alterado,
+  nenhuma impressão real ocorrida, nenhum commit/push. Handoff:
+  `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` (seção
+  "Resultado dos testes — retestagem pós-correção (2026-09-14)").
+  Próximo passo: nova rodada de `/02-testes`.
+- 2026-09-14 — Retestagem física da demanda `impressao-etiqueta-teste`
+  (mesma rodada de `/02-testes`), após a validação sem impressão e a
+  revisão de segurança já terem sido aprovadas: o `devops-especialista`
+  provisionou `servico-impressao-local/config/config.json` real + as
+  variáveis correspondentes no `.env` real (corrigindo o bloqueio de
+  ambiente registrado na entrada anterior). Na 2ª tentativa de teste
+  físico, o `qa-testes` encontrou um NOVO achado, sistêmico: a linha
+  `IMPRESSORAS_PERMITIDAS=EPSON TM-T88VII Receipt` adicionada ao `.env`
+  real (linha 58) tem valor com espaço sem aspas, o que faz
+  `vlucas/phpdotenv` lançar `InvalidFileException: Encountered unexpected
+  whitespace` e quebrar o carregamento do `.env` INTEIRO — reproduzido
+  isoladamente via `php -r` chamando só `Dotenv::createImmutable()->load()`.
+  Como esse `load()` roda antes de qualquer autenticação/rota, TODO
+  endpoint PHP do projeto fica com erro fatal nesta máquina enquanto essa
+  linha não for corrigida — impacto sistêmico, não isolado à demanda de
+  impressão. `qa-testes` parou imediatamente, sem enviar nenhum
+  `POST /imprimir`, sem imprimir nenhuma etiqueta (0 do orçamento de 2
+  consumido, seguem 2 de 6 disponíveis), e sem alterar `.env`/código,
+  conforme instrução explícita do usuário para esta rodada. Veredito:
+  `/02-testes` retorna para `/01-implementacao` — correção pontual
+  conhecida (adicionar aspas ao redor do valor na linha 58), mas não
+  aplicada nesta rodada, aguardando decisão do orquestrador/usuário sobre
+  quando/quem aplica. Nenhum código/`.env` alterado, nenhuma impressão
+  real ocorrida, nenhum commit/push. Handoff:
+  `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` (seção "Teste
+  físico — bloqueado por erro no .env (2026-09-14)"). Próximo passo: nova
+  rodada de `/01-implementacao` restrita à correção de sintaxe do `.env`.
+- 2026-09-14 — Nova rodada de `/02-testes` da demanda
+  `impressao-etiqueta-teste`: retestagem completa (2ª tentativa),
+  solicitada explicitamente pelo usuário, executada de forma independente
+  (não só releitura do histórico). Os 17 itens de validação sem impressão
+  foram reexecutados: 17/17 PASSOU/N-A, zero achados bloqueantes novos
+  (itens 11-idempotência e 12-concorrência validados por revisão de
+  código nesta rodada, sem reexercitar via HTTP com job real, para não
+  arriscar antes da correção do `.env`). Revisão de segurança de
+  confirmação: parecer anterior continua válido, 1 achado NOVO de
+  severidade OBSERVAÇÃO (comparação de token não constant-time em
+  `servico-impressao-local/src/middleware/auth.js` linha 19, risco baixo
+  por bind exclusivo em `127.0.0.1`, não bloqueante). O teste físico
+  autorizado (máx. 2 etiquetas) foi BLOQUEADO NOVAMENTE, pelo MESMO
+  motivo da tentativa anterior — a linha 58 do `.env` real
+  (`IMPRESSORAS_PERMITIDAS=EPSON TM-T88VII Receipt`, sem aspas) continua
+  quebrando o carregamento do `.env` inteiro; ninguém corrigiu desde a
+  rodada anterior. `qa-testes` parou no passo 1, antes de iniciar
+  qualquer fluxo de impressão — 0 requisições `POST /imprimir`, 0 jobs, 0
+  etiquetas físicas, 0 de 2 do orçamento desta rodada consumido (seguem 2
+  de 6 totais intocadas). Veredito: validação técnica 100% aprovada (mock
+  + segurança), mas etapa segue bloqueada para conclusão final até a
+  correção pontual do `.env` real ser aplicada — decisão de quem/quando é
+  do orquestrador/usuário, ainda pendente após 2 tentativas. Nenhum
+  código/`.env` alterado, nenhuma impressão real, nenhum commit/push.
+  Handoff: `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` (seção
+  "Retestagem completa — 2ª tentativa (2026-09-14)").
+- 2026-09-14 — Desfecho completo da demanda `impressao-etiqueta-teste`
+  nesta rodada de `/02-testes`: o `.env` real foi corrigido (linha 58,
+  aspas adicionadas ao redor do valor de `IMPRESSORAS_PERMITIDAS`),
+  destravando o erro sistêmico de carregamento do `.env` inteiro que
+  bloqueava 2 tentativas anteriores — confirmado por leitura direta do
+  arquivo pelo `qa-testes` (`IMPRESSORAS_PERMITIDAS="EPSON TM-T88VII
+  Receipt"`). Com o bloqueio de ambiente resolvido, o teste físico
+  autorizado (máx. 2 etiquetas) foi executado: **diretamente pelo
+  orquestrador**, não pelo `qa-testes` — o `qa-testes` recusou executar a
+  impressão por trava de segurança própria (não aceita consentimento para
+  ação física irreversível repassado por outro agente em vez de vindo
+  diretamente do usuário na mesma conversa); o orquestrador tinha
+  autorização direta e verificável do usuário nesta mesma conversa e
+  executou pessoalmente, com script que carrega tokens internamente
+  (nunca exibidos/persistidos em texto claro). Resultado relatado pelo
+  orquestrador, com confirmação visual do usuário: Teste 1 (impressão
+  normal, identificador `6c59b88da2967bf63d3947de1f2d81f5`) → HTTP 200
+  `impresso`, aprovado (conteúdo/dimensão 50×297mm/orientação
+  portrait/corte corretos, sem dado pessoal); Teste 2 (idempotência,
+  identificador `788180290eefcc8e4f7653f1013b8de3`) → 1ª chamada HTTP 200
+  `impresso`, 2ª chamada com o MESMO identificador HTTP 200
+  `ja_impresso` (sem reimprimir), aprovado — apenas 1 etiqueta física
+  saiu para o par de requisições. Total da rodada: 3 requisições
+  `POST /imprimir` (2 resultaram em impressão real, 1 bloqueada por
+  idempotência), 2 etiquetas físicas impressas, orçamento da demanda
+  inteira 100% consumido (6 de 6 etiquetas autorizadas desde o início: 4
+  da rodada original de `/01-implementacao` + 2 desta rodada). A rodada de
+  `/02-testes` também já contava, de tentativas anteriores desta mesma
+  sessão: validação sem impressão 17/17 PASSOU/N-A (zero achados
+  bloqueantes, reconfirmada de forma independente 2 vezes) e revisão de
+  segurança aprovada (3 achados anteriores corrigidos e confirmados + 1
+  achado novo de severidade OBSERVAÇÃO não bloqueante — comparação de
+  token não constant-time em `auth.js`, risco baixo por bind em
+  `127.0.0.1`). Veredito final desta rodada de `/02-testes`:
+  **APROVADO**. Novo achado registrado, não bloqueante: `.env.example`
+  (linha 96) tem o mesmo padrão sem aspas que causou o bug do `.env`
+  real — não corrigido (fora do escopo de teste), apenas registrado como
+  pendência de precaução (ver seção 5). Nenhum código/`.env`/
+  `.env.example` alterado pelo `qa-testes` nesta rodada, nenhum
+  commit/push. Handoff:
+  `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` (seção "Teste
+  físico executado e aprovado (2026-09-14)"). Próximo passo:
+  `/03-revisao`.
+- 2026-09-14 — Etapa `/03-revisao` da demanda `impressao-etiqueta-teste`
+  concluída: revisão cruzada independente (segurança/UX/devops)
+  confirmou que a implementação corresponde ao planejado, sem desvio de
+  escopo — evidências físicas já registradas (EPSON TM-T88VII Receipt:
+  conteúdo/corte/orientação/dimensão 50×297mm aprovados; idempotência
+  confirmada com hardware real; 6 de 6 etiquetas do orçamento
+  consumidas) reconfirmadas, nenhuma nova impressão autorizada/executada
+  nesta etapa. Segurança: 10/10 itens do checklist OK, zero achados
+  bloqueantes, mais 2 achados pontuais a corrigir (comparação de token
+  não constant-time em `auth.js`; `.env.example` linha 96 sem aspas). UX:
+  zero achados na tela de diagnóstico (`diagnostico-impressao.js`,
+  estado `'indeterminado'`). Devops: item `origensPermitidas` confirmado
+  como pendência de produto sem ação nesta demanda; `docs/deploy-checklist.md`
+  precisa de nova seção sobre o serviço Node local; falta instrução
+  operacional explícita de parada manual do serviço sempre por PID
+  específico (nunca por nome). Veredito: **APROVADO COM RESSALVA** — o
+  bloqueio principal (allowlist/timeout/mutex/indeterminado) está
+  aprovado e validado, mas o fechamento da demanda é interrompido para
+  uma rodada curta de `/01-implementacao`, restrita a 4 pontos pontuais:
+  (1) `auth.js` — `crypto.timingSafeEqual`; (2) `.env.example` linha 96 —
+  aspas; (3) `docs/deploy-checklist.md` — seção do serviço Node local;
+  (4) `servico-impressao-local/README.md` — instrução de parada manual
+  por PID, espelhada em `docs/deploy-checklist.md`. Nenhum código/`.env`/
+  README alterado nesta etapa, nenhuma impressão executada, nenhum
+  commit/push. Handoff: `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md`
+  (seção "Resultado da revisão (2026-09-14)"). Próximo passo: nova
+  rodada curta de `/01-implementacao` restrita aos 4 pontos acima,
+  depois nova `/02-testes`/`/03-revisao` antes de `/04-commit-e-push`.
+- 2026-09-14 — Rodada curta de `/01-implementacao` da demanda
+  `impressao-etiqueta-teste`, restrita exclusivamente às 4 ressalvas do
+  `/03-revisao` anterior: (1) `servico-impressao-local/src/middleware/auth.js`
+  — comparação de token migrada para constant-time (hash SHA-256 dos dois
+  lados + `crypto.timingSafeEqual`), testada com mock em 6 cenários
+  (correto/incorreto mesmo comprimento/mais curto/mais longo/ausente/
+  vazio) — todos PASSOU, resposta HTTP 401 idêntica em todos os cenários
+  de falha; (2) `.env.example` linha 96 corrigida com aspas
+  (`IMPRESSORAS_PERMITIDAS="EPSON TM-T88VII Receipt"`); (3)
+  `docs/deploy-checklist.md` ganhou a seção "1.X Serviço local de
+  impressão (mini PC Windows)" (instalação/configuração/inicialização
+  automática/diagnóstico, com `origensPermitidas` documentado como
+  permanecendo vazio/fail-closed, pendência de produto não resolvida
+  aqui); (4) `servico-impressao-local/README.md` ganhou a subseção "4.6.
+  Parar o serviço manualmente (teste/depuração)" (sempre `taskkill /PID
+  <pid> /T /F`, nunca `taskkill /IM node.exe`, espelhado em
+  `docs/deploy-checklist.md`). `security-especialista` confirmou
+  implementação correta, sem vazamento novo. `origensPermitidas` não foi
+  alterado (permanece pendência de produto). Nenhum código de Talent/
+  atendimento/ordem de coleta tocado. Nenhuma nova impressão física feita
+  nem necessária (orçamento 6/6 já consumido em rodada anterior).
+  `qa-testes` verificou as 4 correções por leitura direta do código/
+  documentação (não só releitura de relato) e confirmou tudo presente
+  como descrito. Handoff:
+  `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` (seção "Rodada
+  curta de /01-implementacao — ressalvas do /03-revisao (2026-09-14)").
+  Próximo passo: nova rodada de `/02-testes`/`/03-revisao` de confirmação
+  final (curta, restrita a estas correções) antes de `/04-commit-e-push`.
+- 2026-09-14 — Confirmação final e fechamento completo da demanda
+  `impressao-etiqueta-teste`: desde a implementação original (endpoint
+  isolado `ImpressaoTesteController`, tela de diagnóstico exclusiva, e o
+  serviço local Node.js `servico-impressao-local/` com allowlist de
+  impressoras físicas fail-closed, timeout configurável com kill exclusivo
+  por PID, liberação de mutex/temporários, estado `indeterminado` sem
+  retry automático, resposta sanitizada), passando pela correção do
+  bloqueio técnico do `/03-revisao` original (4 correções: allowlist,
+  timeout, kill por PID, indeterminado — 10 itens obrigatórios atendidos),
+  pelo teste físico executado e aprovado (6/6 etiquetas do orçamento
+  consumidas, conteúdo/corte/orientação/dimensão 50×297mm aprovados,
+  idempotência confirmada com hardware real), pela rodada curta de
+  `/01-implementacao` que corrigiu as 4 ressalvas pontuais do
+  `/03-revisao` anterior (comparação de token constant-time, aspas em
+  `.env.example`, seção de deploy do serviço local, instrução de parada
+  manual por PID), até esta rodada final de confirmação: `/02-testes` de
+  confirmação com 7/7 itens PASSOU (incluindo 3 suítes de regressão
+  automatizada, 71/71 asserções somadas, zero regressão) e `/03-revisao`
+  de segurança final com zero achados novos, sem regressão em nenhum
+  ponto já revisado, `origensPermitidas` confirmado intocado, Talent/
+  atendimento/ordem de coleta confirmados intocados em TODA a demanda.
+  Documentação de implantação (`docs/deploy-checklist.md` +
+  `servico-impressao-local/README.md`) confirmada suficiente para
+  configuração do zero num mini PC novo, sem lacunas. **VEREDITO FINAL DA
+  DEMANDA: APROVADO.** Handoff completo:
+  `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` (seção
+  "Confirmação final — /02-testes e /03-revisao (2026-09-14)"). Próximo
+  passo: `/04-commit-e-push`.

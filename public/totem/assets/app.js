@@ -228,7 +228,8 @@ function telaHome() {
         <div class="grupo-botoes">
             <button class="tile tile-principal" onclick="selecionarTipo('expedicao')">Expedição</button>
             <button class="tile tile-secundaria" onclick="selecionarTipo('recebimento')">Recebimento</button>
-        </div>`;
+        </div>
+        <div id="diagHotspot" class="diag-hotspot" aria-hidden="true"></div>`;
 }
 function selecionarTipo(tipo) {
     state.tipo = tipo;

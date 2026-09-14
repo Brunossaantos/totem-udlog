@@ -26,6 +26,72 @@ como pendência, nunca suposto.
       `.env.example`) — confirmar se o `php.ini` do plano de hospedagem
       (`upload_max_filesize`/`post_max_size`/`memory_limit`) comporta esse
       tamanho de payload em base64 antes de considerar o limite efetivo.
+- [ ] `IMPRESSORAS_PERMITIDAS` e `IMPRESSAO_TIMEOUT_MS` em `.env`
+      conferem valor-a-valor com `impressorasPermitidas`/`timeoutMs` em
+      `config/config.json` do serviço local no mini PC (não há
+      sincronização automática entre os dois ambientes — ver
+      `servico-impressao-local/README.md`, seção 2.5.1).
+
+### 1.X Serviço local de impressão (mini PC Windows)
+
+Checklist operacional resumido para o `servico-impressao-local/`
+(Node.js standalone, fora do Hostgator). Para o detalhamento completo de
+cada passo, ver `servico-impressao-local/README.md` — este item não
+duplica o manual, só serve de lista de verificação.
+
+- [ ] **Node.js instalado.** Versão mínima `>=22.17.1` (ver `engines` em
+      `servico-impressao-local/package.json` e seção 2.1 do README),
+      baixado do instalador oficial `.msi` de 64 bits em
+      https://nodejs.org/dist/v22.17.1/. Confirmar com `node --version` e
+      `npm --version`.
+- [ ] **Driver da impressora instalado.** Epson Advanced Printer Driver 6
+      para a `EPSON TM-T88VII` instalado e testado com página de teste do
+      próprio Windows antes de qualquer teste via este serviço (README
+      seção 2.2).
+- [ ] **Código do serviço copiado e dependências instaladas.** Pasta
+      `servico-impressao-local/` copiada para o mini PC (ex.
+      `C:\udlog\servico-impressao-local`) e `npm install` executado
+      dentro dela (README seção 2.3).
+- [ ] **Token do serviço gerado com segurança.** Gerado com
+      `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+      — nunca reaproveitar token do totem, do Trello ou do Talent (README
+      seção 2.4).
+- [ ] **`config/config.json` criado a partir de `config/config.example.json`.**
+      Nunca commitado (já coberto por `config/config.json` em
+      `servico-impressao-local/.gitignore`). Preencher, no mínimo:
+  - [ ] `token`: o valor gerado no passo acima.
+  - [ ] `impressorasPermitidas`: allowlist por nome exato de driver — hoje
+        só `["EPSON TM-T88VII Receipt"]` está autorizada. Nunca incluir
+        impressora virtual/interativa (`Microsoft Print to PDF`, `Fax`,
+        etc.) — pode travar a tela do totem esperando interação humana.
+  - [ ] `timeoutMs`: default `30000` (30s) se omitido.
+  - [ ] `origensPermitidas`: **permanece vazio/fail-closed por enquanto**
+        — a URL real de produção do totem ainda não foi definida; não
+        decidir esse valor aqui, só manter vazio até a pendência ser
+        resolvida (README seção 2.5 e seção 6).
+  - [ ] Espelhar manualmente `IMPRESSORAS_PERMITIDAS`,
+        `IMPRESSAO_TIMEOUT_MS` e `IMPRESSAO_FRONTEND_TIMEOUT_MS` no `.env`
+        do backend PHP — não há sincronização automática entre os dois
+        ambientes (README seção 2.5.1, e item acima nesta mesma seção 1).
+- [ ] **Inicialização automática configurada.** Rodar
+      `npm run instalar-servico-windows` (PowerShell como Administrador,
+      README seção 3) e confirmar em `services.msc` que
+      `UDLOG Servico Impressao Local` aparece "Em execução" com
+      inicialização "Automático".
+- [ ] **Diagnóstico e validação no mini PC de produção** (README seção 4):
+  - [ ] `GET /saude` responde `200` com `status: ok`.
+  - [ ] `GET /impressoras` (com `Authorization` correto) responde `200` e
+        lista **somente** a `EPSON TM-T88VII Receipt` — nenhuma
+        impressora fora da allowlist.
+  - [ ] Impressora física conectada, com driver correto e testada com
+        página de teste do Windows, antes de qualquer uso real via
+        totem.
+- [ ] **Parada manual do serviço (teste/depuração) sempre por PID
+      específico, nunca por nome de processo.** `taskkill /IM node.exe`
+      mataria qualquer processo Node.js da máquina, não só este serviço.
+      Usar `Get-Process node` para achar o PID certo e encerrar com
+      `taskkill /PID <pid especifico> /T /F` — ver README seção 4.6 para
+      o passo a passo completo.
 
 ## 2. Chromium kiosk e scanner Netum SD-2000 (mini PC)
 

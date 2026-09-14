@@ -1,0 +1,20 @@
+{
+  "name": "servico-impressao-local-udlog",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Servico local (Node.js) que roda no mini PC Windows do totem UDLOG, fora do Hostgator, recebendo PDFs ja prontos (gerados via FPDF pelo backend PHP) em base64 e imprimindo na impressora fisica indicada. Nao gera conteudo de etiqueta, nao decide layout.",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22.17.1"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "instalar-servico-windows": "node scripts/instalar-servico-windows.js",
+    "desinstalar-servico-windows": "node scripts/desinstalar-servico-windows.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pdf-to-printer": "^5.6.0",
+    "node-windows": "^1.0.0-beta.8"
+  }
+}

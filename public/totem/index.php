@@ -29,5 +29,6 @@ if (!$totem) {
 <div id="app"></div>
 <script src="assets/tesseract/tesseract.min.js"></script>
 <script src="assets/app.js"></script>
+<script src="assets/diagnostico-impressao.js"></script>
 </body>
 </html>
