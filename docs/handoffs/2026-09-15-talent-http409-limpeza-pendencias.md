@@ -900,4 +900,15 @@ imprimiu, ou alterou registro real; `git fetch` sem divergencia com
 
 ## Push
 
-Em andamento.
+Executado com sucesso, sem divergencia (`git fetch` confirmou
+`origin/main` no mesmo commit base esperado antes do push). `git push
+origin main`: `a5bb08a..fc970a5  main -> main`.
+
+**Confirmacao explicita**: `git rev-parse HEAD` e `git rev-parse
+origin/main` (apos novo `git fetch` pos-push) retornaram o MESMO hash:
+`fc970a5e70a306e1a93b718d9e267ed82e66d67f`. `HEAD` local ==
+`origin/main` confirmado.
+
+Commits enviados:
+1. `5332a86b62a80934aba9f7e40c982967c86630ce` — `test(talent): valida conflito HTTP 409 e encerra limpeza`
+2. `fc970a5e70a306e1a93b718d9e267ed82e66d67f` — `docs(talent-http409): fecha handoff com hash do commit`
