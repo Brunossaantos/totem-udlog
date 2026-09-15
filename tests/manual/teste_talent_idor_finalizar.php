@@ -147,20 +147,21 @@ afirmar('Totem sem empresa: mensagem e DIFERENTE das mensagens de posse/etapa/st
 echo "     (mensagem observada para totem sem empresa: \"{$erro5}\")\n";
 
 // ============================================================
-// Caso 6: dono legitimo, etapa/status/documentos corretos, empresa
-// configurada — ATUALIZADO (extensao 2026-09-10, TALENT_DOCTOS_PENDENTE):
-// mesmo com TODOS os gates anteriores passando, a trava incondicional
-// nova em AtendimentoController::finalizar() bloqueia SEMPRE antes de
-// montar payload/chamar TalentRn::processarCheckin(). Nao chega mais a
-// tentativa de envio (202) — ver
-// docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md, secao
-// "Terceira tentativa — CAUSA RAIZ ENCONTRADA".
+// Caso 6: dono legitimo, etapa/status/documentos/doctos[] corretos, empresa
+// configurada — ATUALIZADO (demanda talent-doctos-finalizacao-checkin,
+// 2026-09-14): a trava incondicional antiga (TALENT_DOCTOS_PENDENTE) foi
+// REMOVIDA e substituida pelo mecanismo de ativacao configuravel
+// fail-closed (TALENT_CHECKIN_ATIVO). Mesmo com TODOS os gates reais (doctos/
+// posse/tipo/status/etapa/documentos) passando, o _caso_finalizar.php roda
+// sem TALENT_CHECKIN_ATIVO=true no ambiente do subprocesso — entao o
+// bloqueio esperado agora e TALENT_CHECKIN_DESATIVADO (503), nunca chega a
+// tentativa de envio (202) nem a qualquer chamada de rede real.
 // ============================================================
-$fix6 = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotemVitima, 'expedicao', 'FIN6666');
+$fix6 = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotemVitima, 'expedicao', 'FIN6666', '11222333000181', 'SP', true, '12345678', 'CAMINHAO', 'OC-FIN6666');
 $pastas[] = $fix6['pasta_completa'];
 $idsAtendimento[] = $fix6['id_atendimento'];
 $saida6 = rodarFinalizar($idTotemVitima, $fix6['id_atendimento']);
-afirmar('Dono legitimo (estado correto): bloqueado por TALENT_DOCTOS_PENDENTE, nunca chega a "sera processada em instantes"', str_contains($saida6, 'TALENT_DOCTOS_PENDENTE') && !str_contains($saida6, 'sera processada em instantes'));
+afirmar('Dono legitimo (estado correto, doctos OK): bloqueado por TALENT_CHECKIN_DESATIVADO, nunca chega a "sera processada em instantes"', str_contains($saida6, 'TALENT_CHECKIN_DESATIVADO') && !str_contains($saida6, 'sera processada em instantes'));
 $estadoFinal6 = $atendimentoDao->buscarPorId($fix6['id_atendimento'])['talent_checkin_status'];
 afirmar('Dono legitimo: talent_checkin_status permanece NAO_ENVIADO (nenhuma tentativa de envio, nenhum CAS de idempotencia acionado)', $estadoFinal6 === 'NAO_ENVIADO');
 

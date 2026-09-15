@@ -16,6 +16,14 @@ class NotaFiscalRn
     // notas por atendimento, com folga.
     private const MAX_CNPJS_CANDIDATOS = 10;
 
+    // Comprimento maximo de digitos aceito para numero_nota apos a remocao
+    // de zeros a esquerda (ver atualizarNumeroNota) — teto real do layout
+    // de numero de NF-e (posicoes 26-34 da chave de acesso), bem abaixo do
+    // limite da coluna tb_atendimento_nota.numero_nota VARCHAR(20). Rejeita
+    // explicitamente ANTES de qualquer persistencia (nunca trunca), o que
+    // cobre tambem uma chave de acesso inteira (44 digitos) por engano.
+    private const MAX_DIGITOS_NUMERO_NOTA = 9;
+
     public function __construct(
         private AtendimentoNotaDao $notaDao,
         private ClienteDao $clienteDao
@@ -64,6 +72,73 @@ class NotaFiscalRn
     public function buscarNotaDaOrdem(int $idAtendimento, int $ordem): ?array
     {
         return $this->notaDao->buscarPorAtendimentoEOrdem($idAtendimento, $ordem);
+    }
+
+    /**
+     * Normaliza (SEMPRE no backend, nunca confia no OCR/front) e persiste o
+     * numero da NF-e para a nota de uma ordem especifica dentro de um
+     * atendimento — demanda talent-doctos-finalizacao-checkin (2026-09-14).
+     * Normalizacao: aceita so digitos (rejeita qualquer outro caractere —
+     * numero de NF-e e numerico), remove zeros a esquerda, rejeita vazio
+     * (inclusive "0000..." que normalizaria para string vazia).
+     *
+     * Achado bloqueante da fase 1 de testes (2026-09-14): a validacao
+     * anterior nao limitava o tamanho do valor apos a normalizacao, o que
+     * permitia que um numero acima do tamanho da coluna
+     * tb_atendimento_nota.numero_nota (VARCHAR(20)) — por exemplo, uma
+     * chave de acesso de 44 digitos capturada por engano pelo OCR — fosse
+     * truncado SILENCIOSAMENTE pelo MySQL/MariaDB antes de gravar. Agora
+     * o comprimento maximo plausivel de um numero de NF-e (9 digitos, teto
+     * do proprio layout da chave de acesso: posicoes 26-34) e validado
+     * explicitamente ANTES de qualquer tentativa de persistencia — nunca
+     * trunca, sempre rejeita.
+     *
+     * @throws \InvalidArgumentException 'numero_invalido' se o valor bruto
+     *         nao for numerico, normalizar para vazio, ou tiver mais de 9
+     *         digitos apos a normalizacao (inclusive uma chave de acesso de
+     *         44 digitos, que cai neste mesmo caso).
+     * @throws \RuntimeException 'numero_nota_duplicado' se a UNIQUE KEY
+     *         uk_atendimento_numero_nota for violada (PDOException de
+     *         integridade), 'nota_nao_encontrada' se a ordem nao existir
+     *         neste atendimento.
+     */
+    public function atualizarNumeroNota(int $idAtendimento, int $ordem, string $numeroBruto, string $origem): array
+    {
+        $nota = $this->notaDao->buscarPorAtendimentoEOrdem($idAtendimento, $ordem);
+        if ($nota === null) {
+            throw new \RuntimeException('nota_nao_encontrada');
+        }
+
+        if (!ctype_digit($numeroBruto)) {
+            throw new \InvalidArgumentException('numero_invalido');
+        }
+
+        $normalizado = ltrim($numeroBruto, '0');
+        if ($normalizado === '') {
+            throw new \InvalidArgumentException('numero_invalido');
+        }
+
+        if (strlen($normalizado) > self::MAX_DIGITOS_NUMERO_NOTA) {
+            // Cobre tanto valores "so um pouco acima do limite" quanto o
+            // caso especifico de chave de acesso (44 digitos) — mesma
+            // categoria de erro, generica para o front-end, sem vazar
+            // detalhe de schema/coluna do banco.
+            throw new \InvalidArgumentException('numero_invalido');
+        }
+
+        try {
+            $this->notaDao->atualizarNumero((int) $nota['id_nota'], $normalizado, $origem);
+        } catch (\PDOException $e) {
+            // 23000 = violacao de integridade (UNIQUE KEY
+            // uk_atendimento_numero_nota) — traduzido para categoria fechada,
+            // NUNCA deixa vazar a mensagem bruta do driver.
+            if ($e->getCode() === '23000') {
+                throw new \RuntimeException('numero_nota_duplicado');
+            }
+            throw $e;
+        }
+
+        return ['numero_nota' => $normalizado];
     }
 
     /**

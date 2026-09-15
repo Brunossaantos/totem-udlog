@@ -8,7 +8,7 @@
 > Este arquivo é atualizado ao final de cada ciclo de implementação
 > (etapa 01-implementacao e 04-commit-e-push do workflow).
 
-Última atualização: 2026-09-14
+Última atualização: 2026-09-15
 
 ---
 
@@ -85,6 +85,19 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   `UploadHelper` com `getimagesizefromstring()`. `selecionarOrdem` e
   `finalizar` (envio ao Talent) continuam com o mesmo tipo de IDOR, NÃO
   corrigido nesta rodada (fora do escopo desta correção) — ver pendências.
+- `doctos[]` real do Talent (Recebimento por número de nota, Expedição por
+  ordem de coleta), atualização da ordem de coleta para `INATIVA` após
+  check-in aceito (com tabela de auditoria `tb_ordem_coleta_pendente_baixa`
+  para falha de reconciliação), e endpoint isolado de impressão real da
+  etiqueta (`ImpressaoAtendimentoController`) — implementados e testados em
+  2026-09-14 (demanda `talent-doctos-finalizacao-checkin`). **Validado de
+  ponta a ponta com um POST real ao Talent (produção) em 2026-09-14**:
+  HTTP 200, `sucesso=true`, `nrRegAcesso` retornado, ordem de coleta
+  marcada `INATIVA` com sucesso, impressão física real confirmada
+  visualmente pelo usuário — ver seção 5. O valor PADRÃO do `.env` de
+  produção/deploy continua `TALENT_CHECKIN_ATIVO` ausente/`false`
+  (fail-closed); a ativação é sempre uma decisão explícita e controlada
+  para um teste pontual, nunca o estado permanente do totem em operação.
 
 ## 4. Decisões já tomadas (não reabrir sem pedido explícito)
 
@@ -187,7 +200,16 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
 | ~~Biblioteca PHP de geração de PDF a confirmar~~ | `composer.json` | RESOLVIDA em 2026-09-09 — `setasign/fpdf` instalada e testada (19/19 asserções de PDF/páginas), compatível com PHP 8.0.3 e Hostgator (sem binário externo) |
 | ~~**[BLOQUEANTE - CONFIRMADO REAL]** `veiculo.rntc` obrigatorio no Talent~~ | `app/Rn/DocumentoRn.php`, `sql/migrations/010_talent_rntc_tipo_veiculo.sql` | IMPLEMENTADA em 2026-09-10 — extraido de `data.rntrc` do CRLV via VIO Decode (grafia real do campo confirmada no manual VIO), com validacao/cache/rebaixamento/preenchimento manual. Testado (23/23 asserções dedicadas) |
 | ~~**[BLOQUEANTE - CONFIRMADO REAL]** `veiculo.tipo` obrigatorio no Talent~~ | `app/Rn/DocumentoRn.php`, `sql/migrations/010_talent_rntc_tipo_veiculo.sql` | IMPLEMENTADA em 2026-09-10 — extraido de `data.tipo` do CRLV via VIO Decode, campo de texto livre (sem enum documentado pelo Talent). Testado (23/23 asserções dedicadas) |
-| **[BLOQUEANTE — CONTINUA ABERTA]** `doctos[]` obrigatorio no Talent, semantica de `nrDocto`/`doctos[].tipo` nao confirmada — nao presumir | `app/Controller/AtendimentoController.php` (trava `TALENT_DOCTOS_PENDENTE`) | Mitigado em 2026-09-10 com bloqueio INCONDICIONAL de qualquer envio real ao Talent (`finalizar()` sempre retorna HTTP 501 `TALENT_DOCTOS_PENDENTE`, antes do CAS de idempotência) — confirmado por security-especialista (0 achados) e qa-testes (bloqueio garantido, `talent_checkin_status` nunca muda). Resolucao definitiva (implementar `doctos[]` de fato) exige nova decisao de produto/planejamento, ainda pendente |
+| ~~**[RESOLVIDA — SUCESSO REAL CONFIRMADO]**~~ `doctos[]` obrigatorio no Talent, semantica de `nrDocto`/`doctos[].tipo` nao confirmada — nao presumir | `app/Controller/AtendimentoController.php`, `app/Rn/TalentRn.php`/`TalentClient.php` | Mitigado em 2026-09-10 com bloqueio INCONDICIONAL de qualquer envio real ao Talent (`finalizar()` sempre retorna HTTP 501 `TALENT_DOCTOS_PENDENTE`, antes do CAS de idempotência) — confirmado por security-especialista (0 achados) e qa-testes (bloqueio garantido, `talent_checkin_status` nunca muda). **ADENDO 2026-09-14**: plano completo de resolução produzido em `/00-planejamento` (`docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`), com fatos confirmados via Swagger oficial (`TPortariaCheckinRet={nrRegAcesso,msg}`, `enumTipoEmbDesemb` capitalizado). **DESFECHO (`/01-implementacao` 2026-09-14, IMPLEMENTADO E TESTADO)**: a trava incondicional `TALENT_DOCTOS_PENDENTE` foi REMOVIDA; `doctos[]` real implementado (Recebimento: `NOTA_FISCAL` por nota via novo campo `tb_atendimento_nota.numero_nota`; Expedição: `ORDEM_COLETA` via `ordem_coleta` já existente); `tipoEmbDesemb` corrigido para capitalizado; parsing de resposta corrigido para `nrRegAcesso`/`msg`; ordem de coleta passa a ser marcada `INATIVA` após sucesso (`OrdemColetaDao::marcarInativaPorNumero()`, com `tb_ordem_coleta_pendente_baixa` para falha de reconciliação); endpoint de impressão real criado (`ImpressaoAtendimentoController`). O bloqueio TÉCNICO de `doctos[]` está portanto RESOLVIDO — mais de 190 asserções passando, 0 achados de segurança bloqueantes. **O que CONTINUA intencionalmente desativado**: o envio REAL ao Talent permanece bloqueado por decisão de segurança (não pendência técnica) via nova variável `TALENT_CHECKIN_ATIVO` (fail-closed, ausente/`false` por padrão) — enquanto não for `true` explicitamente, `finalizar()` roda todos os gates reais mas responde HTTP 503 `TALENT_CHECKIN_DESATIVADO` em vez de chamar o Talent. Esse portão só deve ser ligado manualmente antes do protocolo de teste controlado em Produção (ver `docs/manual_talent.md`, seção "HTTP 409 — protocolo de teste controlado planejado"), que ainda não foi executado/autorizado. Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção "Resultado da implementação (2026-09-14)" |
+| Reaproveitamento do endpoint `impressao-teste.php?acao=configuracao-servico-local` pelo novo fluxo REAL de impressão (`ImpressaoAtendimentoController`) | `app/Controller/ImpressaoAtendimentoController.php`, `app/Controller/ImpressaoTesteController.php` | Pendência de arquitetura registrada em 2026-09-14 (demanda `talent-doctos-finalizacao-checkin`) — não bloqueante, mistura configuração de um endpoint de teste com o fluxo de produção; decisão futura sobre separar |
+| Nova tela de seleção de impressora no fluxo REAL (`exp_impressao`/`rec_impressao`) | `public/totem/assets/app.js` | Implementada em 2026-09-14 (antes só existia na tela de diagnóstico) — funcional, mas o texto/estilo exato não foi objeto de revisão formal de UX/produto |
+| Protocolo de teste controlado em Produção para o Talent (envio real com `TALENT_CHECKIN_ATIVO=true`, incluindo teste de HTTP 409 e da divergência `anexos`/`anexosGZip`) | `.env` (produção), `app/Rn/TalentRn.php`/`TalentClient.php` | Ainda NÃO executado nem autorizado — protocolo já definido em `docs/manual_talent.md` (seção "REFINAMENTO 2 (2026-09-09)", subseção "HTTP 409") e reafirmado no handoff de 2026-09-14. Depende de autorização explícita do usuário e do envio manual de `TALENT_CHECKIN_ATIVO=true` no `.env` real |
+| `docs/manual_talent.md` desatualizado sobre `tipoEmbDesemb`/formato de retorno de sucesso/semântica de `nrDocto` | `docs/manual_talent.md` | RESOLVIDA em 2026-09-14 — nova seção final "Implementação de doctos[] e finalização (2026-09-14)" documenta os fatos confirmados via Swagger oficial e marca a decisão antiga de `tipoEmbDesemb` minúsculo (seção "REFINAMENTO 2 (2026-09-09)") como superada/incorreta |
+| ~~**[BLOQUEANTE — `/02-testes` PRECISA DE AJUSTE]** `App\Rn\NotaFiscalRn::atualizarNumeroNota()` aceitava e persistia SILENCIOSAMENTE uma chave de acesso de 44 dígitos como `numero_nota`~~ | `app/Rn/NotaFiscalRn.php`, `public/api/nota.php` (ação `definir-numero`) | CORRIGIDA em 2026-09-14 (rodada curta de `/01-implementacao`) — validação de comprimento/formato de `numero_nota` adicionada, rejeitando explicitamente valores acima do plausível para número de nota (32/32 testes novos passando, segurança reconfirmada sem regressão). Fase 1 de `/02-testes` reexecutada integralmente: **27/27 itens PASSOU, veredito APROVADO**. Fase 2 (preparação do teste controlado em Produção) executada: atendimento sintético de Expedição (`id_atendimento=1573`, ambiente de DEV LOCAL) validado contra todos os gates, payload real montado via `TalentRn::montarPayload()` (nunca enviado) e apresentado mascarado (CPF/nome do motorista nunca exibidos), `doctos[]` com 1 `ORDEM_COLETA` sintética (`OC-TESTE-001`) + 2 anexos (só nome/quantidade), `tipoEmbDesemb="Embarque"` confirmado, `talent_checkin_status=NAO_ENVIADO`, `TALENT_CHECKIN_ATIVO` confirmado ausente (fail-closed). **ATUALIZAÇÃO 2026-09-14 (execução do único POST real controlado autorizado)**: o orquestrador, com autorização direta do usuário, executou o POST real contra `id_atendimento=1573` (Expedição, `OC-TESTE-001`, ambiente de DEV LOCAL), ativando `TALENT_CHECKIN_ATIVO=true` temporariamente. Resultado: HTTP 202, `sucesso=false`, mensagem sanitizada ao cliente, `talent_checkin_status=ERRO_REPROCESSAVEL`. Causa raiz confirmada por leitura do código (`TalentClient.php` linhas 79-112): erro caiu na categoria `erro_conexao`/reprocessável (`CURLE_COULDNT_RESOLVE_HOST`/`CURLE_COULDNT_CONNECT`) — a requisição nunca saiu desta máquina de dev local, nenhum byte chegou ao Talent; nenhum registro foi criado no Talent. Confirmado por consulta direta ao banco: ordem `OC-TESTE-001` permanece `ATIVA`, `tb_ordem_coleta_pendente_baixa` sem nenhuma linha para `id_atendimento=1573`, `TALENT_CHECKIN_ATIVO` revertido para ausente/`false` no `.env` real logo em seguida. Nenhuma impressão física realizada. **Conclusão inicial (superada, ver ATUALIZAÇÃO abaixo)**: o mecanismo de ativação/gates/classificação de erro funcionou exatamente como projetado; a suspeita inicial era de CONECTIVIDADE DE REDE do ambiente de dev local até `api.talentcs.com.br`, não de contrato/payload (o payload sequer teria chegado a ser avaliado pelo Talent). **ATUALIZAÇÃO 2026-09-14 (CAUSA RAIZ REAL CONFIRMADA — 3ª tentativa real controlada e autorizada)**: investigação a fundo (autorizada pelo usuário) descartou a hipótese de rede/DNS/conectividade com evidência concreta (DNS/TLS/conexão HEAD ao path exato do Talent funcionaram perfeitamente em todos os testes) e, via instrumentação de diagnóstico TEMPORÁRIA (autorizada, removida com sucesso logo depois — `git diff` confirmou reversão exata, `php -l` limpo), confirmou que a causa real das 3 tentativas foi **HTTP 401 Unauthorized retornado pelo Talent** (categoria interna `erro_autenticacao`, mapeamento `401 => 'erro_autenticacao'` confirmado em `TalentClient.php`). **CAUSA RAIZ = PENDÊNCIA DE CREDENCIAL EXTERNA**: a `TALENT_API_KEY` configurada no `.env` real desta máquina está sendo REJEITADA pelo Talent (credencial inválida/expirada/incorreta para este endpoint ou válida só para outro ambiente/CNPJ) — não é pendência de rede, payload, contrato ou código desta implementação. Estado final confirmado: atendimento `id_atendimento=1573` permanece `ERRO_REPROCESSAVEL`, não excluído; ordem `OC-TESTE-001` permanece `ATIVA`, intocada; `tb_ordem_coleta_pendente_baixa` sem nenhuma linha para esse atendimento; nenhuma impressão física em nenhuma das 3 tentativas; `TALENT_CHECKIN_ATIVO` revertido para ausente/`false` após cada uma das 3 tentativas. **Próximo passo necessário**: o usuário precisa confirmar/renovar a `TALENT_API_KEY` junto ao Talent (ou confirmar se essa credencial é válida apenas para outro ambiente/CNPJ) antes de qualquer nova tentativa real de POST — sem credencial válida, nenhum teste real ponta a ponta pode ser concluído com sucesso, independente do ambiente (dev local ou produção). A implementação de `doctos[]`/gates/mecanismo de ativação segue tecnicamente correta e validada (Fase 1 = 27/27, 3 revisões de segurança aprovadas); o bloqueio remanescente é puramente de credencial externa, fora do escopo de código. Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seções "Execução do POST real controlado (2026-09-14)" e "Investigação da causa raiz — HTTP 401 confirmado (2026-09-14)". **ATUALIZAÇÃO 2026-09-14 (4ª tentativa — SUCESSO REAL CONFIRMADO)**: causa raiz definitiva do HTTP 401 identificada pelo usuário — `TALENT_API_KEY` no `.env` real estava truncado em 1 caractere (42 em vez de 43). Corrigido, 4ª tentativa real autorizada: HTTP 200, `sucesso=true`, `nrRegAcesso=35784`, ordem `OC-TESTE-001` marcada `INATIVA` com sucesso, impressão física real confirmada visualmente pelo usuário. **ATUALIZAÇÃO 2026-09-14 (`/03-revisao` final = PRECISA DE AJUSTE)**: segurança e QA/evidência 100% APROVADOS (achado de atenção não bloqueante registrado abaixo, em linha própria, sobre `tentarMarcarOrdemConcluida`/`JA_ENVIADO`); UX/front-end encontrou 2 pontos a corrigir antes do fechamento: (1) **[BLOQUEANTE]** modal obrigatório de preenchimento manual do número da nota (`abrirModalNumeroNotaManual`, `app.js`) não tem botão de saída/cancelar/voltar, e seu overlay (`z-index:50`) cobre a barra de "Cancelar atendimento" da tela, tornando-a inacessível ao toque enquanto o modal está aberto; (2) **[ATENÇÃO]** o mesmo modal reaproveita o teclado QWERTY completo (alvos de toque ~40x46px) para o campo puramente numérico `numero_nota`, em vez de um teclado numérico dedicado. Usuário confirmou que já excluiu manualmente, no painel do Talent, o check-in de teste da placa `ABC1D23`. Demanda retorna para rodada curta de `/01-implementacao` restrita aos 2 pontos de UX acima. Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção "Resultado da /03-revisão final (2026-09-14)". **ATUALIZAÇÃO 2026-09-15 (rodada curta de `/01-implementacao` = CORRIGIDA E TESTADA)**: os 2 achados de UX foram corrigidos — (1) modal `abrirModalNumeroNotaManual` ganhou botão "✕ Cancelar atendimento" interno, reaproveitando exatamente `confirmarCancelar()` já existente (sem lógica nova), confirmada ausência de handler de fechamento por toque no overlay; (2) teclado numérico dedicado novo (`montarTecladoNumericoNota`), alvos de toque de 64px, nunca reaproveita `montarTeclado()`/`#teclado` QWERTY (intocado nas demais telas). `qa-testes` validou 13/13 itens do roteiro obrigatório (185 asserções), incluindo regressão de Recebimento/Expedição/Talent/impressão 100% aprovada. Pronta para nova rodada de `/03-revisao` de confirmação. Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção "Rodada curta de /01-implementacao — correções de UX e auditoria (2026-09-15)" |
+| ~~Branch `JA_ENVIADO` de `AtendimentoController::tentarMarcarOrdemConcluida()` pode gravar entrada FALSA em `tb_ordem_coleta_pendente_baixa` quando a ordem já estava `INATIVA` de uma chamada anterior bem-sucedida (`UPDATE ... WHERE status='ATIVA'` retorna `rowCount()=0`/`$ok=false` mesmo sem falha real)~~ | `app/Controller/AtendimentoController.php` | Achado de atenção do `security-especialista` em `/03-revisao` de 2026-09-14, severidade não bloqueante (é ruído de auditoria, não falha de segurança). **CORRIGIDA em 2026-09-15 (rodada curta de `/01-implementacao`)**: novo `OrdemColetaDao::statusPorNumero()`/`OrdemColetaClient::statusAtual()` consulta o status real antes de decidir — se `INATIVA`, trata como sucesso idempotente (sem registro em `tb_ordem_coleta_pendente_baixa`, sem segundo `UPDATE`); só registra pendência se ainda `ATIVA`/não encontrada/erro real. Testado (14/14 asserções, incluindo os 4 novos cenários) |
+| ~~**[BLOQUEANTE — `/03-revisao` PRECISA DE AJUSTE — 2ª tentativa, 2026-09-15]** NOVO achado de UX, distinto do achado de 2026-09-14 já corrigido (ausência de saída no modal): a PRÓPRIA CORREÇÃO da rodada anterior (botão "✕ Cancelar atendimento" interno ao modal de número de nota) introduziu um travamento funcional real~~ | `public/totem/assets/app.js` (`abrirModalNumeroNotaManual`, `confirmarCancelar`, `abrirModal`, flag `numeroModalAberta`), `public/totem/assets/app.css` (`.btn-cancelar`) | Achado do `qa-testes`/revisão UX em `/03-revisao` de 2026-09-15 (revisão de confirmação da correção de 2026-09-15 anterior). **Causa raiz**: `confirmarCancelar()` chama `abrirModal(...)`, que SUBSTITUI o `innerHTML` do mesmo `#modalCaixa` já aberto (não empilha um novo) — sobrescrevendo o modal de número de nota pela pergunta de confirmação de cancelamento. Se o motorista tocar "Continuar atendimento" (não quero cancelar), o `onclick` só chama `fecharModal()` (esconde o overlay) sem restaurar o conteúdo original do modal de número de nota e sem resetar `numeroModalAberta` (permanece `true` para sempre) — `processarProximoNumeroNotaModal()` passa a retornar cedo para qualquer nota futura, sem nenhum caminho de UI restante para reabrir o campo; `finalizarDigitalizacao()` continua bloqueado. Efeito real: motorista que escolhe "Continuar atendimento" fica PERMANENTEMENTE TRAVADO, só consegue sair cancelando o atendimento inteiro — o oposto da opção escolhida. **AJUSTE EXATO necessário**: o botão "Continuar atendimento" deste fluxo precisa RESTAURAR o modal de número de nota (reabrir `abrirModalNumeroNotaManual`/`abrirModalNumeroNotaSugestao` com o estado da nota pendente atual) em vez de só `fecharModal()` — ou usar confirmação que não sobrescreva o modal original (segundo modal empilhado, ou confirmação inline). **Achado de ATENÇÃO adicional (não bloqueante)**: botão "✕ Cancelar atendimento" usa `.btn-cancelar` (texto cinza claro, sem padding/altura/borda definidos) — contraste/alvo de toque abaixo do padrão do projeto; sugerido usar estilo próximo de `.btn-fantasma`/`.btn-alerta`, já que dentro do modal é a única saída disponível. Segurança 100% APROVADA nesta mesma rodada (10/10 itens, zero achados). **VEREDITO**: `/03-revisao` = PRECISA DE AJUSTE, retorna para nova rodada curta de `/01-implementacao` restrita a estes 2 pontos (1 bloqueante + 1 atenção), mesmo arquivo/modal já tocado na correção anterior. Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção "Resultado da /03-revisão final — 2ª tentativa (2026-09-15)" **CORRIGIDA em 2026-09-15 (nova rodada curta de `/01-implementacao`)**: implementado overlay de confirmação SEPARADO e independente (`#modalConfirmCancelNotaFundo`/`#modalConfirmCancelNotaCaixa`, `z-index:55`), empilhado por cima do `#modalCaixa` original — nunca mais sobrescreve/destrói o modal de número de nota. Novas funções `confirmarCancelarNotaModal()`/`fecharConfirmacaoCancelarNotaModal()`: "Continuar atendimento" fecha só a confirmação (nada precisa ser restaurado, pois o modal de baixo nunca foi tocado); "Sim, cancelar" reaproveita `cancelarESair()` já existente, sem duplicar lógica. Botão adicionado nas duas variantes (`abrirModalNumeroNotaManual`/`abrirModalNumeroNotaSugestao`). Ajuste visual: nova classe `.btn-saida-modal-nota` (contraste tipo `.btn-fantasma`, `min-height:64px`) substitui `.btn-cancelar-modal`. `qa-testes` validou os 10 itens obrigatórios por rastreamento de código (sem ambiente de navegador/DOM real disponível — recomendada validação manual rápida no dispositivo físico antes do `/04-commit-e-push`). Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção "Rodada curta de /01-implementacao — correção do cancelamento no modal de número de nota (2026-09-15)". |
+| ~~**[BLOQUEANTE — `/02-testes` PRECISA DE AJUSTE, confirmado 2026-09-15]** `mostrarInatividade()` ainda usa `abrirModal()` diretamente, sobrescrevendo `#modalCaixa` — o timer de inatividade (180s) roda normalmente enquanto o modal obrigatório de número de nota está aberto (tela `rec_digitaliza` !== `home`); ao disparar, sobrescreve o modal de nota pelo aviso "Ainda está aí?", destruindo nota pendente/número digitado/teclado; se o motorista tocar "Continuar", `fecharModal()` só esconde o overlay, sem restaurar o modal de nota e sem resetar `numeroModalAberta` (fica `true` para sempre) — motorista PERMANENTEMENTE TRAVADO, sem nenhuma ação incorreta da parte dele, só 3min de inatividade com o modal aberto. Mais 30s de inatividade total cancela o atendimento inteiro automaticamente~~ | `public/totem/assets/app.js` (`mostrarInatividade`, linha ~125; `reiniciarIdle`, `abrirModal`, `numeroModalAberta`) | Achado do `qa-testes` registrado como observação não bloqueante em 2026-09-15 (rodada anterior), **RECLASSIFICADO PARA BLOQUEANTE em 2026-09-15 (`/02-testes` de confirmação)** por instrução explícita do usuário de tratar como bloqueante se reproduzido/confirmado por código (não como pendência futura) — confirmado com certeza por leitura exata de código, sem necessidade de execução em browser (lógica determinística). `/02-testes` = PRECISA DE AJUSTE, demanda retorna para `/01-implementacao` restrita a esta correção: `mostrarInatividade()` precisa do mesmo tratamento já aplicado ao cancelamento nesta demanda (overlay próprio/empilhado, ou verificação se o modal de número de nota está aberto antes de sobrescrever `#modalCaixa`, restaurando o estado ao fechar). Regressão automatizada (202/202 asserções, 10 suítes) 100% aprovada nesta mesma rodada, zero achados novos além deste. Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção "Resultado dos testes — /02-testes de confirmação (2026-09-15)" **CORRIGIDA em 2026-09-15 (nova rodada curta de `/01-implementacao`)**: `mostrarInatividade()` migrada para overlay PRÓPRIO e independente (`#modalInatividadeFundo`/`#modalInatividadeCaixa`, nova classe `.modal-fundo-inatividade { z-index: 80 }` — acima de `.modal-fundo` 50, `.modal-fundo-confirma-nota` 55 e `.diag-overlay` 70), nunca mais tocando em `#modalCaixa`/`#modalFundo`. Nova `fecharAvisoInatividade()` fecha só o overlay de inatividade; timer único `idleTimer` reaproveitado para os dois timeouts (180s/30s), sempre limpo antes de reagendar (sem duplicação); expiração do timer de abandono reaproveita `cancelarESair()` já existente, sem duplicar lógica. `ir()` ganhou `fecharAvisoInatividade()` no início, evitando overlay/timer órfão em qualquer troca de tela. `numeroModalAberta` não é tocada por esse fluxo. `qa-testes` validou 10/10 itens do roteiro (empilhamento sobre modal manual, sugestão OCR, e confirmação de cancelamento — 3 camadas) por rastreamento de código (sem ambiente de navegador real disponível), mais reexecução das 10 suítes automatizadas de backend (202/202 PASSOU, zero regressão, backend confirmado intocado por mtime). Observação não bloqueante registrada: listener global de toque reagenda o timer sem fechar o overlay se o motorista tocar fora do botão "Continuar" — pré-existente, não alterado, fora do escopo. Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção "Rodada curta de /01-implementacao — correção do bloqueio de inatividade (2026-09-15)". |
+| ~~**[BLOQUEANTE — `/02-testes` PRECISA DE AJUSTE, confirmado 2026-09-15, Etapa 1 de confirmação]** Listener global de toque (`document.addEventListener` para `click`/`touchstart`/`keydown`, chamando `reiniciarIdle()`) interfere no countdown de 30s de abandono do aviso de inatividade: um toque em QUALQUER lugar da tela, inclusive dentro do próprio overlay `#modalInatividadeFundo` fora do botão "Continuar", cancela o timer de abandono (30s) e o reagenda para `IDLE_MS` (180s) via `mostrarInatividade` — sem fechar o overlay nem alterar visualmente o aviso. Divergência real entre UI ("Ainda está aí?", implicando expiração em 30s) e comportamento de fundo (sistema já concedeu 180s silenciosamente)~~ | `public/totem/assets/app.js` (`reiniciarIdle` linha ~120-123, listener global linha ~160, `mostrarInatividade`/`fecharAvisoInatividade` linha ~138-158) | Achado do `qa-testes` em 2026-09-15 (rodada curta anterior registrou como observação não aprofundada; **CONFIRMADO BLOQUEANTE nesta rodada de `/02-testes` de confirmação, Etapa 1**, por instrução explícita do usuário de classificar como bloqueante se confirmado por código). `reiniciarIdle()` faz `clearTimeout(idleTimer)` incondicional, sem distinguir se o timer ativo era o principal (180s) ou o de abandono (30s) — mesma variável tratada de forma cega. **NÃO CORRIGIDO ainda** — `/02-testes` = PRECISA DE AJUSTE, Etapa 2 (validação manual) e `/03-revisao` NÃO iniciadas. Demanda retorna para `/01-implementacao`, restrita a: listener global ignorar toques enquanto `#modalInatividadeFundo` estiver com a classe `aberto` (exceto o botão "Continuar"), ou distinguir o estado do timer antes de reagendar incondicionalmente. Regressão automatizada (202/202 asserções, 10 suítes) 100% aprovada nesta mesma rodada, zero achados novos além deste. Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção "Resultado dos testes — /02-testes de confirmação, Etapa 1 (2026-09-15)" **CORRIGIDA em 2026-09-15 (nova rodada curta de `/01-implementacao`)**: implementada máquina de estado explícita — duas variáveis de timer DEDICADAS (`idleTimerPrincipal` 180s, `idleTimerAbandono` 30s, nunca compartilhadas) + novo estado `idleEstado` (`normal`/`aviso`/`inativo`). Listener global corrigido com guarda `if (idleEstado === 'aviso') return;` ANTES de qualquer `reiniciarIdle()` — confirmado ser a única linha capaz de decidir isso, sem nenhum outro listener concorrente. Nova `continuarAposAvisoInatividade()` é o único caminho que fecha o aviso/cancela o timer de abandono/reinicia o principal. `fecharAvisoInatividade()` sempre limpa `idleTimerAbandono` (evita callback fantasma). `qa-testes` validou 12/12 itens do roteiro (toque/tecla/conteúdo do overlay não alteram o prazo de 30s, expiração dispara `cancelarESair()` uma única vez, sem timers duplicados, ciclo repetido 3x, modal manual/sugestão OCR/confirmação de cancelamento preservados, navegação limpa tudo sem callback atrasado) por rastreamento de código (sem ambiente de navegador real disponível — mesma limitação recorrente nesta demanda), mais reexecução das 10 suítes automatizadas de backend (202/202 PASSOU, zero regressão). Ver `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção "Rodada curta de /01-implementacao — correção do listener global e timers de inatividade (2026-09-15)". |
 ## 6. Fora de escopo (não sugerir sem pedido)
 
 - Qualquer infraestrutura que exija processo persistente, WebSocket de longa
@@ -1427,3 +1449,470 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md` (seção
   "Confirmação final — /02-testes e /03-revisao (2026-09-14)"). Próximo
   passo: `/04-commit-e-push`.
+- 2026-09-14 — Planejamento (`/00-planejamento`) da demanda
+  `talent-doctos-finalizacao-checkin`: consolidado plano de backend para
+  desbloquear `AtendimentoController::finalizar()` (hoje sempre HTTP 501
+  `TALENT_DOCTOS_PENDENTE`), implementando `doctos[]` real (Recebimento
+  por notas, Expedição por ordem de coleta), corrigindo o parsing da
+  resposta do Talent para `nrRegAcesso`/`msg` (confirmados via Swagger
+  oficial nesta rodada) em vez dos campos inexistentes `senha`/
+  `protocolo`, corrigindo `tipoEmbDesemb` para capitalizado (bug real
+  desde a decisão de 2026-09-09), atualizando a ordem de coleta para
+  `INATIVA` após sucesso, e adicionando endpoint isolado de impressão
+  real da etiqueta (nunca redispara envio ao Talent). Nenhum código foi
+  alterado nesta etapa — só planejamento e documentação. Divergência
+  crítica registrada: schema real do Swagger usa `anexosGZip`, não
+  `anexos` (manual PDF); protocolo de teste controlado do usuário
+  permanece válido. Handoff completo com todas as pendências e decisões
+  necessárias do usuário antes de `/01-implementacao`:
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`.
+- 2026-09-14 — `/01-implementacao` da demanda
+  `talent-doctos-finalizacao-checkin` concluída com sucesso total, após
+  as 3 decisões do usuário (tabela `tb_ordem_coleta_pendente_baixa`,
+  reimpressão manual permitida, rótulo "Número de acesso") terem sido
+  tomadas. **Backend**: migration `012_talent_doctos_finalizacao_checkin.sql`
+  (`tb_atendimento_nota.numero_nota`/`numero_nota_origem` + UNIQUE key,
+  nova tabela `tb_ordem_coleta_pendente_baixa`); `TalentRn`/`TalentClient`
+  corrigidos (`tipoEmbDesemb` capitalizado, parsing real de
+  `nrRegAcesso`/`msg`, `doctos[]` real — `NOTA_FISCAL` por nota no
+  Recebimento via `numero_nota` novo, `ORDEM_COLETA` via `ordem_coleta`
+  já existente na Expedição —, `montarAnexosGzip()` isolado nunca
+  chamado automaticamente); `AtendimentoController::finalizar()` com a
+  trava incondicional `TALENT_DOCTOS_PENDENTE` REMOVIDA, substituída por
+  gates reais + nova variável `TALENT_CHECKIN_ATIVO` (fail-closed,
+  ausente/`false` por padrão — enquanto não for `true`, todos os gates
+  reais rodam mas o Talent nunca é chamado de verdade, HTTP 503
+  `TALENT_CHECKIN_DESATIVADO`); `OrdemColetaDao::marcarInativaPorNumero()`
+  atualiza a ordem para `INATIVA` após sucesso confirmado (`UPDATE`
+  condicional idempotente), com falha de reconciliação registrada em
+  `tb_ordem_coleta_pendente_baixa` sem nunca bloquear a resposta de
+  sucesso ao motorista; novo `ImpressaoAtendimentoController` +
+  `impressao.php` (isolado do endpoint de teste, só lê resultado já
+  persistido, nunca redispara chamada ao Talent, nunca CPF/CNH na
+  etiqueta); novo `nota.php?acao=definir-numero` com normalização
+  sempre no backend. **Frontend**: captura do número de nota encaixada
+  no ciclo de `rec_digitaliza` (confirmação rápida se OCR confiante,
+  manual se não); nova máquina de estados de impressão real em
+  `exp_impressao`/`rec_impressao` (mesmo padrão já aprovado de
+  preparando/imprimindo/concluído/erro/indeterminado, sem retry
+  automático), com rótulo "Número de acesso" + nome do motorista, nova
+  tela de seleção de impressora no fluxo real, e reimpressão manual
+  gerando novo `identificador` a cada vez sem redisparar `finalizar()`.
+  **Segurança**: zero achados bloqueantes, 2 observações não
+  bloqueantes (reaproveitamento do endpoint de configuração do serviço
+  local de impressão pelo fluxo real; script não versionado
+  `_diagnostico_talent_731.php` presente, não tocado). **QA**: mais de
+  190 asserções somadas (unitário, integração, IDOR, concorrência, E2E,
+  regressão), 100% passando, zero regressão nas suítes pré-existentes.
+  **NENHUMA chamada real ao Talent, NENHUMA impressão física, NENHUMA
+  alteração de ordem real de coleta em nenhum momento desta
+  implementação** — `TALENT_CHECKIN_ATIVO` permaneceu `false`/ausente
+  durante toda a demanda. `docs/manual_talent.md` atualizado com nova
+  seção final registrando os fatos confirmados via Swagger oficial
+  (`TPortariaCheckinRet`, `enumTipoEmbDesemb` capitalizado — corrige a
+  decisão de 2026-09-09 sobre minúsculo —, semântica de `nrDocto`).
+  Pendência de `doctos[]` (seção 5) atualizada: bloqueio TÉCNICO
+  resolvido; envio real ao Talent permanece desativado por decisão de
+  segurança (`TALENT_CHECKIN_ATIVO`) até o protocolo de teste
+  controlado em Produção ser executado (ainda não autorizado). Nenhum
+  commit/push realizado. Detalhes completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Resultado da implementação (2026-09-14)". Próximo passo: `/02-testes`
+  formal (pode reaproveitar os testes já executados), seguido de
+  `/03-revisao`.
+- 2026-09-14 — `/02-testes` Fase 1 (QA + segurança independentes) da
+  demanda `talent-doctos-finalizacao-checkin` executado. **Segurança**:
+  100% aprovada, zero achados bloqueantes (só reafirmou as 2 observações
+  não bloqueantes já conhecidas da implementação). **QA**: 26 de 27 itens
+  do roteiro PASSARAM; 1 item FALHOU (bloqueante) — item 5,
+  `App\Rn\NotaFiscalRn::atualizarNumeroNota()` aceita e persiste
+  silenciosamente uma chave de acesso de 44 dígitos como `numero_nota`,
+  truncada sem erro pela coluna `VARCHAR(20)` (ver seção 5). Item 27
+  (regressão completa) teve 2 desvios AMBIENTAIS não bloqueantes e não
+  causados por esta demanda (`teste_consulta_ordem_coleta.php` — fixture
+  externa `OC-TESTE-005` ausente no banco de dev local;
+  `teste_status_processamento.php` — 1 falha flaky de rate-limit,
+  reexecutado e passou 9/9). Observação adicional do QA (não testada
+  formalmente, fora dos 27 itens), registrada para avaliação futura, não
+  confirmada como bug ativo: em
+  `AtendimentoController::tentarMarcarOrdemConcluida()`, o branch
+  `JA_ENVIADO` pode gerar entrada "falsa" em
+  `tb_ordem_coleta_pendente_baixa` mesmo quando a baixa já ocorreu com
+  sucesso antes. **Veredito**: `/02-testes` Fase 1 = PRECISA DE AJUSTE.
+  Retorna para `/01-implementacao`, restrito à correção do item 5. Fase 2
+  (teste controlado em Produção) NÃO iniciada. Nenhum código alterado,
+  nenhuma chamada real ao Talent, nenhuma impressão física nesta rodada.
+  Detalhes completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Resultado de /02-testes — Fase 1 (2026-09-14)".
+- 2026-09-14 — rodada curta de `/01-implementacao` corrigiu o achado
+  bloqueante do item 5 (validação de comprimento/formato de
+  `numero_nota` em `NotaFiscalRn`/`nota.php?acao=definir-numero`),
+  32/32 testes novos passando, segurança reconfirmada sem regressão.
+  Em seguida, `/02-testes` reexecutou a Fase 1 integralmente:
+  **27/27 itens PASSOU, veredito APROVADO.** Fase 2 (preparação do
+  teste controlado em Produção) executada: atendimento sintético de
+  Expedição (`id_atendimento=1573`, DEV LOCAL) validado contra todos
+  os gates de `finalizar()`; payload real montado via
+  `TalentRn::montarPayload()` (nunca enviado) e apresentado mascarado
+  (CNPJs/placa parcialmente mascarados; CPF/nome do motorista nunca
+  exibidos, só confirmados como presentes); `doctos[]` com 1
+  `ORDEM_COLETA` sintética (`OC-TESTE-001`) + 2 anexos (só
+  nome/quantidade); `tipoEmbDesemb="Embarque"` confirmado;
+  `talent_checkin_status=NAO_ENVIADO`; `TALENT_CHECKIN_ATIVO`
+  confirmado ausente do `.env` real (fail-closed). **NENHUM POST real
+  foi enviado ao Talent, nenhuma impressão física, nenhuma alteração
+  de ordem real.** Demanda PARADA aguardando autorização explícita do
+  usuário ("AUTORIZO POST REAL") diretamente ao orquestrador; 3
+  pendências remanescentes registradas na seção 5 (repetir preparação
+  em produção real se necessário; esclarecer como localizar/excluir
+  check-in no painel do Talent; `id_atendimento=1573` de dev local
+  pendente de limpeza). Nenhum commit/push realizado. Detalhes
+  completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`,
+  seção "Resultado de /02-testes — Fase 1 reexecutada e Fase 2
+  preparada (2026-09-14)".
+- 2026-09-14 — o orquestrador, com autorização direta do usuário,
+  executou o único POST real controlado autorizado até aqui, contra
+  `id_atendimento=1573` (Expedição, `OC-TESTE-001`, ambiente de DEV
+  LOCAL), ativando `TALENT_CHECKIN_ATIVO=true` temporariamente.
+  Resultado: HTTP 202, `sucesso=false`, `talent_checkin_status`
+  resultante `ERRO_REPROCESSAVEL`. Causa raiz confirmada por leitura do
+  código (`TalentClient.php` linhas 79-112): erro de
+  conexão/DNS (`erro_conexao`, `CURLE_COULDNT_RESOLVE_HOST`/
+  `CURLE_COULDNT_CONNECT`) — a requisição nunca chegou a sair desta
+  máquina de dev local, nenhum byte foi transmitido ao Talent, nenhum
+  registro criado do lado do Talent. Confirmado por consulta direta ao
+  banco: ordem `OC-TESTE-001` permanece `ATIVA`,
+  `tb_ordem_coleta_pendente_baixa` sem nenhuma linha para
+  `id_atendimento=1573`, `TALENT_CHECKIN_ATIVO` revertido para
+  ausente/`false` no `.env` real logo em seguida. Nenhuma impressão
+  física realizada. Mecanismo de ativação/gates/classificação de erro
+  validado tecnicamente (bloqueio foi só de conectividade de rede do
+  ambiente de dev local, não de contrato/payload). Pendência
+  remanescente: teste real ponta a ponta depende de ambiente com rota
+  de rede real até `api.talentcs.com.br` (provavelmente produção
+  Hostgator). `id_atendimento=1573` permanece intacto, não excluído.
+  Nenhum código alterado, nenhum commit/push nesta rodada. Detalhes
+  completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`,
+  seção "Execução do POST real controlado (2026-09-14)".
+- 2026-09-14 — investigação da causa raiz das 3 tentativas reais de POST
+  ao Talent contra `id_atendimento=1573` concluída. A suspeita inicial de
+  conectividade de rede/DNS foi descartada com evidência concreta (DNS/
+  TLS/conexão HEAD ao path exato funcionaram normalmente). Com
+  autorização explícita do usuário, uma instrumentação de diagnóstico
+  TEMPORÁRIA foi adicionada, uma 3ª tentativa real controlada foi
+  executada, e a causa raiz real foi confirmada: o Talent respondeu
+  **HTTP 401 Unauthorized** às 3 tentativas (categoria interna
+  `erro_autenticacao`, confirmada no mapeamento `401 => 'erro_autenticacao'`
+  de `TalentClient.php`). A instrumentação temporária foi removida com
+  sucesso logo depois (`git diff` confirmou reversão exata, `php -l`
+  limpo). **Causa raiz = pendência de CREDENCIAL EXTERNA**: a
+  `TALENT_API_KEY` do `.env` real desta máquina está sendo rejeitada
+  pelo Talent — não é problema de rede, payload, contrato ou código.
+  Estado final: atendimento `1573` continua `ERRO_REPROCESSAVEL`, não
+  excluído; ordem `OC-TESTE-001` continua `ATIVA`, intocada; nenhuma
+  entrada em `tb_ordem_coleta_pendente_baixa`; nenhuma impressão física
+  em nenhuma das 3 tentativas; `TALENT_CHECKIN_ATIVO` revertido para
+  ausente/`false` após cada tentativa. Próximo passo: usuário precisa
+  confirmar/renovar a `TALENT_API_KEY` junto ao Talent antes de qualquer
+  nova tentativa real. Nenhum código alterado, nenhuma chamada real ao
+  Talent nesta rodada de documentação, nenhum commit/push. Detalhes
+  completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Investigação da causa raiz — HTTP 401 confirmado (2026-09-14)".
+- 2026-09-14 — **RESOLUÇÃO FINAL, teste real controlado com SUCESSO
+  CONFIRMADO**. A causa raiz real e definitiva do bloqueio de HTTP 401
+  nas 3 tentativas anteriores foi identificada pelo próprio usuário: o
+  `TALENT_API_KEY` no `.env` real estava truncado em 1 caractere (42 em
+  vez de 43 caracteres), a partir de comparação com o e-mail original do
+  Talent contendo o token completo. O usuário forneceu o token correto,
+  o orquestrador corrigiu a linha do `.env`, e executou a 4ª tentativa
+  real, autorizada explicitamente, com sucesso total: HTTP 200,
+  `sucesso=true`, `nrRegAcesso=35784`, ordem `OC-TESTE-001` marcada
+  `INATIVA` com sucesso (sem necessidade de reconciliação via
+  `tb_ordem_coleta_pendente_baixa`), formato `anexos` aceito (nunca
+  precisou de `anexosGZip`), impressão física real executada 1 vez e
+  confirmada visualmente pelo usuário (etiqueta com "Número de acesso:
+  35784" + nome do motorista sintético, sem CPF/CNH). `.env` revertido
+  para `TALENT_CHECKIN_ATIVO` ausente/`false` imediatamente após,
+  confirmado por releitura. **Veredito final da demanda**:
+  `talent-doctos-finalizacao-checkin` validada de ponta a ponta com
+  sucesso real em ambiente de dev local (o mecanismo funciona mesmo
+  apontando para o Talent de produção real). Pendência remanescente: o
+  usuário vai excluir manualmente o check-in de teste no painel do
+  Talent (placa `ABC1D23`, CNPJ armazém Maua I, ordem `OC-TESTE-001`).
+  Próximo passo: `/03-revisao` final, depois `/04-commit-e-push`. Nenhum
+  código alterado nesta rodada de documentação, nenhum commit/push.
+  Detalhes completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Teste real controlado — SUCESSO CONFIRMADO (2026-09-14)".
+- 2026-09-14 — **`/03-revisao` final da demanda
+  `talent-doctos-finalizacao-checkin` = PRECISA DE AJUSTE**. Três
+  revisões independentes: segurança APROVADA (zero achados bloqueantes,
+  1 achado de atenção não bloqueante registrado em pendência dedicada na
+  seção 5, sobre `tentarMarcarOrdemConcluida`/`JA_ENVIADO`); QA/evidência
+  APROVADO (confirmado por consulta direta ao banco: atendimento `1573`
+  `concluido`/`ENVIADO`/`talent_senha=35784`, ordem `OC-TESTE-001`
+  `INATIVA`, `tb_ordem_coleta_pendente_baixa` sem linha para o
+  atendimento; regressão 100% nas suítes específicas da demanda, com 1
+  suíte pré-existente — `teste_consulta_ordem_coleta.php` — mudando de 4
+  para 5 falhas por CONSEQUÊNCIA ESPERADA do próprio sucesso do teste
+  real, não regressão); UX/front-end encontrou 2 achados a corrigir: (1)
+  **[BLOQUEANTE]** modal obrigatório de número da nota manual sem
+  botão de saída/cancelar, com overlay cobrindo a barra de "Cancelar
+  atendimento" da tela; (2) **[ATENÇÃO]** mesmo modal usando teclado
+  QWERTY completo em vez de teclado numérico dedicado para campo
+  puramente numérico. Usuário confirmou exclusão manual, no painel do
+  Talent, do check-in de teste da placa `ABC1D23`. Demanda retorna para
+  rodada curta de `/01-implementacao` restrita aos 2 pontos de UX (o
+  achado de segurança de atenção pode entrar na mesma rodada, não é
+  obrigatório). Nenhum código alterado nesta rodada de documentação,
+  nenhuma chamada real ao Talent, nenhuma impressão física, nenhum
+  commit/push. Detalhes completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Resultado da /03-revisão final (2026-09-14)".
+- 2026-09-15 — **Rodada curta de `/01-implementacao` para
+  `talent-doctos-finalizacao-checkin` — correções de UX e auditoria =
+  IMPLEMENTADA E TESTADA**. Restrita aos 2 achados de UX (bloqueante e
+  atenção) e ao achado de atenção de segurança do `/03-revisao` anterior:
+  (1) modal `abrirModalNumeroNotaManual` ganhou botão "✕ Cancelar
+  atendimento" interno, reaproveitando exatamente `confirmarCancelar()`
+  já existente (nenhuma lógica de cancelamento nova), confirmada
+  ausência de handler de fechamento por toque no overlay; (2) teclado
+  numérico dedicado novo (`montarTecladoNumericoNota`/
+  `digitarNumeroNota`/`apagarNumeroNota`/`atualizarBotaoNumeroNota`),
+  alvos de toque de 64px, nunca reaproveita `montarTeclado()`/`#teclado`
+  QWERTY (intocado nas demais telas); (3) `AtendimentoController::
+  tentarMarcarOrdemConcluida()` corrigido com novo
+  `OrdemColetaDao::statusPorNumero()`/`OrdemColetaClient::statusAtual()`
+  — quando `marcarConcluida()` retorna `false`, consulta o status real
+  antes de decidir, tratando ordem já `INATIVA` como sucesso idempotente
+  (sem falsa entrada em `tb_ordem_coleta_pendente_baixa`). `qa-testes`
+  validou 13/13 itens do roteiro obrigatório do usuário (185 asserções
+  somadas), incluindo os 4 novos cenários de `JA_ENVIADO`/ordem `INATIVA`
+  e regressão 100% de Recebimento/Expedição/Talent/impressão (mais de
+  150 asserções). Nenhuma chamada real ao Talent, nenhuma impressão
+  física, nenhuma reutilização da placa `ABC1D23`, nenhuma alteração de
+  registro real, nenhuma lógica de OCR/confiança/doctos[]/TalentRn
+  tocada. Veredito: pronta para nova rodada de `/03-revisao` de
+  confirmação. Detalhes completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Rodada curta de /01-implementacao — correções de UX e auditoria
+  (2026-09-15)".
+- 2026-09-15 — **`/03-revisao` de confirmação (2ª tentativa) de
+  `talent-doctos-finalizacao-checkin` = PRECISA DE AJUSTE (novo achado
+  bloqueante de UX)**. Segurança 100% APROVADA (10/10 itens do roteiro,
+  zero achados). A revisão de UX encontrou um achado BLOQUEANTE NOVO —
+  distinto e mais grave que o já corrigido na rodada de 2026-09-15
+  anterior — introduzido pela própria correção daquela rodada: o botão
+  "✕ Cancelar atendimento" interno ao modal de número de nota chama
+  `confirmarCancelar()` → `abrirModal(...)`, que SOBRESCREVE o
+  `innerHTML` do mesmo `#modalCaixa` em vez de empilhar um novo modal.
+  Se o motorista tocar "Continuar atendimento", apenas `fecharModal()` é
+  chamado — sem restaurar o modal de número de nota nem resetar
+  `numeroModalAberta` — travando permanentemente qualquer confirmação
+  futura de número de nota (sem caminho de UI para prosseguir, exceto
+  cancelar o atendimento inteiro, o oposto da escolha do motorista).
+  Achado de atenção adicional (não bloqueante): `.btn-cancelar` do botão
+  interno tem contraste/alvo de toque abaixo do padrão do projeto.
+  Veredito: retorna para nova rodada curta de `/01-implementacao`,
+  restrita a esses 2 pontos, no mesmo arquivo/modal já tocado. Detalhes
+  completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Resultado da /03-revisão final — 2ª tentativa (2026-09-15)".
+
+- 2026-09-15 — **Rodada curta de `/01-implementacao` corrige o achado
+  BLOQUEANTE de UX do `/03-revisao` anterior (`talent-doctos-finalizacao-checkin`)**.
+  O botão interno "✕ Cancelar atendimento", dentro do modal obrigatório de
+  número da nota (`abrirModalNumeroNotaManual()`/`abrirModalNumeroNotaSugestao()`,
+  `public/totem/assets/app.js`), agora abre uma CONFIRMAÇÃO SEPARADA e
+  independente (`#modalConfirmCancelNotaFundo`/`#modalConfirmCancelNotaCaixa`,
+  `z-index:55`, criada uma única vez em `iniciarApp()`), empilhada por cima
+  do `#modalCaixa` original (`z-index:50`) — nunca mais sobrescreve/destrói
+  o conteúdo do modal de número de nota. Novas funções
+  `confirmarCancelarNotaModal()`/`fecharConfirmacaoCancelarNotaModal()`:
+  "Continuar atendimento" fecha só a confirmação (o modal de baixo nunca foi
+  destruído, então número digitado/nota pendente/teclado/tipo de modal
+  permanecem intactos sem restauração manual); "Sim, cancelar" reaproveita
+  exatamente `cancelarESair()` já existente, sem duplicar lógica de
+  cancelamento. `numeroModalAberta` nunca é tocada nesse ciclo, permanecendo
+  coerente. O botão foi adicionado em AMBAS as variantes do modal (manual e
+  sugestão do OCR). Ajuste visual: nova classe `.btn-saida-modal-nota`
+  substitui a antiga `.btn-cancelar-modal` — contraste tipo `.btn-fantasma`
+  (fundo branco, borda sólida `#0b2a45`), `min-height:64px` (mesmo alvo de
+  toque do teclado numérico dedicado), sem competir com Confirmar/Corrigir/
+  Salvar. `qa-testes` validou os 10 itens obrigatórios do roteiro do
+  usuário (ciclo repetido 3x, sem overlay invisível, sem toque externo
+  fechando, `numeroModalAberta` nunca presa, regressão de OCR/notas/
+  cancelamento geral/`doctos[]`/`TalentRn` confirmada intocada) por
+  rastreamento de código — **sem ambiente de navegador/DOM real disponível
+  nesta sessão para simular cliques de fato**, registrado como limitação,
+  recomendando validação manual rápida no dispositivo físico antes do
+  `/04-commit-e-push`. Nenhuma chamada real ao Talent, nenhuma impressão,
+  nenhuma reutilização da placa `ABC1D23`, nenhuma alteração de registro
+  real, nenhum arquivo de backend/banco tocado. Achado NOVO, não bloqueante,
+  registrado para avaliação futura (fora do escopo desta correção):
+  `mostrarInatividade()` (`app.js`, linha ~125) ainda usa `abrirModal()`
+  diretamente e sobrescreveria o modal de número de nota da mesma forma que
+  o bug corrigido, se o timer de inatividade disparar enquanto esse modal
+  estiver aberto — não corrigido nesta rodada. Detalhes completos em
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Rodada curta de /01-implementacao — correção do cancelamento no modal
+  de número de nota (2026-09-15)".
+
+- 2026-09-15 — **`/02-testes` de confirmação de
+  `talent-doctos-finalizacao-checkin` = PRECISA DE AJUSTE (novo achado
+  BLOQUEANTE confirmado)**. Regressão automatizada 100% aprovada (202/202
+  asserções, 10 suítes PHP reais, zero achados novos de regressão).
+  Validação manual real em navegador/totem NÃO pôde ser executada de fato
+  (sem ferramenta de automação de browser disponível nesta sessão —
+  declarado explicitamente pelo `qa-testes`, sem simulação fingida),
+  permanece pendente de execução genuína. O teste obrigatório de
+  inatividade pedido pelo usuário CONFIRMOU um achado BLOQUEANTE por
+  leitura exata de código: `mostrarInatividade()` continua chamando
+  `abrirModal()` diretamente (não foi migrada para o novo overlay
+  separado desta demanda) — o timer de 180s roda normalmente com o modal
+  de número de nota aberto, e ao disparar sobrescreve esse modal; tocar
+  "Continuar" no aviso de inatividade não restaura o modal de nota nem
+  reseta `numeroModalAberta`, travando o motorista permanentemente sem
+  nenhuma ação incorreta da parte dele. Por instrução explícita do
+  usuário, esse achado foi tratado como bloqueante (não como pendência
+  futura). Demanda RETORNA para `/01-implementacao`, restrita a essa
+  correção; `/03-revisao` NÃO foi iniciada. Cartão Trello mantido em
+  "Sprint Bruno - Fazendo [Semanal]". Ver
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Resultado dos testes — /02-testes de confirmação (2026-09-15)".
+
+- 2026-09-15 — **Rodada curta de `/01-implementacao` corrige o bloqueio de
+  inatividade confirmado no `/02-testes` anterior
+  (`talent-doctos-finalizacao-checkin`)**. `mostrarInatividade()` migrada
+  para overlay PRÓPRIO e independente (`#modalInatividadeFundo`/
+  `#modalInatividadeCaixa`, `.modal-fundo-inatividade { z-index: 80 }` —
+  acima de `.modal-fundo` 50, `.modal-fundo-confirma-nota` 55 e
+  `.diag-overlay` 70), nunca mais sobrescrevendo `#modalCaixa`/`#modalFundo`
+  do modal de número de nota. Nova `fecharAvisoInatividade()`; timer único
+  `idleTimer` reaproveitado para os dois timeouts (180s/30s), sempre
+  limpo antes de reagendar; expiração do timer de abandono reaproveita
+  `cancelarESair()` já existente, sem duplicar lógica. `ir()` ganhou
+  `fecharAvisoInatividade()` no início, evitando overlay/timer órfão em
+  qualquer troca de tela. `numeroModalAberta` não é tocada por esse
+  fluxo. `qa-testes` validou 10/10 itens do roteiro (empilhamento sobre
+  modal manual, sugestão OCR, e confirmação de cancelamento — 3 camadas),
+  por rastreamento de código (sem ambiente de navegador real disponível
+  nesta sessão — limitação declarada explicitamente, recorrente nas 3
+  últimas rodadas desta demanda), mais reexecução das 10 suítes
+  automatizadas de backend (202/202 PASSOU, zero regressão, backend
+  confirmado intocado por mtime de arquivo). Observação não bloqueante
+  registrada: listener global de toque reagenda o timer sem fechar o
+  overlay se o motorista tocar fora do botão "Continuar" — pré-existente,
+  não alterado, fora do escopo. Escopo restrito a
+  `public/totem/assets/app.js`/`app.css`; nenhum arquivo de backend/banco/
+  Talent/impressão tocado; nenhuma chamada real ao Talent, nenhuma
+  impressão, nenhuma reutilização da placa `ABC1D23`, nenhuma alteração
+  de registro real. Cartão Trello mantido em "Sprint Bruno - Fazendo
+  [Semanal]". Esta rodada foi restrita a `/01-implementacao` — aguardando
+  decisão do usuário para nova rodada formal de `/02-testes`/`/03-revisao`
+  de confirmação (idealmente incluindo validação manual real em
+  navegador/dispositivo físico, ainda pendente de execução genuína em
+  toda a demanda). Ver
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Rodada curta de /01-implementacao — correção do bloqueio de
+  inatividade (2026-09-15)".
+
+- 2026-09-15 — **`/02-testes` de confirmação (Etapa 1 — validação
+  automatizada) de `talent-doctos-finalizacao-checkin` = PRECISA DE
+  AJUSTE (novo achado BLOQUEANTE confirmado)**. Regressão automatizada
+  100% aprovada (202/202 asserções, 10 suítes PHP reais, zero regressão).
+  A pergunta crítica do usuário sobre o listener global de toque
+  interferir no countdown de 30s de abandono do aviso de inatividade foi
+  respondida SIM, com certeza, por leitura exata de código: `reiniciarIdle()`
+  cancela e reagenda incondicionalmente o `idleTimer` (para `IDLE_MS`=180s)
+  a qualquer toque na tela — inclusive dentro do próprio overlay de aviso,
+  fora do botão "Continuar" — sem fechar o overlay, criando divergência
+  real entre o que a UI mostra (aviso de 30s) e o comportamento de fundo
+  (timer estendido silenciosamente para 180s). Por instrução explícita do
+  usuário, classificado como BLOQUEANTE, não pendência futura. Etapa 2
+  (validação manual real) e `/03-revisao` NÃO foram iniciadas, conforme
+  regra de avanço definida pelo usuário. Demanda RETORNA para
+  `/01-implementacao`, restrita a essa correção. Cartão Trello mantido em
+  "Sprint Bruno - Fazendo [Semanal]". Ver
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Resultado dos testes — /02-testes de confirmação, Etapa 1 (2026-09-15)".
+
+- 2026-09-15 — **Rodada curta de `/01-implementacao` corrige o listener
+  global de toque e os timers de inatividade
+  (`talent-doctos-finalizacao-checkin`)**. Implementada máquina de estado
+  explícita: duas variáveis de timer DEDICADAS (`idleTimerPrincipal`
+  180s, `idleTimerAbandono` 30s, nunca compartilhadas) + novo estado
+  `idleEstado` (`normal`/`aviso`/`inativo`). Listener global corrigido com
+  guarda `if (idleEstado === 'aviso') return;` antes de qualquer
+  `reiniciarIdle()` — nenhum toque/tecla fora do botão "Continuar" tem
+  qualquer efeito enquanto o aviso de inatividade está aberto. Nova
+  `continuarAposAvisoInatividade()` é o único caminho autorizado a fechar
+  o aviso/reiniciar o monitoramento normal. `fecharAvisoInatividade()`
+  sempre limpa o timer de abandono, evitando callback fantasma na
+  expiração. `qa-testes` validou 12/12 itens do roteiro (toque/tecla/
+  conteúdo do overlay não alteram o prazo de 30s, expiração dispara
+  `cancelarESair()` uma única vez, sem timers duplicados, ciclo repetido
+  3x, modal manual/sugestão OCR/confirmação de cancelamento preservados,
+  navegação limpa tudo) por rastreamento de código (sem ambiente de
+  navegador real disponível nesta sessão — limitação recorrente ao longo
+  de toda a demanda), mais reexecução das 10 suítes automatizadas de
+  backend (202/202 PASSOU, zero regressão). Escopo restrito a
+  `public/totem/assets/app.js`; nenhum arquivo de backend/banco/Talent/
+  impressão tocado; nenhuma chamada real ao Talent, nenhuma impressão,
+  nenhuma reutilização da placa `ABC1D23`, nenhuma alteração de registro
+  real. Cartão Trello mantido em "Sprint Bruno - Fazendo [Semanal]". Esta
+  rodada foi restrita a `/01-implementacao` — aguardando decisão do
+  usuário para nova rodada formal de `/02-testes`/`/03-revisao` de
+  confirmação (idealmente incluindo, finalmente, validação manual real em
+  navegador/dispositivo físico, ainda pendente de execução genuína em
+  toda a demanda). Ver
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Rodada curta de /01-implementacao — correção do listener global e
+  timers de inatividade (2026-09-15)".
+
+- 2026-09-15 — **`/02-testes` de confirmação FINAL de
+  `talent-doctos-finalizacao-checkin` = APROVADO (Etapa 1 + Etapa 2)**.
+  Etapa 1 (automatizada): 12/12 cenários de inatividade reconfirmados por
+  leitura de código, 202/202 asserções das 10 suítes de backend PASSOU,
+  zero regressão. **Etapa 2 (validação manual real no navegador, pela
+  primeira vez em toda a demanda)**: 8/8 cenários confirmados PASSOU pelo
+  próprio usuário, executando de fato no ambiente local (dados
+  sintéticos, sem placa `ABC1D23`, sem POST real, sem impressão),
+  incluindo o cenário mais crítico — aviso de inatividade aberto, toque
+  fora + tecla pressionada, cronometrado com relógio real, expirou nos
+  30s exatos sem ser estendido. Isso confirma em execução real, não só
+  por código, que o bug do listener global foi corrigido. Também
+  confirmados: ciclo repetido 3x, modal de sugestão OCR preservado,
+  empilhamento de 3 camadas (inatividade → confirmação de cancelamento →
+  modal de nota) preservado, cancelamento único na expiração, navegação
+  sem overlay/callback fantasma, contraste/legibilidade adequados.
+  Demanda segue para `/03-revisao` final. Ver
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Resultado dos testes — /02-testes de confirmação FINAL (2026-09-15)".
+
+- 2026-09-15 — **`/03-revisao` final (3ª tentativa) de
+  `talent-doctos-finalizacao-checkin` = APROVADO**. `security-especialista`
+  e `ui-ux-especialista` revisaram de forma independente as 3 últimas
+  rodadas de correção de front-end (cancelamento com overlay separado,
+  aviso de inatividade em overlay próprio, máquina de estado de timers) e
+  aprovaram sem nenhum achado: segurança confirmou ausência de XSS
+  (templates estáticos ou com `escapeHtml()`), reaproveitamento correto
+  de `cancelarESair()` sem caminho paralelo, estado client-side sem
+  influência em validação de negócio real, e confirmou por leitura de
+  código que as 3 rodadas tocaram exclusivamente
+  `public/totem/assets/app.js`/`app.css`; UX confirmou contraste/alvo de
+  toque adequados, empilhamento coerente de até 3 camadas (z-index
+  50/55/80, sem destruição de camadas inferiores), conformidade com os
+  padrões visuais já estabelecidos do projeto, e correspondência exata
+  com o planejado (sem desvio de escopo). Combinado com `/02-testes` =
+  APROVADO (Etapa 1 automatizada + Etapa 2 manual real com 8/8 cenários
+  confirmados pelo próprio usuário no navegador, incluindo cronometragem
+  real do bug original corrigido), **a demanda
+  `talent-doctos-finalizacao-checkin` está PRONTA PARA
+  `/04-commit-e-push`**. Ver
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Resultado da revisão — /03-revisao final (2026-09-15, 3ª tentativa)".

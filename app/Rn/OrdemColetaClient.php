@@ -42,6 +42,34 @@ class OrdemColetaClient
     }
 
     /**
+     * Wrapper fino sobre OrdemColetaDao::marcarInativaPorNumero() — usado
+     * por App\Controller\AtendimentoController::finalizar() apos check-in
+     * confirmado no Talent (ENVIADO/JA_ENVIADO), somente para Expedicao.
+     * Qualquer excecao de conexao/banco (ConexaoGestaoColetas) se propaga —
+     * o chamador e responsavel por capturar e tratar como "pendente de
+     * baixa manual" (nunca bloqueia a resposta de sucesso ja dada ao
+     * motorista).
+     */
+    public function marcarConcluida(string $numero): bool
+    {
+        return $this->ordemColetaDao->marcarInativaPorNumero($numero);
+    }
+
+    /**
+     * Wrapper fino sobre OrdemColetaDao::statusPorNumero() — usado por
+     * App\Controller\AtendimentoController::tentarMarcarOrdemConcluida()
+     * SOMENTE quando marcarConcluida() retornou false, para distinguir
+     * "ordem ja estava INATIVA" (idempotente, nao e falha) de uma falha real.
+     * Qualquer excecao se propaga, mesmo padrao de marcarConcluida() — o
+     * chamador trata como status desconhecido (assume falha real por
+     * seguranca, registra pendencia de reconciliacao manual).
+     */
+    public function statusAtual(string $numero): ?string
+    {
+        return $this->ordemColetaDao->statusPorNumero($numero);
+    }
+
+    /**
      * Normalizacao EXCLUSIVAMENTE no backend — maiusculas, remove espaco/
      * hifen/qualquer caractere que nao seja alfanumerico. Nunca confia em
      * normalizacao feita pelo front-end.

@@ -44,4 +44,49 @@ class OrdemColetaDao
 
         return $stmt->fetchAll();
     }
+
+    /**
+     * Marca uma ordem de coleta como INATIVA apos check-in confirmado no
+     * Talent (demanda talent-doctos-finalizacao-checkin, 2026-09-14) — so
+     * tem efeito se a ordem ainda estiver ATIVA (UPDATE condicional,
+     * idempotente: reexecutar contra uma ordem ja INATIVA nao altera nada e
+     * retorna false, o que o chamador trata como "sem efeito", nunca como
+     * erro fatal isolado). Conexao aberta so no momento desta chamada, nunca
+     * no bootstrap.
+     */
+    public function marcarInativaPorNumero(string $numero): bool
+    {
+        $pdo = ConexaoGestaoColetas::obter();
+
+        $stmt = $pdo->prepare('
+            UPDATE tb_ordens_coleta
+            SET status = \'INATIVA\'
+            WHERE numero_ordem_coleta = :numero AND status = \'ATIVA\'
+        ');
+        $stmt->execute(['numero' => $numero]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Consulta o status atual (ATIVA/INATIVA) de uma ordem de coleta pelo
+     * numero, sem alterar nada — usada por
+     * App\Controller\AtendimentoController::tentarMarcarOrdemConcluida()
+     * para distinguir, quando marcarInativaPorNumero() retorna false, se foi
+     * porque a ordem JA ESTAVA INATIVA (idempotente, nada a fazer, nao e
+     * falha) de uma falha real (ordem ainda ATIVA e o UPDATE nao conseguiu
+     * mudar, ou ordem inexistente). Retorna null se a ordem nao existir.
+     */
+    public function statusPorNumero(string $numero): ?string
+    {
+        $pdo = ConexaoGestaoColetas::obter();
+
+        $stmt = $pdo->prepare('
+            SELECT status FROM tb_ordens_coleta WHERE numero_ordem_coleta = :numero
+        ');
+        $stmt->execute(['numero' => $numero]);
+        $status = $stmt->fetchColumn();
+
+        return $status === false ? null : $status;
+    }
 }

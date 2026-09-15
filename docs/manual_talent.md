@@ -391,3 +391,122 @@ produto explícita. Confirmado por 347/347 testes (0 falhas) e revisão de
 segurança independente (0 achados críticos/altos/médios). Detalhes
 completos em `docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md`,
 seção "Nova rodada de /01-implementacao (2026-09-10)".
+
+> **NOTA (2026-09-14)**: a pendência de `doctos`/`nrDocto` descrita acima
+> foi RESOLVIDA — ver seção final "Implementação de doctos[] e finalização
+> (2026-09-14)". A trava `TALENT_DOCTOS_PENDENTE` foi removida do código,
+> substituída por gates reais + a variável `TALENT_CHECKIN_ATIVO`
+> (fail-closed) como novo portão de ativação.
+
+## Implementação de doctos[] e finalização (2026-09-14)
+
+Esta seção registra os fatos CONFIRMADOS via **Swagger oficial**
+(`https://api.talentcs.com.br/swagger/v1/swagger.json`, lido pelo
+orquestrador na etapa de planejamento da demanda
+`talent-doctos-finalizacao-checkin`) e a implementação real feita a
+partir deles. Tudo abaixo é fato documentado no schema real da API,
+nada inventado.
+
+### `TPortariaCheckinRet` — retorno de sucesso CONFIRMADO
+
+Resolve a pendência antiga "1. Formato do retorno de sucesso de
+`Portaria/Checkin`" (nunca documentada no manual PDF). O schema real do
+Swagger confirma:
+
+```json
+{ "nrRegAcesso": "string ou null", "msg": "string ou null" }
+```
+
+`TalentClient::checkin()` foi reescrito para extrair `nrRegAcesso`/`msg`
+reais — os campos antigos `senha`/`protocolo` (usados na implementação
+de 2026-09-09) nunca existiram na API real e foram removidos.
+`tb_atendimento.talent_senha` agora recebe `nrRegAcesso`.
+`tb_atendimento.talent_protocolo` permanece `NULL` permanentemente (a
+API real não retorna esse campo) — achado já registrado, não corrigido
+no schema nesta demanda (fora do escopo).
+
+### `enumTipoEmbDesemb` — CORRIGE a decisão de 2026-09-09
+
+**CONFIRMADO no Swagger real**: os únicos literais válidos são
+`"Embarque"`/`"Desembarque"` (capitalizados).
+
+> A seção **"REFINAMENTO 2 (2026-09-09)"** acima, subseção `tipoEmbDesemb`,
+> que decidiu enviar em minúsculas (`"embarque"`/`"desembarque"`), está
+> **SUPERADA/INCORRETA** — era uma decisão de produto tomada sem acesso
+> ao contrato real, e o Swagger agora confirma que o formato correto é
+> capitalizado, igual ao que o manual PDF original já indicava (seção
+> "Campos obrigatorios", linha `tipoEmbDesemb`). O código
+> (`TalentRn`/`TalentClient`) foi corrigido para capitalizado.
+> Mapeamento mantido: `expedicao → "Embarque"`, `recebimento →
+> "Desembarque"`.
+
+### Semântica de `nrDocto` — CONFIRMADA e implementada
+
+Resolve a pendência antiga "4. Semântica exata de `nrDocto` por tipo de
+`docto`":
+
+- **Recebimento**: `nrDocto` = número individual da nota fiscal
+  extraído do DANFE (**nunca** a série ou a chave de acesso de 44
+  dígitos), sem zero à esquerda. Persistido em campo novo
+  `tb_atendimento_nota.numero_nota` (migration 012), preenchido via
+  confirmação/correção do OCR ou digitação manual, sempre normalizado
+  no backend (`AtendimentoNotaDao::atualizarNumero()` — nunca confia no
+  valor bruto do OCR do front). `doctos[]` = uma entrada
+  `{tipo:'NOTA_FISCAL', nrDocto: numero_nota}` por nota.
+- **Expedição**: `nrDocto` = `tb_atendimento.ordem_coleta` (coluna já
+  existente, sem nova coluna). `doctos[]` = uma entrada
+  `{tipo:'ORDEM_COLETA', nrDocto: ordem_coleta}`.
+
+`TalentRn` falha explicitamente (nunca envia `doctos[]` incompleto) se
+alguma nota do Recebimento não tiver `numero_nota` definido.
+
+### `TALENT_CHECKIN_ATIVO` — novo portão de ativação (fail-closed)
+
+Nova variável de ambiente, ausente/`false` por padrão. Implementada como
+o mecanismo que precisa ser ligado manualmente antes do protocolo de
+teste controlado em Produção: enquanto `TALENT_CHECKIN_ATIVO` não for
+`true` explicitamente, `AtendimentoController::finalizar()` executa
+TODOS os gates reais (posse/tipo/status/etapa/documentos/empresa/
+`doctos[]` completo) normalmente, mas **nunca chama o Talent de
+verdade** — retorna HTTP 503 com código interno
+`TALENT_CHECKIN_DESATIVADO`. Isso substitui a trava incondicional
+anterior (`TALENT_DOCTOS_PENDENTE`, sempre HTTP 501, que bloqueava até
+mesmo a validação dos gates).
+
+### Anexos — `anexos` continua ativo; `anexosGZip` isolado, nunca automático
+
+`anexos:[{anexoBase64,descricao}]` (formato do manual PDF) continua o
+formato ATIVO por padrão, sem alteração. O formato `anexosGZip:
+[{nome,valueBase64}]` do schema real do Swagger (divergência registrada
+no handoff de planejamento) foi implementado como método isolado
+(`TalentRn::montarAnexosGzip()`), **nunca chamado automaticamente** — a
+troca de um formato para o outro só acontece por decisão manual
+explícita durante o protocolo de teste controlado em Produção (ainda
+não executado).
+
+### HTTP 409 — mantido como categoria própria
+
+`409 Conflict` permanece uma categoria própria (`'conflito'`) na
+classificação de resposta do `TalentClient`, **nunca** reclassificado
+automaticamente como sucesso ou duplicidade. Continua pendente de
+confirmação real via o protocolo de teste controlado em Produção
+descrito na seção "HTTP 409 — protocolo de teste controlado planejado"
+acima — não executado nesta demanda.
+
+### Pendências resolvidas nesta rodada
+
+As pendências abaixo, listadas na seção "Pendencias nao confirmadas"
+deste documento, estão **RESOLVIDAS** por esta implementação:
+
+1. ~~Formato do retorno de sucesso de `Portaria/Checkin`~~ — RESOLVIDA:
+   `TPortariaCheckinRet = {nrRegAcesso, msg}`, confirmado via Swagger
+   oficial e implementado em `TalentClient::checkin()`.
+4. ~~Semântica exata de `nrDocto` por tipo de `docto`~~ — RESOLVIDA para
+   os dois tipos usados pelo totem (`NOTA_FISCAL`/`ORDEM_COLETA`), ver
+   subseção acima.
+
+Demais pendências da lista original (2, 3, 5-10) seguem sem alteração.
+
+Detalhes completos da implementação, resultado de segurança e QA:
+`docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+"Resultado da implementação (2026-09-14)".

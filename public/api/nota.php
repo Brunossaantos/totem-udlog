@@ -37,6 +37,9 @@ switch ($_GET['acao'] ?? '') {
     case 'identificar-cliente':
         $controller->identificarCliente($entrada, (int) $totem['id_totem']);
         break;
+    case 'definir-numero':
+        $controller->definirNumero($entrada, (int) $totem['id_totem']);
+        break;
     default:
         Resposta::erro('Acao invalida', 404);
 }

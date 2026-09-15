@@ -5,9 +5,11 @@ namespace App\Controller;
 use App\Rn\AtendimentoRn;
 use App\Rn\TalentRn;
 use App\Rn\DocumentoRn;
+use App\Rn\OrdemColetaClient;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
+use App\Dao\OrdemColetaPendenteBaixaDao;
 use Util\Resposta;
 use Util\UploadHelper;
 
@@ -19,7 +21,9 @@ class AtendimentoController
         private AtendimentoNotaDao $notaDao,
         private ?DocumentoRn $documentoRn = null,
         private ?TotemDao $totemDao = null,
-        private ?EmpresaDao $empresaDao = null
+        private ?EmpresaDao $empresaDao = null,
+        private ?OrdemColetaClient $ordemColetaClient = null,
+        private ?OrdemColetaPendenteBaixaDao $ordemColetaPendenteBaixaDao = null
     ) {}
 
     public function iniciar(int $idTotem, array $entrada): void
@@ -521,22 +525,43 @@ class AtendimentoController
             Resposta::erro('Totem sem empresa/armazem configurado para envio ao Talent', 500);
         }
 
-        // TRAVA TEMPORARIA (extensao integracao-talent-portaria-checkin,
-        // 2026-09-10) — NAO E uma falha transitoria deste atendimento, e uma
-        // lacuna de implementacao que afeta TODOS os atendimentos: teste real
-        // em Producao confirmou (HTTP 400) que `doctos[]` e obrigatorio no
-        // Checkin do Talent, mas a semantica de `nrDocto`/`doctos[].tipo`
-        // continua indefinida (nao presumir). Enquanto isso nao for
-        // implementado, a chamada ao Talent fica SEMPRE bloqueada aqui,
-        // ANTES do CAS de idempotencia — nenhum payload e montado, nenhuma
-        // chamada a TalentRn::processarCheckin() ocorre, talent_checkin_status
-        // permanece NAO_ENVIADO indefinidamente (nenhuma tentativa
-        // registrada). Ver docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md,
-        // secao "Terceira tentativa — CAUSA RAIZ ENCONTRADA". Remover esta
-        // trava somente quando doctos[] for implementado numa demanda futura.
-        Resposta::erro('Envio ao Talent temporariamente indisponivel (TALENT_DOCTOS_PENDENTE)', 501);
-
         $notas = $this->notaDao->listarPorAtendimento($idAtendimento);
+
+        // GATES REAIS de doctos[] (demanda talent-doctos-finalizacao-checkin,
+        // 2026-09-14) — substituem a trava incondicional TALENT_DOCTOS_PENDENTE
+        // anterior. Rodam ANTES do CAS de idempotencia, exercitando 100% da
+        // validacao mesmo quando TALENT_CHECKIN_ATIVO estiver desligado (ver
+        // abaixo) — defesa em profundidade, App\Rn\TalentRn::montarPayload()
+        // tambem valida isso internamente.
+        if ($atendimento['tipo'] === 'recebimento') {
+            foreach ($notas as $nota) {
+                if (trim((string) ($nota['numero_nota'] ?? '')) === '') {
+                    Resposta::erro('Existem notas fiscais sem numero definido (NOTAS_SEM_NUMERO)', 422);
+                    return;
+                }
+            }
+        } else {
+            // expedicao — defesa em profundidade, ordem_coleta ja deveria
+            // estar garantido a montante (selecionar-ordem)
+            if (trim((string) ($atendimento['ordem_coleta'] ?? '')) === '') {
+                Resposta::erro('Atendimento sem ordem de coleta selecionada', 422);
+                return;
+            }
+        }
+
+        // Mecanismo de "ativacao configuravel fail-closed" — enquanto
+        // TALENT_CHECKIN_ATIVO nao for LITERALMENTE 'true' no .env, nenhuma
+        // chamada de rede real ao Talent ocorre daqui pra frente, mas TODOS
+        // os gates acima (doctos/posse/tipo/status/etapa/documentos) ja
+        // foram exercitados normalmente. Fail-closed: ausente/qualquer outro
+        // valor = tratado como desativado. Permite "ligar" no futuro so
+        // mudando esta variavel de ambiente, sem alterar codigo. Ver
+        // docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md.
+        $talentCheckinAtivo = ($_ENV['TALENT_CHECKIN_ATIVO'] ?? '') === 'true';
+        if (!$talentCheckinAtivo) {
+            Resposta::erro('Envio ao Talent temporariamente desativado (TALENT_CHECKIN_DESATIVADO)', 503);
+            return;
+        }
 
         // CAS de idempotencia (5 estados) — ULTIMO portao antes de ler
         // anexos do disco/montar payload. App\Rn\TalentRn::processarCheckin
@@ -548,6 +573,16 @@ class AtendimentoController
         switch ($resultado['status']) {
             case 'ENVIADO':
             case 'JA_ENVIADO':
+                // Atualizacao de ordem para INATIVA — so Expedicao, so DEPOIS
+                // da confirmacao de sucesso, nunca antes, nunca para
+                // Recebimento. Falha aqui NUNCA bloqueia a resposta de
+                // sucesso ja garantida ao motorista (a senha/nrRegAcesso ja
+                // e valida independente disso) — registrada como pendencia
+                // de auditoria (tb_ordem_coleta_pendente_baixa), idempotente,
+                // sem cron de reconciliacao automatica nesta demanda.
+                if ($atendimento['tipo'] === 'expedicao') {
+                    $this->tentarMarcarOrdemConcluida($idAtendimento, (string) $atendimento['ordem_coleta']);
+                }
                 Resposta::sucesso(['senha' => $resultado['senha'], 'protocolo' => $resultado['protocolo']]);
                 return;
             case 'EM_ANDAMENTO':
@@ -579,6 +614,64 @@ class AtendimentoController
         $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
         $this->atendimentoRn->cancelar($idAtendimento);
         Resposta::sucesso(['ok' => true]);
+    }
+
+    /**
+     * Tenta marcar a ordem de coleta como INATIVA (banco externo de gestao
+     * de coletas) apos check-in confirmado no Talent — SEMPRE em try/catch,
+     * SEMPRE sem propagar excecao: qualquer falha real (retorno false por
+     * ordem ainda ATIVA/inexistente, OU excecao) e registrada em
+     * tb_ordem_coleta_pendente_baixa (auditoria idempotente, so os 2
+     * identificadores + timestamps, NUNCA payload/dado pessoal/credencial),
+     * log estruturado sanitizado so com esses 2 IDs. Nunca bloqueia/altera a
+     * resposta de sucesso ja decidida pelo chamador.
+     *
+     * Correcao de auditoria (2026-09-15): o branch JA_ENVIADO do Talent pode
+     * chegar aqui com a ordem ja INATIVA de uma chamada anterior
+     * bem-sucedida (reprocessamento idempotente do mesmo check-in) —
+     * marcarConcluida() retorna false nesse caso (UPDATE condicional
+     * WHERE status='ATIVA' afeta 0 linhas), mas isso NAO e uma falha: a
+     * ordem ja esta no estado final correto. Por isso, quando marcarConcluida()
+     * retorna false, consulta-se o status atual (statusAtual()) para
+     * distinguir "ja estava INATIVA" (idempotente, sucesso, sem registro de
+     * pendencia, sem segunda tentativa de UPDATE) de uma falha real (ordem
+     * ainda ATIVA, inexistente, ou status desconhecido por excecao na
+     * propria consulta de status — tratado como falha real por seguranca).
+     */
+    private function tentarMarcarOrdemConcluida(int $idAtendimento, string $numeroOrdemColeta): void
+    {
+        if ($this->ordemColetaClient === null || $this->ordemColetaPendenteBaixaDao === null) {
+            error_log("finalizar: OrdemColetaClient/OrdemColetaPendenteBaixaDao nao injetados — pendencia de baixa nao registrada para id_atendimento={$idAtendimento}");
+            return;
+        }
+
+        try {
+            $ok = $this->ordemColetaClient->marcarConcluida($numeroOrdemColeta);
+        } catch (\Throwable $e) {
+            $ok = false;
+        }
+
+        if ($ok === true) {
+            return;
+        }
+
+        try {
+            $statusAtual = $this->ordemColetaClient->statusAtual($numeroOrdemColeta);
+        } catch (\Throwable $e) {
+            $statusAtual = null;
+        }
+
+        if ($statusAtual === 'INATIVA') {
+            error_log("finalizar: ordem de coleta ja estava INATIVA (idempotente, nada a fazer) para id_atendimento={$idAtendimento}");
+            return;
+        }
+
+        try {
+            $this->ordemColetaPendenteBaixaDao->registrar($idAtendimento, $numeroOrdemColeta);
+            error_log("finalizar: baixa da ordem de coleta pendente, registrada para reconciliacao manual (id_atendimento={$idAtendimento})");
+        } catch (\Throwable $e) {
+            error_log("finalizar: falha ao registrar pendencia de baixa de ordem de coleta (id_atendimento={$idAtendimento})");
+        }
     }
 
     /**

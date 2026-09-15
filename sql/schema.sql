@@ -143,6 +143,13 @@ CREATE TABLE tb_atendimento_nota (
     ordem                 TINYINT UNSIGNED NOT NULL,
     arquivo               VARCHAR(255) NOT NULL,
     chave_acesso          CHAR(44) NULL,
+    -- numero_nota/numero_nota_origem: numero da NF-e (OCR confirmado ou
+    -- digitado manualmente), sempre normalizado no backend (sem zero a
+    -- esquerda, so digitos) antes de gravar. Usado para montar doctos[]
+    -- (tipo NOTA_FISCAL) no envio ao Talent. Ver
+    -- sql/migrations/012_talent_doctos_finalizacao_checkin.sql.
+    numero_nota           VARCHAR(20) NULL,
+    numero_nota_origem    ENUM('OCR','MANUAL') NULL,
     cnpj_emitente         VARCHAR(20) NULL,
     cliente_identificado  TINYINT(1) NOT NULL DEFAULT 0,
     -- status_ocr/processado_em: identificacao de cliente via OCR client-side
@@ -157,7 +164,26 @@ CREATE TABLE tb_atendimento_nota (
     FOREIGN KEY (id_atendimento) REFERENCES tb_atendimento(id_atendimento),
     INDEX idx_chave (chave_acesso),
     INDEX idx_status_ocr (status_ocr),
-    UNIQUE KEY uk_atendimento_ordem (id_atendimento, ordem)
+    UNIQUE KEY uk_atendimento_ordem (id_atendimento, ordem),
+    UNIQUE KEY uk_atendimento_numero_nota (id_atendimento, numero_nota)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Registro de auditoria interno (banco do TOTEM) para o cenario "Talent
+-- aceitou o check-in, mas o UPDATE de status da ordem de coleta para
+-- INATIVA (banco externo de gestao de coletas) falhou" — NUNCA guarda
+-- payload/corpo bruto/CPF/CNH/token, so os 2 identificadores + timestamps.
+-- UNIQUE(id_atendimento) torna a gravacao idempotente (replay do CAS de
+-- idempotencia do Talent nao duplica linha). Sem cron de reconciliacao
+-- automatica nesta demanda (fora de escopo, so registro de auditoria). Ver
+-- sql/migrations/012_talent_doctos_finalizacao_checkin.sql.
+CREATE TABLE tb_ordem_coleta_pendente_baixa (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    id_atendimento      BIGINT UNSIGNED NOT NULL,
+    numero_ordem_coleta VARCHAR(50) NOT NULL,
+    criado_em           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolvido_em        DATETIME NULL,
+    UNIQUE KEY uk_ordem_coleta_pendente_baixa_atendimento (id_atendimento),
+    FOREIGN KEY (id_atendimento) REFERENCES tb_atendimento(id_atendimento)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Controle de taxa (rate limit) por totem para nota.php?acao=identificar-cliente.

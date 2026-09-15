@@ -110,6 +110,10 @@ $atendimentoDao->atualizarValidacaoCnh($idAtendimento, 'MOTORISTA TESTE PREP', '
 $atendimentoDao->atualizarValidacaoCrlv($idAtendimento, $placaTeste, 2025, 'SP', '12345678', 'CAMINHAO', 'MANUAL', 'PENDENTE_REVISAO');
 $atendimentoDao->atualizarEtapa($idAtendimento, 'rec_confirmacao');
 $idNota = $notaDao->inserir($idAtendimento, 1, 'nota_01.jpg', '35' . str_repeat('0', 42), $clienteCnpjTeste, true);
+// numero_nota (demanda talent-doctos-finalizacao-checkin, 2026-09-14) --
+// obrigatorio para doctos[] (tipo NOTA_FISCAL) nao lancar excecao ao montar
+// o payload no passo 4 abaixo.
+$notaDao->atualizarNumero($idNota, '123456', 'MANUAL');
 
 echo "Documentos gravados: CNH (MANUAL, aprovada), CRLV (MANUAL, aprovado, UF=SP), 1 nota fiscal (id_nota={$idNota})\n";
 echo "Arquivos criados em disco: {$pastaCompleta}/cnh_frente.jpg, cnh_verso.jpg, crlv.jpg, nota_01.jpg\n\n";

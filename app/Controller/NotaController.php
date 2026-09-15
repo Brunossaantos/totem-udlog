@@ -181,6 +181,64 @@ class NotaController
         Resposta::sucesso($resultado);
     }
 
+    /**
+     * Endpoint nota.php?acao=definir-numero (demanda
+     * talent-doctos-finalizacao-checkin, 2026-09-14) — grava o numero da
+     * NF-e (OCR confirmado pelo motorista ou digitado manualmente).
+     * Normalizacao (so digitos, sem zero a esquerda) e SEMPRE feita no
+     * backend (App\Rn\NotaFiscalRn::atualizarNumeroNota), nunca confia no
+     * que o front envia como "ja normalizado". Mesmo padrao de
+     * posse/tipo/status/etapa das demais acoes deste controller.
+     */
+    public function definirNumero(array $entrada, int $idTotem): void
+    {
+        $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
+        $ordem = (int) ($entrada['ordem'] ?? 0);
+        $numero = $entrada['numero'] ?? null;
+        $origem = $entrada['origem'] ?? null;
+
+        if (!$idAtendimento || !$ordem || !is_string($numero) || trim($numero) === '' || !in_array($origem, ['OCR', 'MANUAL'], true)) {
+            Resposta::erro('Dados incompletos');
+        }
+
+        if ($ordem < 1 || $ordem > 5) {
+            Resposta::erro('Ordem da nota invalida');
+        }
+
+        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+
+        if ($atendimento['tipo'] !== 'recebimento') {
+            Resposta::erro('Atendimento nao encontrado', 404);
+        }
+        if ($atendimento['status'] !== 'em_andamento') {
+            Resposta::erro('Atendimento nao esta em andamento');
+        }
+        if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
+            Resposta::erro('Atendimento nao esta na etapa de digitalizacao de notas');
+        }
+
+        try {
+            $resultado = $this->notaFiscalRn->atualizarNumeroNota($idAtendimento, $ordem, trim($numero), $origem);
+        } catch (\InvalidArgumentException $e) {
+            Resposta::erro('Numero de nota invalido — informe apenas os digitos da NF-e', 400);
+            return;
+        } catch (\RuntimeException $e) {
+            if ($e->getMessage() === 'numero_nota_duplicado') {
+                Resposta::erro('Ja existe uma nota com esse numero neste atendimento (NUMERO_NOTA_DUPLICADO)', 409);
+                return;
+            }
+            if ($e->getMessage() === 'nota_nao_encontrada') {
+                Resposta::erro('Nota nao encontrada para essa ordem', 404);
+                return;
+            }
+            error_log('definir-numero: falha nao prevista: ' . $e->getMessage());
+            Resposta::erro('Nao foi possivel gravar o numero da nota', 500);
+            return;
+        }
+
+        Resposta::sucesso($resultado);
+    }
+
     public function algumaIdentificada(int $idAtendimento, int $idTotem): void
     {
         $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);

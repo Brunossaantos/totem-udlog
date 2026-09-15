@@ -38,12 +38,23 @@ class TalentClient
 
     /**
      * @param array $payload payload ja montado por App\Rn\TalentRn::montarPayload
-     * @return array{senha: ?string, protocolo: ?string} allowlist do retorno —
-     *         o manual NAO documenta o formato de sucesso deste endpoint
-     *         especifico; 'senha'/'protocolo' so sao preenchidos se
-     *         literalmente presentes e do tipo string no corpo JSON de
-     *         resposta, NUNCA inventados. Ausencia de ambos e tratada como
-     *         "sucesso tecnico sem dados adicionais" pelo chamador.
+     * @return array{senha: ?string, protocolo: ?string} formato de resposta
+     *         real CONFIRMADO via Swagger oficial em 2026-09-14
+     *         (TPortariaCheckinRet = {nrRegAcesso: string|null, msg:
+     *         string|null}) — substitui o allowlist anterior
+     *         (senha/protocolo), que nunca existiram na API real.
+     *         'nrRegAcesso' e mapeado para a chave interna 'senha' (mantida
+     *         por compatibilidade com App\Dao\AtendimentoDao::gravarResultadoEnvioTalent
+     *         e o restante do fluxo, que ja consomem esse nome — decisao
+     *         documentada aqui em vez de renomear a coluna/assinatura em
+     *         cascata). 'protocolo' NUNCA e preenchido pela API real (o
+     *         campo tb_atendimento.talent_protocolo fica permanentemente
+     *         NULL apos esta correcao — achado registrado em
+     *         ia_development_state.md para limpeza futura de schema).
+     *         'msg' e SOMENTE usado transitoriamente aqui dentro (nunca
+     *         logado/persistido/retornado) — hoje sem uso de decisao
+     *         interna, mas o parsing ja o descarta explicitamente por
+     *         clareza.
      * @throws TalentClientException categorizada (nunca com corpo bruto)
      */
     public function checkin(array $payload): array
@@ -126,9 +137,14 @@ class TalentClient
                 return ['senha' => null, 'protocolo' => null];
             }
 
+            // 'msg' (nullable, TPortariaCheckinRet) e descartado logo apos a
+            // leitura — NUNCA logado nem persistido (corpo de texto livre
+            // vindo do Talent, potencialmente com dado sensivel de negocio).
+            unset($dados['msg']);
+
             return [
-                'senha' => is_string($dados['senha'] ?? null) ? $dados['senha'] : null,
-                'protocolo' => is_string($dados['protocolo'] ?? null) ? $dados['protocolo'] : null,
+                'senha' => is_string($dados['nrRegAcesso'] ?? null) ? $dados['nrRegAcesso'] : null,
+                'protocolo' => null,
             ];
         }
 

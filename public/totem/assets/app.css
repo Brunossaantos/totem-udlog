@@ -91,8 +91,12 @@ input.campo-texto {
 .lista-sugestoes .item:hover { background: #f4f6f8; }
 
 .miniaturas { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
-.miniatura { width: 32px; height: 40px; background: #0b2a45; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; overflow: hidden; }
-.miniatura img { width: 100%; height: 100%; object-fit: cover; }
+.miniatura { position: relative; width: 32px; height: 40px; background: #0b2a45; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; overflow: visible; }
+.miniatura img { width: 100%; height: 100%; object-fit: cover; border-radius: 5px; }
+/* selo de numero da nota (confirmado/pendente) — demanda talent-doctos-finalizacao-checkin */
+.selo-numero { position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 4px; }
+.selo-numero.ok { background: #1d7a5f; color: #fff; }
+.selo-numero.pendente { background: #a32d2d; color: #fff; }
 
 /* aspect-ratio 4/3 e so o fallback ANTES do stream conectar (e antes do primeiro
    calculo) — 4/3 (horizontal) foi escolhido por ser a proporcao real entregue
@@ -131,6 +135,58 @@ input.campo-texto {
 .modal-caixa { background: #fff; border-radius: 14px; padding: 24px; max-width: 320px; text-align: center; display: flex; flex-direction: column; gap: 14px; }
 .modal-caixa .titulo { font-size: 17px; }
 .modal-caixa .subtitulo { font-size: 14px; }
+
+/* confirmacao de cancelamento EMPILHADA sobre o modal de numero da nota
+   (achado bloqueante do /03-revisao, demanda talent-doctos-finalizacao-checkin)
+   — elemento PROPRIO e independente de #modalFundo/#modalCaixa, por isso
+   z-index maior (fica por cima do modal de numero da nota, que continua
+   visivel/intacto por tras enquanto esta confirmacao estiver aberta). */
+.modal-fundo-confirma-nota { z-index: 55; }
+
+/* aviso de inatividade em overlay PROPRIO e independente (achado bloqueante
+   do /02-testes de confirmacao, demanda talent-doctos-finalizacao-checkin) —
+   elemento PROPRIO, nunca reaproveita #modalFundo/#modalCaixa nem
+   #modalConfirmCancelNotaFundo/Caixa. Precisa aparecer por cima de QUALQUER
+   overlay que possa estar aberto no momento em que o timer dispara: acima do
+   modal padrao (z-index:50), da confirmacao de cancelamento empilhada sobre o
+   modal de numero da nota (z-index:55) e do overlay de diagnostico de
+   impressao (.diag-overlay, z-index:70, acessivel por toque longo em
+   qualquer tela) — por isso a camada mais alta do projeto. */
+.modal-fundo-inatividade { z-index: 80; }
+
+/* teclado numerico DEDICADO ao modal de numero da nota fiscal (demanda
+   talent-doctos-finalizacao-checkin, achado 2 do /03-revisao) — alvos grandes
+   (~64px), NAO reaproveitado por nenhuma outra tela/teclado do projeto. */
+.teclado-numerico-nota { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; max-width: 280px; margin: 0 auto; }
+.tecla-numerica { height: 64px; font-size: 22px; font-weight: 600; background: #fff; border: 2px solid #0b2a45; border-radius: 10px; color: #0b2a45; cursor: pointer; }
+.tecla-numerica-apagar { background: #dbe4ea; border-color: #dbe4ea; }
+.tecla-numerica-confirmar { background: #0b2a45; border-color: #0b2a45; color: #fff; }
+.tecla-numerica-confirmar:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* botao de saida do modal obrigatorio de numero da nota (achado 1 e achado
+   de atencao do /03-revisao, demanda talent-doctos-finalizacao-checkin) —
+   antes usava .btn-cancelar (texto cinza claro, sem padding/borda definidos,
+   sem alvo de toque minimo), com contraste insuficiente sendo o UNICO botao
+   de saida disponivel dentro de um modal obrigatorio. Agora usa contraste
+   equivalente a .btn-fantasma (fundo branco, borda solida) com altura minima
+   de 64px, igual ao alvo de toque do teclado numerico dedicado desta mesma
+   tela (.tecla-numerica), mas mais discreto que .btn-alerta/.tecla-numerica-
+   confirmar para nao competir visualmente com "Confirmar". */
+.btn-saida-modal-nota {
+    margin-top: 4px;
+    min-height: 64px;
+    width: 100%;
+    max-width: 280px;
+    margin-left: auto;
+    margin-right: auto;
+    background: #fff;
+    color: #0b2a45;
+    border: 2px solid #0b2a45;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+}
 
 /* ponto de acesso discreto ao diagnostico de impressao de teste (toque longo)
    — ver public/totem/assets/diagnostico-impressao.js. Invisivel de proposito,

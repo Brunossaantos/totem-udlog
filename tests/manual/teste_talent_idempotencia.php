@@ -160,7 +160,7 @@ afirmar('FilaEnvioDao::buscarPendentes NUNCA retorna atendimento com talent_chec
 // Item 7 (parte 1): timeout do TalentClient vira ENVIO_INDETERMINADO via
 // TalentRn::processarCheckin (SEM rede real)
 // ============================================================
-$fixTimeout = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'TIM1111');
+$fixTimeout = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'TIM1111', '11222333000181', 'SP', true, '12345678', 'CAMINHAO', 'OC-TIM1111');
 afirmarLimpo($idsAtendimento, $pastas, $pdo, $fixTimeout);
 
 $clienteTimeout = new TalentClientDeTeste(function () {
@@ -181,7 +181,7 @@ afirmar('Apos timeout, NENHUMA nova tentativa automatica e aceita (ENVIO_INDETER
 // ter saido do totem, ex.: CURLE_RECV_ERROR/GOT_NOTHING) tambem vira
 // ENVIO_INDETERMINADO, igual a 'timeout' (nunca ERRO_REPROCESSAVEL)
 // ============================================================
-$fixIndeterminado = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'IND1111');
+$fixIndeterminado = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'IND1111', '11222333000181', 'SP', true, '12345678', 'CAMINHAO', 'OC-IND1111');
 afirmarLimpo($idsAtendimento, $pastas, $pdo, $fixIndeterminado);
 
 $clienteIndeterminado = new TalentClientDeTeste(function () {
@@ -200,7 +200,7 @@ afirmar("Apos 'erro_indeterminado', NENHUMA nova tentativa automatica e aceita (
 // Item 7 (parte 2): resposta ATRASADA de uma tentativa ANTIGA nao
 // sobrescreve o resultado de uma tentativa MAIS NOVA
 // ============================================================
-$fixZumbi = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'ZUM1111');
+$fixZumbi = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'ZUM1111', '11222333000181', 'SP', true, '12345678', 'CAMINHAO', 'OC-ZUM1111');
 afirmarLimpo($idsAtendimento, $pastas, $pdo, $fixZumbi);
 
 $tentativaAntiga = bin2hex(random_bytes(8));
@@ -241,13 +241,15 @@ afirmar('status/etapa do atendimento avancam para concluido/impressao apos ENVIA
 // ============================================================
 $fixSucesso = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'recebimento', 'SUC1111');
 afirmarLimpo($idsAtendimento, $pastas, $pdo, $fixSucesso);
+talentInserirNotaComNumero($notaDao, $fixSucesso['id_atendimento'], 1, '123');
 
 $clienteSucesso = new TalentClientDeTeste(function () {
     return ['senha' => 'ABC123', 'protocolo' => 'PROTO-XYZ'];
 });
 $talentRnSucesso = new TalentRn($clienteSucesso, new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
 $atSucesso = $atendimentoDao->buscarPorId($fixSucesso['id_atendimento']);
-$r1 = $talentRnSucesso->processarCheckin($atSucesso, $empresa, []);
+$notasSucesso = $notaDao->listarPorAtendimento($fixSucesso['id_atendimento']);
+$r1 = $talentRnSucesso->processarCheckin($atSucesso, $empresa, $notasSucesso);
 afirmar('processarCheckin (sucesso): status ENVIADO', $r1['status'] === 'ENVIADO');
 afirmar('processarCheckin (sucesso): senha/protocolo retornados vem literalmente da allowlist do TalentClient', $r1['senha'] === 'ABC123' && $r1['protocolo'] === 'PROTO-XYZ');
 
@@ -256,7 +258,7 @@ $r2 = $talentRnSucesso->processarCheckin($atSucesso2, $empresa, []);
 afirmar('processarCheckin (chamada repetida apos ENVIADO): status JA_ENVIADO', $r2['status'] === 'JA_ENVIADO');
 afirmar('processarCheckin (JA_ENVIADO): NAO chama o Talent de novo (idempotencia real, so 1 chamada total)', $clienteSucesso->chamadas === 1);
 
-$fixErro = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'ERR1111');
+$fixErro = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'ERR1111', '11222333000181', 'SP', true, '12345678', 'CAMINHAO', 'OC-ERR1111');
 afirmarLimpo($idsAtendimento, $pastas, $pdo, $fixErro);
 $clienteErro = new TalentClientDeTeste(function () {
     throw new TalentClientException('erro_servidor');
@@ -276,6 +278,7 @@ foreach ($pastas as $p) {
 }
 foreach ($idsAtendimento as $id) {
     $pdo->prepare('DELETE FROM tb_fila_envio WHERE id_atendimento = :id')->execute(['id' => $id]);
+    $pdo->prepare('DELETE FROM tb_atendimento_nota WHERE id_atendimento = :id')->execute(['id' => $id]);
     $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $id]);
 }
 $pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotem]);

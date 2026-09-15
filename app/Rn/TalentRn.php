@@ -28,6 +28,19 @@ class TalentRn
      */
     private const TIMEOUT_INDETERMINADO_SEGUNDOS = 60;
 
+    /**
+     * Formato de anexo ATIVO por padrao (demanda
+     * talent-doctos-finalizacao-checkin, 2026-09-14) — confirmado pelo
+     * protocolo de teste do usuario (testar `anexos` primeiro, como
+     * documentado no manual PDF; `anexosGZip` (schema real do Swagger) so se
+     * `anexos` for rejeitado/ignorado num teste controlado em Producao,
+     * mediante autorizacao explicita, NUNCA automaticamente por causa de
+     * resposta ambigua/timeout/erro). A troca entre os dois formatos e
+     * SEMPRE uma decisao manual explicita — ver montarAnexosGzip() abaixo,
+     * metodo isolado, nunca chamado automaticamente por montarPayload().
+     */
+    private const FORMATO_ANEXO_ATIVO = 'anexos';
+
     public function __construct(
         private TalentClient $talentClient,
         private FilaEnvioDao $filaEnvioDao,
@@ -148,10 +161,13 @@ class TalentRn
         if (!in_array($atendimento['tipo'] ?? null, ['expedicao', 'recebimento'], true)) {
             throw new \RuntimeException('tipo_atendimento_invalido');
         }
-        // Literais confirmados por decisao de produto (2026-09-09):
-        // minusculas, "embarque"/"desembarque" — substitui a suposicao
-        // anterior capitalizada ("Embarque"/"Desembarque").
-        $tipoEmbDesemb = $atendimento['tipo'] === 'expedicao' ? 'embarque' : 'desembarque';
+        // Literais CORRIGIDOS em 2026-09-14 — confirmados via Swagger oficial
+        // (https://api.talentcs.com.br/swagger/v1/swagger.json,
+        // enumTipoEmbDesemb): "Embarque"/"Desembarque", capitalizado. A
+        // decisao anterior de 2026-09-09 (minusculas) era baseada em
+        // suposicao, hoje considerada desatualizada e incorreta — ver
+        // docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md.
+        $tipoEmbDesemb = $atendimento['tipo'] === 'expedicao' ? 'Embarque' : 'Desembarque';
 
         $placa = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($atendimento['placa'] ?? '')));
         $uf = strtoupper(trim((string) ($atendimento['crlv_uf'] ?? '')));
@@ -191,16 +207,61 @@ class TalentRn
             ]];
         }
 
-        // doctos[] OMITIDO nesta versao — sem mapeamento confirmado de
-        // nrDocto por tipo (decisao registrada em docs/manual_talent.md,
-        // "Doctos — decisao desta rodada"). Demais campos opcionais sem
-        // fonte de captura (reboque, exigePesagem, transportadora,
-        // telefones, nrCNH/categoriaCNH, pernoite, paletes,
-        // container/lacre/delivery, obs) tambem OMITIDOS.
+        // doctos[] — implementado em 2026-09-14 (demanda
+        // talent-doctos-finalizacao-checkin), enumTipoDocto confirmado via
+        // Swagger oficial (AR/APONTAMENTO/NOTA_FISCAL/ORDEM_COLETA). Demais
+        // campos opcionais sem fonte de captura (reboque, exigePesagem,
+        // transportadora, telefones, nrCNH/categoriaCNH, pernoite, paletes,
+        // container/lacre/delivery, obs) continuam OMITIDOS.
+        $payload['doctos'] = $this->montarDoctos($atendimento, $notas);
 
-        $payload['anexos'] = $this->montarAnexos($atendimento, $notas);
+        // Formato de anexo ATIVO (ver FORMATO_ANEXO_ATIVO) — nunca decide
+        // dinamicamente entre 'anexos'/'anexosGZip' aqui.
+        $payload[self::FORMATO_ANEXO_ATIVO] = $this->montarAnexos($atendimento, $notas);
 
         return $payload;
+    }
+
+    /**
+     * Monta doctos[] (obrigatorio pelo Talent, confirmado em teste real de
+     * Producao em 2026-09-10) — defesa em profundidade: mesmo que o gate de
+     * App\Controller\AtendimentoController::finalizar() ja tenha barrado a
+     * chamada antes de chegar aqui, este metodo NUNCA monta/retorna um
+     * doctos[] vazio nem incompleto, sempre lanca excecao (tratada pelo
+     * chamador como ERRO_REPROCESSAVEL, nunca chega a chamar o Talent):
+     *
+     *  - Recebimento: 1 entrada {tipo:'NOTA_FISCAL', nrDocto: numero_nota}
+     *    POR NOTA do atendimento — TODAS as notas precisam ter numero_nota
+     *    preenchido, senao excecao.
+     *  - Expedicao: 1 entrada {tipo:'ORDEM_COLETA', nrDocto: ordem_coleta}
+     *    — falha explicita se ordem_coleta vazio.
+     */
+    private function montarDoctos(array $atendimento, array $notas): array
+    {
+        if ($atendimento['tipo'] === 'expedicao') {
+            $ordemColeta = trim((string) ($atendimento['ordem_coleta'] ?? ''));
+            if ($ordemColeta === '') {
+                throw new \RuntimeException('doctos_ordem_coleta_ausente');
+            }
+
+            return [['tipo' => 'ORDEM_COLETA', 'nrDocto' => $ordemColeta]];
+        }
+
+        // recebimento
+        if (count($notas) === 0) {
+            throw new \RuntimeException('doctos_notas_ausentes');
+        }
+
+        $doctos = [];
+        foreach ($notas as $nota) {
+            $numeroNota = trim((string) ($nota['numero_nota'] ?? ''));
+            if ($numeroNota === '') {
+                throw new \RuntimeException('doctos_nota_sem_numero');
+            }
+            $doctos[] = ['tipo' => 'NOTA_FISCAL', 'nrDocto' => $numeroNota];
+        }
+
+        return $doctos;
     }
 
     /**
@@ -265,5 +326,47 @@ class TalentRn
             'anexoBase64' => base64_encode($pdfBytes),
             'descricao' => $descricao,
         ];
+    }
+
+    /**
+     * Montador ISOLADO do formato `anexosGZip:[{nome,valueBase64}]`,
+     * confirmado como o schema REAL do Swagger oficial (diverge do manual
+     * PDF, que documenta `anexos:[{anexoBase64,descricao}]` —
+     * FORMATO_ANEXO_ATIVO). NUNCA chamado automaticamente por
+     * montarPayload()/montarAnexos() — a troca de formato so pode acontecer
+     * via decisao explicita/manual num teste controlado em Producao (ver
+     * docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md, item
+     * 10), nunca automaticamente por causa de resposta ambigua/timeout/erro
+     * do Talent. Mantido aqui pronto para uso manual futuro, sem nenhum
+     * ponto de chamada no fluxo real desta demanda.
+     *
+     * Comprime cada PDF com gzencode() antes do base64 (nome do arquivo
+     * derivado da descricao, sem espacos/extensao .pdf.gz).
+     */
+    public function montarAnexosGzip(array $atendimento, array $notas): array
+    {
+        $anexosPadrao = $this->montarAnexos($atendimento, $notas);
+
+        $anexosGzip = [];
+        foreach ($anexosPadrao as $anexo) {
+            $pdfBytes = base64_decode($anexo['anexoBase64'], true);
+            if ($pdfBytes === false) {
+                throw new \RuntimeException('anexo_gzip_decodificacao_invalida');
+            }
+
+            $comprimido = gzencode($pdfBytes);
+            if ($comprimido === false) {
+                throw new \RuntimeException('anexo_gzip_compressao_falhou');
+            }
+
+            $nomeArquivo = preg_replace('/[^A-Za-z0-9_]+/', '_', $anexo['descricao']) . '.pdf.gz';
+
+            $anexosGzip[] = [
+                'nome' => $nomeArquivo,
+                'valueBase64' => base64_encode($comprimido),
+            ];
+        }
+
+        return $anexosGzip;
     }
 }

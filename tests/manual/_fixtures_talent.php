@@ -66,7 +66,8 @@ function talentCriarAtendimentoPronto(
     string $uf = 'SP',
     bool $comCnhFrenteVerso = true,
     string $rntc = '12345678',
-    string $tipoVeiculo = 'CAMINHAO'
+    string $tipoVeiculo = 'CAMINHAO',
+    ?string $ordemColeta = null
 ): array {
     $idAtendimento = $atendimentoDao->criar($idTotem, $tipo, $placa);
 
@@ -89,10 +90,32 @@ function talentCriarAtendimentoPronto(
     $atendimentoDao->atualizarValidacaoCnh($idAtendimento, 'MOTORISTA TESTE', '11144477735', '2030-01-01', 'MANUAL', 'PENDENTE_REVISAO');
     $atendimentoDao->atualizarValidacaoCrlv($idAtendimento, strtoupper($placa), 2025, $uf, $rntc, $tipoVeiculo, 'MANUAL', 'PENDENTE_REVISAO');
 
+    // ordem_coleta (demanda talent-doctos-finalizacao-checkin, 2026-09-14) —
+    // gravado diretamente via UPDATE simples (preencherDadosOrdem() muda
+    // tambem etapa_atual para 'dados_encontrados', o que seria sobrescrito
+    // logo abaixo mesmo, mas evitamos o efeito colateral indevido aqui).
+    if ($tipo === 'expedicao' && $ordemColeta !== null) {
+        $pdo->prepare('UPDATE tb_atendimento SET ordem_coleta = :oc WHERE id_atendimento = :id')
+            ->execute(['oc' => $ordemColeta, 'id' => $idAtendimento]);
+    }
+
     $etapaConfirmacao = $tipo === 'expedicao' ? 'exp_confirmacao' : 'rec_confirmacao';
     $atendimentoDao->atualizarEtapa($idAtendimento, $etapaConfirmacao);
 
     return ['id_atendimento' => $idAtendimento, 'pasta' => $pasta, 'pasta_completa' => $pastaCompleta];
+}
+
+/**
+ * Insere uma nota fiscal ja com numero_nota definido (fixture da demanda
+ * talent-doctos-finalizacao-checkin, 2026-09-14) — usa
+ * App\Dao\AtendimentoNotaDao::inserir + atualizarNumero, mesmo caminho de
+ * producao, para os testes de montagem de doctos[]/gate de finalizar().
+ */
+function talentInserirNotaComNumero(App\Dao\AtendimentoNotaDao $notaDao, int $idAtendimento, int $ordem, string $numeroNota, string $origem = 'MANUAL'): int
+{
+    $idNota = $notaDao->inserir($idAtendimento, $ordem, "nota_{$ordem}.jpg", null, null, false);
+    $notaDao->atualizarNumero($idNota, $numeroNota, $origem);
+    return $idNota;
 }
 
 function talentLimparPasta(string $pastaCompleta): void

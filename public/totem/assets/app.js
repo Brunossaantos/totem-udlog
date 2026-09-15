@@ -15,6 +15,12 @@ const state = {
     dados: {},
     notaOrdem: 0,
     notasImagens: [],
+    // paralelo a notasImagens (mesmo indice, ordem = indice+1) — demanda
+    // talent-doctos-finalizacao-checkin: cada entrada { ordem, numero,
+    // confirmado, origem: 'OCR'|'MANUAL'|null }. "Finalizar digitalizacao"
+    // so habilita quando todas estiverem confirmado=true (ver
+    // atualizarIndicadorNumerosNota()).
+    notasNumeros: [],
     previewNotaAtual: null,
     capturaNotaEmAndamento: false,
     finalizandoDigitalizacao: false,
@@ -107,26 +113,99 @@ function apagar() { if (campoAtivo) campoAtivo.value = campoAtivo.value.slice(0,
 
 // -------------------- inatividade --------------------
 
-let idleTimer = null;
+// Maquina de estado explicita de inatividade (correcao do achado BLOQUEANTE
+// do /02-testes de confirmacao, Etapa 1, 2026-09-15). Antes havia UMA unica
+// variavel idleTimer reaproveitada tanto para o timer principal (180s) quanto
+// para o timer de abandono (30s) — clearTimeout() no listener global era
+// incondicional, entao qualquer toque dentro do proprio overlay de aviso
+// cancelava o timer de abandono e reagendava 180s, sem fechar o overlay
+// (divergencia entre UI e comportamento real). Agora:
+// - idleTimerPrincipal: EXCLUSIVO do periodo de monitoramento normal (180s).
+// - idleTimerAbandono: EXCLUSIVO do periodo de aviso aberto, aguardando
+//   resposta (30s). So e criado por mostrarInatividade() e so e limpo por
+//   fecharAvisoInatividade() (chamada exclusivamente pelo botao "Continuar",
+//   por ir()/novoAtendimento(), ou pelo proprio disparo do timer de abandono).
+// - idleEstado: 'normal' | 'aviso' | 'inativo' — 'inativo' cobre state.tela
+//   === 'home' (nenhum monitoramento ativo). O listener global consulta esse
+//   estado ANTES de agir: em 'aviso', nao mexe em timer nenhum (nenhum toque
+//   fora do botao "Continuar" cancela/estende o prazo de 30s).
+let idleTimerPrincipal = null;
+let idleTimerAbandono = null;
+let idleEstado = 'inativo';
 const IDLE_MS = 180000;
 const IDLE_ABANDONO_MS = 30000;
 
+// Reinicia o timer de monitoramento NORMAL (180s). So deve ser chamada
+// quando idleEstado !== 'aviso' (o listener global ja garante isso). Nunca
+// mexe em idleTimerAbandono.
 function reiniciarIdle() {
-    clearTimeout(idleTimer);
-    if (state.tela !== 'home') idleTimer = setTimeout(mostrarInatividade, IDLE_MS);
+    clearTimeout(idleTimerPrincipal);
+    if (state.tela === 'home') {
+        idleEstado = 'inativo';
+        return;
+    }
+    idleEstado = 'normal';
+    idleTimerPrincipal = setTimeout(mostrarInatividade, IDLE_MS);
 }
 
+// Aviso de inatividade em overlay PROPRIO e independente (achado bloqueante
+// do /02-testes de confirmacao, demanda talent-doctos-finalizacao-checkin).
+// Antes chamava abrirModal(), que reescreve o MESMO #modalCaixa/#modalFundo
+// usado pelo modal obrigatorio de numero da nota (rec_digitaliza) — o timer de
+// inatividade roda mesmo com esse modal aberto e, ao disparar, destruia o
+// numero digitado/teclado e travava o motorista (numeroModalAberta nunca era
+// resetada, "Continuar" so escondia o overlay sem restaurar nada). Agora usa
+// #modalInatividadeFundo/Caixa (ver iniciarApp()), elemento PROPRIO, nunca
+// toca em #modalCaixa/#modalFundo nem em #modalConfirmCancelNotaFundo/Caixa —
+// por isso fica numa camada acima de TODOS os outros overlays (ver
+// .modal-fundo-inatividade em app.css) e qualquer modal que esteja aberto por
+// baixo (nenhum, numero da nota manual/sugestao, ou a confirmacao de
+// cancelamento empilhada sobre ele) continua exatamente como estava.
 function mostrarInatividade() {
-    abrirModal(`
+    idleEstado = 'aviso';
+    document.getElementById('modalInatividadeCaixa').innerHTML = `
         <div class="titulo">Ainda está aí?</div>
         <div class="subtitulo">Toque na tela para continuar o atendimento.</div>
-        <button class="btn-primario" onclick="fecharModal(); reiniciarIdle();">Continuar</button>
-    `);
-    // se ninguem responder ao aviso, cancela e volta pro inicio por seguranca
-    idleTimer = setTimeout(() => { fecharModal(); cancelarESair(); }, IDLE_ABANDONO_MS);
+        <button class="btn-primario" onclick="continuarAposAvisoInatividade();">Continuar</button>
+    `;
+    document.getElementById('modalInatividadeFundo').classList.add('aberto');
+    // timer de abandono EXCLUSIVO (30s) — variavel propria, nunca compartilhada
+    // com o timer principal. So e cancelado por fecharAvisoInatividade().
+    clearTimeout(idleTimerAbandono);
+    idleTimerAbandono = setTimeout(() => {
+        idleTimerAbandono = null;
+        fecharAvisoInatividade();
+        cancelarESair();
+    }, IDLE_ABANDONO_MS);
 }
 
-['click', 'touchstart', 'keydown'].forEach(evento => document.addEventListener(evento, reiniciarIdle));
+// Unico caminho acionado pelo botao "Continuar": fecha o aviso, cancela o
+// timer de abandono e volta ao monitoramento normal (180s).
+function continuarAposAvisoInatividade() {
+    fecharAvisoInatividade();
+    reiniciarIdle();
+}
+
+// Fecha o overlay de inatividade E cancela o timer de abandono (30s), se
+// houver — garante que nenhum callback atrasado de um timer ja "encerrado"
+// ainda dispare depois (sem callback fantasma). Nunca toca em #modalCaixa/
+// #modalFundo nem em #modalConfirmCancelNotaFundo/Caixa, entao qualquer modal
+// aberto por baixo (numero da nota manual/sugestao, confirmacao de
+// cancelamento) permanece intacto, sem nenhuma destruicao/recriacao.
+function fecharAvisoInatividade() {
+    document.getElementById('modalInatividadeFundo').classList.remove('aberto');
+    clearTimeout(idleTimerAbandono);
+    idleTimerAbandono = null;
+}
+
+// So reinicia o monitoramento em resposta a interacao do usuario quando o
+// aviso de inatividade NAO estiver aberto. Enquanto idleEstado === 'aviso',
+// nenhum toque fora do botao "Continuar" (que chama continuarAposAvisoInatividade
+// diretamente, sem passar por aqui) pode cancelar/estender o prazo de 30s.
+['click', 'touchstart', 'keydown'].forEach(evento => document.addEventListener(evento, () => {
+    if (idleEstado === 'aviso') return;
+    reiniciarIdle();
+}));
 
 // -------------------- modal generico --------------------
 
@@ -160,6 +239,15 @@ function ir(tela) {
     document.getElementById('barraCancelar').style.display = tela === 'home' ? 'none' : 'block';
     fecharTeclado();
     fecharModal();
+    // toda troca de tela (cancelar, voltar ao inicio, novo atendimento) fecha
+    // tambem o aviso de inatividade, se estiver aberto — evita overlay orfao
+    // visivel por cima da tela nova. fecharAvisoInatividade() sempre limpa o
+    // timer de abandono (idleTimerAbandono, 30s) mesmo que nao estivesse
+    // ativo (clearTimeout(null) e um no-op seguro); reiniciarIdle() logo
+    // abaixo sempre limpa o timer principal (idleTimerPrincipal, 180s) e so
+    // reagenda se a tela de destino nao for 'home' — nenhum callback
+    // fantasma de timer anterior sobrevive a navegacao.
+    fecharAvisoInatividade();
     renderTela();
     reiniciarIdle();
 }
@@ -212,12 +300,15 @@ function renderTela() {
 function novoAtendimento() {
     Object.assign(state, {
         tela: 'home', tipo: null, idAtendimento: null, placa: '',
-        ordens: [], dados: {}, notaOrdem: 0, notasImagens: [], previewNotaAtual: null,
+        ordens: [], dados: {}, notaOrdem: 0, notasImagens: [], notasNumeros: [], previewNotaAtual: null,
         capturaNotaEmAndamento: false, finalizandoDigitalizacao: false, clienteIdentificado: false, ultimaLeituraQr: null,
         exp: estadoExpVazio(),
         rec: estadoRecVazio(),
     });
     ocrFila = [];
+    ocrNumeroFila = [];
+    numeroModalFila = [];
+    numeroModalAberta = false;
     ir('home');
 }
 
@@ -1172,36 +1263,358 @@ async function salvarAjudanteEAvancar(nome, cpf) {
     } catch (e) { mostrarErroTela(e.message); }
 }
 
-// -------------------- impressao da senha (expedicao e recebimento) --------------------
+// ===================================================================
+// IMPRESSAO REAL pos-Talent (expedicao e recebimento) — demanda
+// talent-doctos-finalizacao-checkin. Maquina de estados PROPRIA deste
+// arquivo, NUNCA reaproveitando diagnostico-impressao.js (modulo de teste
+// isolado — so referencia de padrao: mesma chave de localStorage
+// (totem_impressora_nome), mesmo uso de AbortController para timeout,
+// nunca retry automatico). telaImpressao()/processarImpressao() mantidos
+// como pontos de entrada (chamados por renderTela() em exp_impressao/
+// rec_impressao), reescritos por completo.
+//
+// Campos devolvidos por atendimento.php?acao=finalizar em caso de sucesso,
+// confirmado com o backend-especialista: `senha` (numero de acesso, valor
+// de nrRegAcesso do Talent) e `protocolo` (sempre null). `motorista_nome`
+// nao vem do backend — usa fallback para state.dados.motorista_nome.
+// ===================================================================
+
+const IMPR_CHAVE_IMPRESSORA = 'totem_impressora_nome'; // MESMA chave ja usada por diagnostico-impressao.js
+const IMPR_TIMEOUT_FALLBACK_MS = 35000;
+
+const imprState = {
+    tela: 'enviando', // enviando | erro_finalizar | selecionar_impressora | preparando | imprimindo | concluido | erro | indeterminado
+    urlServicoLocal: null,
+    tokenServicoLocal: null,
+    frontendTimeoutMs: IMPR_TIMEOUT_FALLBACK_MS,
+    impressoras: [],
+    mensagemErro: '',
+    mensagemIndeterminado: '',
+    resultadoFinalizar: null, // { nrRegAcesso, motoristaNome }
+    etiqueta: null,
+};
 
 function telaImpressao() {
-    return `<div id="impressaoConteudo"><div class="subtitulo">Enviando seus dados...</div></div>`;
+    return `<div id="imprConteudo">${imprRenderCorpo()}</div>`;
 }
+
 async function processarImpressao() {
-    const el = document.getElementById('impressaoConteudo');
+    Object.assign(imprState, {
+        tela: 'enviando',
+        mensagemErro: '',
+        mensagemIndeterminado: '',
+        resultadoFinalizar: null,
+        etiqueta: null,
+    });
+    imprRender();
+    await imprFinalizar();
+}
+
+// -------------------- passo 1: finalizar() (ja existe, so consumido aqui) --------------------
+
+async function imprFinalizar() {
     try {
         const dados = await api('atendimento.php', 'finalizar', { id_atendimento: state.idAtendimento });
-        // Formato de retorno de sucesso do Talent (Portaria/Checkin) NAO e
-        // documentado no manual oficial (pendencia registrada em
-        // docs/manual_talent.md) — senha/protocolo podem vir ausentes
-        // (null). Nesse caso mostra mensagem generica de check-in
-        // registrado, em vez de exibir "undefined"/valor vazio como senha.
-        const blocoSenha = dados.senha
-            ? `<div class="senha-caixa"><div class="rotulo">SENHA</div><div class="valor">${escapeHtml(dados.senha)}</div></div>
-               <div class="subtitulo">Retire o comprovante na bandeja abaixo</div>`
-            : `<div class="subtitulo">Seu check-in foi registrado com sucesso.</div>`;
-        el.innerHTML = `<div class="subtitulo">${dados.senha ? 'Imprimindo sua senha' : 'Tudo certo!'}</div>
-            ${blocoSenha}
-            <button class="btn-fantasma" style="max-width:320px;margin:0 auto" onclick="novoAtendimento()">Novo atendimento</button>`;
+        imprState.resultadoFinalizar = {
+            nrRegAcesso: dados.senha ?? null,
+            motoristaNome: dados.motorista_nome ?? (state.dados && state.dados.motorista_nome) ?? null,
+        };
+        await imprIniciarImpressao();
     } catch (e) {
-        if (e.status === 202) {
-            el.innerHTML = `<div class="subtitulo">Seu atendimento foi recebido — a senha será processada em instantes.</div>
-                <button class="btn-fantasma" style="max-width:320px;margin:0 auto" onclick="novoAtendimento()">Novo atendimento</button>`;
-        } else {
-            el.innerHTML = `<div class="subtitulo">${escapeHtml(e.message)}</div>
-                <button class="btn-primario" style="max-width:320px;margin:0 auto" onclick="processarImpressao()">Tentar novamente</button>`;
-        }
+        // Inclui o codigo TALENT_CHECKIN_DESATIVADO (esperado nesta etapa,
+        // .env ainda nao ativado) e qualquer outro erro de finalizar() —
+        // sempre tratado como estado de erro claro/recuperavel, nunca como
+        // sucesso, nunca trava a tela.
+        imprState.mensagemErro = e.message || 'Não foi possível concluir o check-in agora.';
+        imprState.tela = 'erro_finalizar';
+        imprRender();
     }
+}
+
+// -------------------- comunicacao: backend PHP (token do TOTEM) --------------------
+
+async function imprApiConfiguracaoServicoLocal() {
+    // PENDENCIA: reaproveita o MESMO endpoint ja usado pelo diagnostico
+    // (impressao-teste.php?acao=configuracao-servico-local) — o handoff nao
+    // especifica um endpoint proprio deste fluxo real para essa configuracao
+    // (so gerar-etiqueta e novo, em impressao.php). Ajustar se o backend
+    // criar uma acao equivalente dedicada.
+    const res = await fetch(`${API_BASE}impressao-teste.php?acao=configuracao-servico-local`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${TOKEN}` },
+    });
+    const json = await res.json();
+    if (!json.sucesso) {
+        const erro = new Error(json.erro || 'Erro desconhecido');
+        erro.status = res.status;
+        throw erro;
+    }
+    return json.dados;
+}
+
+function imprApiGerarEtiqueta(reimpressao) {
+    const corpo = { id_atendimento: state.idAtendimento };
+    if (reimpressao) corpo.reimpressao = 1;
+    return api('impressao.php', 'gerar-etiqueta', corpo);
+}
+
+// -------------------- comunicacao: servico local Node.js (token PROPRIO, nunca o do totem) --------------------
+// Implementacao PROPRIA (nao importa/chama nada de diagnostico-impressao.js),
+// mesmo padrao: AbortController para desistir por conta propria do fetch,
+// nunca retry automatico embutido aqui.
+
+async function imprFetchServicoLocal(caminho, opcoes, timeoutMs) {
+    const url = `${imprState.urlServicoLocal}${caminho}`;
+    const headers = Object.assign({}, (opcoes && opcoes.headers) || {});
+    if (caminho !== '/saude') {
+        headers['Authorization'] = `Bearer ${imprState.tokenServicoLocal}`;
+    }
+
+    let controller = null;
+    let temporizador = null;
+    const opcoesFinais = Object.assign({}, opcoes, { headers });
+    if (timeoutMs) {
+        controller = new AbortController();
+        opcoesFinais.signal = controller.signal;
+        temporizador = setTimeout(() => controller.abort(), timeoutMs);
+    }
+
+    try {
+        const res = await fetch(url, opcoesFinais);
+        let json = null;
+        try { json = await res.json(); } catch (e) { /* resposta sem corpo JSON valido */ }
+        return { ok: res.ok, status: res.status, dados: json, abortou: false };
+    } catch (e) {
+        if (e && e.name === 'AbortError') {
+            return { ok: false, status: 0, dados: null, abortou: true };
+        }
+        throw e;
+    } finally {
+        if (temporizador) clearTimeout(temporizador);
+    }
+}
+
+// -------------------- passos 2-4: impressora + gerar etiqueta + imprimir --------------------
+
+async function imprIniciarImpressao() {
+    imprState.tela = 'preparando';
+    imprRender();
+
+    try {
+        const cfg = await imprApiConfiguracaoServicoLocal();
+        imprState.urlServicoLocal = cfg.url;
+        imprState.tokenServicoLocal = cfg.token;
+        imprState.frontendTimeoutMs = (typeof cfg.frontend_timeout_ms === 'number' && cfg.frontend_timeout_ms > 0)
+            ? cfg.frontend_timeout_ms
+            : IMPR_TIMEOUT_FALLBACK_MS;
+    } catch (e) {
+        imprState.mensagemErro = 'Serviço de impressão local não configurado: ' + e.message;
+        imprState.tela = 'erro';
+        imprRender();
+        return;
+    }
+
+    const impressoraSalva = localStorage.getItem(IMPR_CHAVE_IMPRESSORA);
+    if (!impressoraSalva) {
+        const listaOk = await imprCarregarImpressoras();
+        if (!listaOk) return;
+        imprState.tela = 'selecionar_impressora';
+        imprRender();
+        return;
+    }
+    await imprExecutarImpressao(impressoraSalva, false);
+}
+
+async function imprCarregarImpressoras() {
+    const resp = await imprFetchServicoLocal('/impressoras', { method: 'GET' });
+    if (!resp.ok) {
+        imprState.mensagemErro = (resp.dados && resp.dados.erro) || 'Não foi possível listar as impressoras.';
+        imprState.tela = 'erro';
+        imprRender();
+        return false;
+    }
+    imprState.impressoras = (resp.dados && resp.dados.impressoras) || [];
+    if (imprState.impressoras.length === 0) {
+        imprState.mensagemErro = 'Nenhuma impressora encontrada pelo serviço local.';
+        imprState.tela = 'erro';
+        imprRender();
+        return false;
+    }
+    return true;
+}
+
+function imprSelecionarImpressora(nome) {
+    localStorage.setItem(IMPR_CHAVE_IMPRESSORA, nome);
+    imprExecutarImpressao(nome, false);
+}
+
+async function imprExecutarImpressao(nomeImpressora, reimpressao) {
+    imprState.tela = 'preparando';
+    imprRender();
+
+    let etiqueta;
+    try {
+        etiqueta = await imprApiGerarEtiqueta(reimpressao);
+    } catch (e) {
+        imprState.mensagemErro = 'Não foi possível gerar a etiqueta: ' + e.message;
+        imprState.tela = 'erro';
+        imprRender();
+        return;
+    }
+    imprState.etiqueta = etiqueta;
+
+    imprState.tela = 'imprimindo';
+    imprRender();
+
+    let resp;
+    try {
+        resp = await imprFetchServicoLocal('/imprimir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                pdf_base64: etiqueta.pdf_base64,
+                impressora: nomeImpressora,
+                identificador: etiqueta.identificador,
+            }),
+        }, imprState.frontendTimeoutMs);
+    } catch (e) {
+        // falha de rede nao tratada nunca pode virar "sucesso" — trata como
+        // indeterminado, igual ao padrao ja aprovado no diagnostico
+        imprState.mensagemIndeterminado = 'Não foi possível confirmar se a etiqueta foi impressa (falha de comunicação). Verifique fisicamente a impressora antes de tentar novamente.';
+        imprState.tela = 'indeterminado';
+        imprRender();
+        return;
+    }
+
+    if (resp.abortou) {
+        imprState.mensagemIndeterminado = 'O tempo de espera pela confirmação da impressora foi excedido. Não é possível confirmar se a etiqueta foi impressa. Verifique fisicamente a impressora antes de tentar novamente.';
+        imprState.tela = 'indeterminado';
+        imprRender();
+        return;
+    }
+
+    if (resp.ok && resp.dados && (resp.dados.status === 'impresso' || resp.dados.status === 'ja_impresso')) {
+        imprState.tela = 'concluido';
+        imprRender();
+        return;
+    }
+
+    if (resp.status === 504 || (resp.dados && resp.dados.status === 'indeterminado')) {
+        imprState.mensagemIndeterminado = (resp.dados && (resp.dados.erro || resp.dados.mensagem))
+            || 'Não foi possível confirmar se a etiqueta foi impressa. Verifique fisicamente a impressora antes de tentar novamente.';
+        imprState.tela = 'indeterminado';
+        imprRender();
+        return;
+    }
+
+    const mensagemErro = (resp.dados && resp.dados.erro) || 'Falha ao imprimir a etiqueta.';
+    if (/impressora/i.test(mensagemErro)) {
+        localStorage.removeItem(IMPR_CHAVE_IMPRESSORA);
+        imprState.mensagemErro = mensagemErro + ' Selecione a impressora novamente.';
+        const listaOk = await imprCarregarImpressoras();
+        if (listaOk) { imprState.tela = 'selecionar_impressora'; imprRender(); }
+        return;
+    }
+
+    imprState.mensagemErro = mensagemErro;
+    imprState.tela = 'erro';
+    imprRender();
+}
+
+// "Tentar novamente"/"Imprimir novamente" — SEMPRE acao manual explicita
+// (nunca automatica), SEMPRE reexecuta so a impressao (gerar-etiqueta +
+// imprimir, novo identificador/job a cada vez) — NUNCA rechama
+// atendimento.php?acao=finalizar (ja confirmado com sucesso antes de chegar
+// aqui). Marca reimpressao=1 (exceto na primeira tentativa automatica logo
+// apos o sucesso de finalizar(), feita por imprIniciarImpressao()).
+function imprTentarNovamente() {
+    const impressoraSalva = localStorage.getItem(IMPR_CHAVE_IMPRESSORA);
+    if (impressoraSalva) {
+        imprExecutarImpressao(impressoraSalva, true);
+    } else {
+        imprIniciarImpressao();
+    }
+}
+
+// -------------------- render --------------------
+
+function imprRender() {
+    const el = document.getElementById('imprConteudo');
+    if (!el) return;
+    el.innerHTML = imprRenderCorpo();
+    const lista = el.querySelector('#imprListaImpressoras');
+    if (lista) {
+        lista.querySelectorAll('[data-impressora]').forEach(btn => {
+            btn.addEventListener('click', () => imprSelecionarImpressora(btn.dataset.impressora));
+        });
+    }
+}
+
+function imprRenderCorpo() {
+    switch (imprState.tela) {
+        case 'enviando': return `<div class="subtitulo">Enviando seus dados...</div>`;
+        case 'erro_finalizar': return imprTelaErroFinalizar();
+        case 'selecionar_impressora': return imprTelaSelecionarImpressora();
+        case 'preparando': return `<div class="subtitulo">Preparando etiqueta...</div>`;
+        case 'imprimindo': return `<div class="subtitulo">Imprimindo...</div>`;
+        case 'concluido': return imprTelaConcluido();
+        case 'erro': return imprTelaErro();
+        case 'indeterminado': return imprTelaIndeterminado();
+        default: return '';
+    }
+}
+
+function imprTelaErroFinalizar() {
+    return `<div class="subtitulo">${escapeHtml(imprState.mensagemErro)}</div>
+        <div class="grupo-botoes">
+            <button class="btn-primario" onclick="processarImpressao()">Tentar novamente</button>
+            <button class="btn-fantasma" onclick="novoAtendimento()">Novo atendimento</button>
+        </div>`;
+}
+
+function imprTelaSelecionarImpressora() {
+    const botoes = imprState.impressoras.map(imp => `
+        <button class="btn-fantasma" data-impressora="${escapeHtml(imp.nome)}">${escapeHtml(imp.nome)}${imp.padrao ? ' (padrão)' : ''}</button>
+    `).join('');
+    return `<div class="titulo">Selecione a impressora</div>
+        <div class="subtitulo">Essa escolha será lembrada neste totem</div>
+        <div class="grupo-botoes" id="imprListaImpressoras">${botoes}</div>`;
+}
+
+function imprTelaConcluido() {
+    const r = imprState.resultadoFinalizar || {};
+    // NUNCA CPF/CNH nesta tela — so numero de acesso + nome do motorista.
+    const blocoAcesso = r.nrRegAcesso
+        ? `<div class="senha-caixa"><div class="rotulo">Número de acesso</div><div class="valor">${escapeHtml(r.nrRegAcesso)}</div></div>`
+        : `<div class="subtitulo">Check-in registrado com sucesso.</div>`;
+    const nomeMotorista = r.motoristaNome
+        ? `<div class="subtitulo">Motorista: ${escapeHtml(r.motoristaNome)}</div>`
+        : '';
+    return `<div class="subtitulo">Tudo certo!</div>
+        ${blocoAcesso}
+        ${nomeMotorista}
+        <div class="subtitulo">Retire o comprovante na bandeja abaixo</div>
+        <div class="grupo-botoes">
+            <button class="btn-fantasma" onclick="imprTentarNovamente()">Imprimir novamente</button>
+            <button class="btn-primario" onclick="novoAtendimento()">Novo atendimento</button>
+        </div>`;
+}
+
+function imprTelaErro() {
+    return `<div class="subtitulo">${escapeHtml(imprState.mensagemErro)}</div>
+        <div class="grupo-botoes">
+            <button class="btn-primario" onclick="imprTentarNovamente()">Tentar novamente</button>
+            <button class="btn-fantasma" onclick="novoAtendimento()">Novo atendimento</button>
+        </div>`;
+}
+
+function imprTelaIndeterminado() {
+    return `<div class="titulo">Não foi possível confirmar a impressão</div>
+        <div class="subtitulo">${escapeHtml(imprState.mensagemIndeterminado)}</div>
+        <div class="grupo-botoes">
+            <button class="btn-primario" onclick="imprTentarNovamente()">Tentar novamente</button>
+            <button class="btn-fantasma" onclick="novoAtendimento()">Novo atendimento</button>
+        </div>`;
 }
 
 // -------------------- recebimento: placa + quantidade de notas --------------------
@@ -1228,11 +1641,15 @@ async function iniciarRecebimento(excedeLimite) {
         } else {
             state.notaOrdem = 0;
             state.notasImagens = [];
+            state.notasNumeros = [];
             state.previewNotaAtual = null;
             state.capturaNotaEmAndamento = false;
             state.finalizandoDigitalizacao = false;
             state.clienteIdentificado = false;
             ocrFila = [];
+            ocrNumeroFila = [];
+            numeroModalFila = [];
+            numeroModalAberta = false;
             await api('atendimento.php', 'salvar-etapa', { id_atendimento: state.idAtendimento, etapa: 'digitalizacao_notas' });
             ir('rec_digitaliza');
         }
@@ -1249,10 +1666,19 @@ function telaBloqueado() {
 // a identificacao do cliente roda em segundo plano em cada chamada de /nota.php;
 // "Finalizar digitalizacao" decide se pula a tela de confirmacao do cliente.
 
+// Selo por nota (pendente/confirmado) — demanda talent-doctos-finalizacao-checkin.
+// state.notasNumeros e paralelo a state.notasImagens (mesmo indice).
+function renderMiniaturasNotas() {
+    return (state.notasImagens || []).map((img, i) => {
+        const info = (state.notasNumeros || [])[i] || {};
+        const selo = info.confirmado
+            ? `<span class="selo-numero ok">Nº ${escapeHtml(info.numero)}</span>`
+            : `<span class="selo-numero pendente">Pendente</span>`;
+        return `<div class="miniatura"><img src="${img}" alt="Nota digitalizada">${selo}</div>`;
+    }).join('');
+}
+
 function telaDigitaliza() {
-    const miniaturas = (state.notasImagens || []).map(img =>
-        `<div class="miniatura"><img src="${img}" alt="Nota digitalizada"></div>`
-    ).join('');
     return `<div class="subtitulo">Notas digitalizadas: <span id="contadorNotas">${state.notaOrdem}</span> de 5</div>
         <div class="caixa-scanner" id="caixaScanner">
             <video id="videoScanner" autoplay playsinline></video>
@@ -1260,11 +1686,33 @@ function telaDigitaliza() {
         </div>
         <img id="previaNota" class="previa-nota" style="display:none" alt="Nota capturada">
         <div class="status-scanner" id="scannerStatus">Conectando ao scanner...</div>
-        <div class="miniaturas" id="miniaturas">${miniaturas}</div>
+        <div class="miniaturas" id="miniaturas">${renderMiniaturasNotas()}</div>
+        <div class="subtitulo" id="indicadorNumerosNota"></div>
         <div class="grupo-botoes" id="controlesScanner">
             <button class="btn-fantasma" id="btnCapturarNota" onclick="capturarPreviaNota()" disabled>Capturar nota</button>
         </div>
         <button class="btn-primario" id="btnFinalizarDigitalizacao" style="max-width:320px;margin:0 auto" onclick="finalizarDigitalizacao()">Finalizar digitalização</button>`;
+}
+
+// Atualiza contador/selo de pendencias de numero de nota e habilita/desabilita
+// "Finalizar digitalizacao" — chamado sempre que uma nota e capturada ou seu
+// numero e confirmado (ver confirmarUsoImagemNota()/marcarNumeroNotaConfirmado()).
+function atualizarIndicadorNumerosNota() {
+    const lista = state.notasNumeros || [];
+    const total = lista.length;
+    const pendentes = lista.filter(n => !n.confirmado).length;
+    const indicador = document.getElementById('indicadorNumerosNota');
+    if (indicador) {
+        indicador.textContent = total === 0
+            ? ''
+            : (pendentes === 0
+                ? `Números confirmados: ${total} de ${total}`
+                : `Números confirmados: ${total - pendentes} de ${total} — ${pendentes} pendente(s)`);
+    }
+    const miniaturas = document.getElementById('miniaturas');
+    if (miniaturas) miniaturas.innerHTML = renderMiniaturasNotas();
+    const btnFinalizar = document.getElementById('btnFinalizarDigitalizacao');
+    if (btnFinalizar) btnFinalizar.disabled = pendentes > 0;
 }
 
 // -------------------- scanner Netum SD-2000 (dispositivo de video USB) --------------------
@@ -1747,12 +2195,13 @@ async function confirmarUsoImagemNota() {
         if (resultado.cliente_identificado) state.clienteIdentificado = true;
         state.notaOrdem = ordem;
         state.notasImagens.push(imagem);
+        state.notasNumeros.push({ ordem, numero: null, confirmado: false, origem: null });
         state.previewNotaAtual = null;
         processarOcrNota(imagem, ordem);
+        processarOcrNumeroNota(imagem, ordem);
         const contador = document.getElementById('contadorNotas');
         if (contador) contador.textContent = state.notaOrdem;
-        const miniaturas = document.getElementById('miniaturas');
-        if (miniaturas) miniaturas.innerHTML += `<div class="miniatura"><img src="${imagem}" alt="Nota digitalizada"></div>`;
+        atualizarIndicadorNumerosNota();
         mostrarStatusScanner('Documento salvo');
         voltarParaVideoAoVivo();
         if (state.notaOrdem >= 5) {
@@ -1774,6 +2223,10 @@ async function confirmarUsoImagemNota() {
 
 async function finalizarDigitalizacao() {
     if (state.finalizandoDigitalizacao) return;
+    if ((state.notasNumeros || []).some(n => !n.confirmado)) {
+        mostrarErroTela('Confirme o número de todas as notas antes de finalizar.');
+        return;
+    }
     state.finalizandoDigitalizacao = true;
     const btn = document.getElementById('btnFinalizarDigitalizacao');
     if (btn) btn.disabled = true;
@@ -1871,6 +2324,295 @@ function extrairCandidatos(texto) {
     return { cnpjsCandidatos: cnpjsUnicos, razaoSocialCandidata };
 }
 
+// -------------------- recebimento: heuristica de extracao do NUMERO DA NOTA (OCR) --------------------
+// Demanda talent-doctos-finalizacao-checkin. Heuristica, NAO contrato formal
+// — procura o numero individual da nota (nunca a serie, nunca a chave de 44
+// digitos) por proximidade textual de rotulos comuns de DANFE ("Nº"/"N°"/
+// "NUMERO"/"Nº."). So retorna confianca alta quando encontra um numero
+// plausivel (1 a 9 digitos, apos remover pontuacao) perto de um desses
+// rotulos, excluindo explicitamente comprimentos de CNPJ (14) e de chave de
+// acesso (44). Qualquer outro caso cai no preenchimento manual obrigatorio
+// (ver processarProximaOcrNumeroDaFila()/enfileirarNumeroNotaModal()).
+const NUMERO_NOTA_REGEX_ROTULO = /N[º°ºoO]\.?\s*[:\-]?\s*(\d[\d.\s]{0,12}\d|\d)/;
+
+function extrairNumeroNota(texto) {
+    const textoSeguro = texto || '';
+    const linhas = textoSeguro.split(/\r?\n/);
+    for (const linha of linhas) {
+        // "SERIE"/"SÉRIE" na mesma linha do rotulo e um forte indicio de
+        // cabecalho combinado "Nº ... SERIE ..." — nesse caso o numero mais
+        // proximo do rotulo "N" ainda tende a ser o correto (o regex ja para
+        // no primeiro grupo numerico apos o rotulo), mas evitamos linhas que
+        // citem SOMENTE serie sem nenhum rotulo de numero reconhecido.
+        const m = linha.match(NUMERO_NOTA_REGEX_ROTULO);
+        if (!m) continue;
+        const bruto = m[1].replace(/[.\s]/g, '');
+        if (!/^\d+$/.test(bruto)) continue;
+        if (bruto.length === 44) continue; // chave de acesso, nunca numero de nota
+        if (bruto.length === 14) continue; // provavel CNPJ confundido com rotulo
+        if (bruto.length < 1 || bruto.length > 9) continue; // faixa plausivel de numero de nota
+        return { numero: bruto, confiancaAlta: true };
+    }
+    return { numero: null, confiancaAlta: false };
+}
+
+// Serializa TODAS as chamadas worker.recognize() do Tesseract.js entre as
+// duas filas de OCR existentes (ocrFila, identificacao de cliente, e a nova
+// ocrNumeroFila abaixo) — o worker do Tesseract.js e unico e reaproveitado
+// (iniciarOcrWorker()), e chamar recognize() concorrentemente nele nao e
+// seguro. Cada fila mantem sua propria ordem interna (ocrProcessando/
+// ocrNumeroProcessando); este mutex extra so garante que as duas filas nunca
+// disputem o mesmo worker ao mesmo tempo.
+let filaExecucaoTesseract = Promise.resolve();
+function executarReconhecimentoSerializado(fn) {
+    const execucao = filaExecucaoTesseract.then(fn, fn);
+    filaExecucaoTesseract = execucao.catch(() => {});
+    return execucao;
+}
+
+// Fila dedicada de OCR para o numero da nota — INDEPENDENTE da fila de
+// identificacao de cliente (ocrFila/processarProximaOcrDaFila): aquela usa
+// early-stop assim que o cliente e identificado (nao dispara OCR nas notas
+// seguintes), mas o numero da nota precisa ser capturado em TODAS as notas,
+// independente do estado de identificacao do cliente. Por isso roda uma
+// segunda passada de reconhecimento por nota (custo de CPU aceito nesta
+// implementacao — ver observacao registrada no handoff desta etapa).
+let ocrNumeroFila = [];
+let ocrNumeroProcessando = false;
+
+function processarOcrNumeroNota(imagem, ordem) {
+    ocrNumeroFila.push({ imagem, ordem, idAtendimento: state.idAtendimento });
+    processarProximaOcrNumeroDaFila();
+}
+
+async function processarProximaOcrNumeroDaFila() {
+    if (ocrNumeroProcessando) return;
+    const proxima = ocrNumeroFila.shift();
+    if (!proxima) return;
+    ocrNumeroProcessando = true;
+    const deAtendimentoAtual = proxima.idAtendimento === state.idAtendimento;
+    let numeroSugerido = null;
+    try {
+        const workerPromise = iniciarOcrWorker();
+        if (!workerPromise) throw new Error('Tesseract.js indisponivel');
+        const worker = await workerPromise;
+        const imagemRotacionada = await rotacionarImagem270(proxima.imagem);
+        const resultado = await executarReconhecimentoSerializado(() => worker.recognize(imagemRotacionada));
+        const texto = (resultado && resultado.data && resultado.data.text) || '';
+        const extraido = extrairNumeroNota(texto);
+        numeroSugerido = extraido.confiancaAlta ? extraido.numero : null;
+    } catch (e) {
+        console.warn('[OCR] falha ao extrair numero da nota', e);
+        numeroSugerido = null;
+    } finally {
+        ocrNumeroProcessando = false;
+        if (deAtendimentoAtual && state.tela === 'rec_digitaliza') {
+            enfileirarNumeroNotaModal(proxima.ordem, numeroSugerido);
+        }
+        processarProximaOcrNumeroDaFila();
+    }
+}
+
+// -------------------- recebimento: confirmacao/preenchimento do numero da nota --------------------
+// Fila de modais (nunca mais de um aberto por vez) — cada nota capturada gera
+// exatamente um modal: confirmacao rapida (confianca alta) ou preenchimento
+// manual obrigatorio (confianca baixa/ausente). Preserva as notas ja
+// aprovadas: so mexe na entrada de state.notasNumeros correspondente a
+// "ordem", nunca nas demais.
+let numeroModalFila = [];
+let numeroModalAberta = false;
+
+// Confirmacao de cancelamento EMPILHADA sobre o modal de numero da nota
+// (achado bloqueante do /03-revisao, demanda talent-doctos-finalizacao-checkin).
+// O botao "Cancelar atendimento" DENTRO do modal obrigatorio de numero da nota
+// (abrirModalNumeroNotaManual) NUNCA deve chamar confirmarCancelar() direto,
+// pois essa funcao usa abrirModal(), que SOBRESCREVE o innerHTML do MESMO
+// #modalCaixa ja aberto — destruindo o numero ja digitado, a "ordem" pendente,
+// o teclado numerico dedicado e qual variante do modal (manual/sugestao)
+// estava em uso, alem de nunca restaurar nada se o motorista tocasse em
+// "Continuar atendimento" (numeroModalAberta ficava true para sempre, sem
+// nenhum modal visivel — motorista travado). Em vez disso, esta confirmacao
+// usa um elemento PROPRIO, independente, empilhado por cima (#modalConfirm
+// CancelNotaFundo/Caixa, ver iniciarApp()) que nunca toca em #modalCaixa/
+// #modalFundo. Como o modal de numero da nota nunca e fechado nem reescrito
+// enquanto essa confirmacao esta aberta, "Continuar atendimento" so precisa
+// fechar a propria confirmacao — o modal de numero da nota (e numeroModal
+// Aberta, que permanece true o tempo todo) continuam exatamente como estavam,
+// sem nenhuma restauracao manual necessaria. Ao confirmar ("Sim, cancelar"),
+// reaproveita EXATAMENTE a mesma logica de encerramento que confirmarCancelar()
+// ja dispara (fecharModal() + cancelarESair()) — sem duplicar.
+function confirmarCancelarNotaModal() {
+    document.getElementById('modalConfirmCancelNotaCaixa').innerHTML = `
+        <div class="titulo">Cancelar atendimento?</div>
+        <div class="subtitulo">Os dados digitados serão perdidos.</div>
+        <button class="btn-alerta" onclick="fecharConfirmacaoCancelarNotaModal(); fecharModal(); cancelarESair();">Sim, cancelar</button>
+        <button class="btn-fantasma" onclick="fecharConfirmacaoCancelarNotaModal()">Continuar atendimento</button>
+    `;
+    document.getElementById('modalConfirmCancelNotaFundo').classList.add('aberto');
+}
+function fecharConfirmacaoCancelarNotaModal() {
+    document.getElementById('modalConfirmCancelNotaFundo').classList.remove('aberto');
+}
+
+function enfileirarNumeroNotaModal(ordem, sugestao) {
+    numeroModalFila.push({ ordem, sugestao });
+    processarProximoNumeroNotaModal();
+}
+
+function processarProximoNumeroNotaModal() {
+    if (numeroModalAberta || state.tela !== 'rec_digitaliza') return;
+    const proximo = numeroModalFila.shift();
+    if (!proximo) return;
+    numeroModalAberta = true;
+    if (proximo.sugestao) {
+        abrirModalNumeroNotaSugestao(proximo.ordem, proximo.sugestao);
+    } else {
+        abrirModalNumeroNotaManual(proximo.ordem, null, '');
+    }
+}
+
+function fecharModalNumeroNotaAtual() {
+    fecharModal();
+    numeroModalAberta = false;
+    processarProximoNumeroNotaModal();
+}
+
+function abrirModalNumeroNotaSugestao(ordem, sugestao) {
+    abrirModal(`
+        <div class="titulo">Nota nº ${escapeHtml(sugestao)} identificada</div>
+        <div class="subtitulo">Confira o número antes de continuar</div>
+        <div class="grupo-botoes">
+            <button class="btn-primario" id="btnConfirmarNumeroSugerido">Confirmar</button>
+            <button class="btn-fantasma" id="btnCorrigirNumeroSugerido">Corrigir</button>
+        </div>
+        <button class="btn-saida-modal-nota" onclick="confirmarCancelarNotaModal()">✕ Cancelar atendimento</button>
+    `);
+    const btnConfirmar = document.getElementById('btnConfirmarNumeroSugerido');
+    const btnCorrigir = document.getElementById('btnCorrigirNumeroSugerido');
+    if (btnConfirmar) btnConfirmar.addEventListener('click', () => confirmarNumeroNotaSugerido(ordem, sugestao));
+    if (btnCorrigir) btnCorrigir.addEventListener('click', () => abrirModalNumeroNotaManual(ordem, sugestao, ''));
+}
+
+async function confirmarNumeroNotaSugerido(ordem, sugestao) {
+    try {
+        await salvarNumeroNota(ordem, sugestao, 'OCR');
+        marcarNumeroNotaConfirmado(ordem, sugestao);
+        fecharModalNumeroNotaAtual();
+    } catch (e) {
+        // NUMERO_NOTA_DUPLICADO (HTTP 409) ou erro de validacao — NUNCA fecha
+        // o modal nem descarta a imagem ja capturada; cai para o campo
+        // manual, com o erro exibido inline, mesma "ordem".
+        const msg = e.status === 409
+            ? 'Esse número já foi usado em outra nota deste atendimento. Corrija abaixo.'
+            : (e.message || 'Não foi possível salvar o número. Corrija ou tente novamente.');
+        abrirModalNumeroNotaManual(ordem, sugestao, msg);
+    }
+}
+
+function abrirModalNumeroNotaManual(ordem, valorInicial, mensagemErro) {
+    abrirModal(`
+        <div class="titulo">Número da nota fiscal</div>
+        <div class="subtitulo">Digite o número da nota (obrigatório)</div>
+        <input class="campo-texto" id="inputNumeroNota" inputmode="numeric" readonly value="${escapeHtml(valorInicial || '')}" placeholder="Número da nota">
+        <div class="status-scanner erro" id="numeroNotaErro" style="${mensagemErro ? '' : 'display:none'}">${escapeHtml(mensagemErro || '')}</div>
+        <div class="teclado-numerico-nota" id="tecladoNumericoNota"></div>
+        <button class="btn-saida-modal-nota" onclick="confirmarCancelarNotaModal()">✕ Cancelar atendimento</button>
+    `);
+    montarTecladoNumericoNota(ordem);
+}
+
+// Teclado numerico DEDICADO ao modal de numero da nota fiscal — NAO reaproveita
+// montarTeclado()/#teclado (QWERTY, global, outras telas) nem campoAtivo. Fica
+// embutido no proprio modal (grid 0-9 + Apagar + Confirmar) com alvos grandes
+// (~64px) para uso com dedo/luva. O botao "Confirmar" aciona exatamente o
+// mesmo fluxo ja existente de salvar (salvarNumeroNotaManual -> nota.php?
+// acao=definir-numero), sem reimplementar validacao alguma.
+function montarTecladoNumericoNota(ordem) {
+    const container = document.getElementById('tecladoNumericoNota');
+    if (!container) return;
+    container.innerHTML = `
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('1')">1</button>
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('2')">2</button>
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('3')">3</button>
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('4')">4</button>
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('5')">5</button>
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('6')">6</button>
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('7')">7</button>
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('8')">8</button>
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('9')">9</button>
+        <button type="button" class="tecla-numerica tecla-numerica-apagar" id="btnApagarNumeroNota">Apagar</button>
+        <button type="button" class="tecla-numerica" onclick="digitarNumeroNota('0')">0</button>
+        <button type="button" class="tecla-numerica tecla-numerica-confirmar" id="btnSalvarNumeroNota" disabled>Confirmar</button>
+    `;
+    const btnApagar = document.getElementById('btnApagarNumeroNota');
+    const btnConfirmar = document.getElementById('btnSalvarNumeroNota');
+    if (btnApagar) btnApagar.addEventListener('click', apagarNumeroNota);
+    if (btnConfirmar) btnConfirmar.addEventListener('click', () => salvarNumeroNotaManual(ordem));
+    atualizarBotaoNumeroNota();
+}
+
+function atualizarBotaoNumeroNota() {
+    const input = document.getElementById('inputNumeroNota');
+    const btn = document.getElementById('btnSalvarNumeroNota');
+    if (btn && input) btn.disabled = input.value.trim().length === 0;
+}
+
+function digitarNumeroNota(digito) {
+    const input = document.getElementById('inputNumeroNota');
+    if (!input) return;
+    input.value += digito;
+    atualizarBotaoNumeroNota();
+}
+
+function apagarNumeroNota() {
+    const input = document.getElementById('inputNumeroNota');
+    if (!input) return;
+    input.value = input.value.slice(0, -1);
+    atualizarBotaoNumeroNota();
+}
+
+async function salvarNumeroNotaManual(ordem) {
+    const input = document.getElementById('inputNumeroNota');
+    const erroEl = document.getElementById('numeroNotaErro');
+    const btn = document.getElementById('btnSalvarNumeroNota');
+    const valor = (input && input.value || '').trim();
+    if (!valor) return; // botao ja fica desabilitado nesse caso — validacao defensiva
+    if (btn) btn.disabled = true;
+    try {
+        await salvarNumeroNota(ordem, valor, 'MANUAL');
+        marcarNumeroNotaConfirmado(ordem, valor);
+        fecharModalNumeroNotaAtual();
+    } catch (e) {
+        // erro INLINE, sem fechar o modal, mantendo o foco no campo (item do
+        // escopo: nunca perde a imagem ja capturada nem fecha o modal aqui)
+        const msg = e.status === 409
+            ? 'Esse número já foi usado em outra nota deste atendimento. Corrija abaixo.'
+            : (e.message || 'Não foi possível salvar o número.');
+        if (erroEl) { erroEl.textContent = msg; erroEl.style.display = 'block'; }
+        if (btn) btn.disabled = false;
+    }
+}
+
+function salvarNumeroNota(ordem, numero, origem) {
+    // normalizacao final (zero a esquerda, so digitos) e SEMPRE do backend
+    // (nota.php?acao=definir-numero) — o front so garante nao-vazio.
+    return api('nota.php', 'definir-numero', {
+        id_atendimento: state.idAtendimento,
+        ordem,
+        numero,
+        origem,
+    });
+}
+
+function marcarNumeroNotaConfirmado(ordem, numero) {
+    const entrada = (state.notasNumeros || []).find(n => n.ordem === ordem);
+    if (entrada) {
+        entrada.numero = numero;
+        entrada.confirmado = true;
+    }
+    atualizarIndicadorNumerosNota();
+}
+
 // Gera uma COPIA rotacionada em 270 graus da imagem, usada exclusivamente
 // para o OCR/Tesseract.js — NUNCA persistida nem enviada ao backend como a
 // "nota" (a imagem original, ja salva via confirmarUsoImagemNota(), segue
@@ -1952,7 +2694,10 @@ async function processarProximaOcrDaFila() {
         // a imagem original (proxima.imagem) ja foi salva intocada por
         // confirmarUsoImagemNota() antes desta chamada.
         const imagemRotacionada = await rotacionarImagem270(proxima.imagem);
-        const resultado = await worker.recognize(imagemRotacionada);
+        // serializado com a fila de OCR do numero da nota (ocrNumeroFila) —
+        // ver executarReconhecimentoSerializado(), o worker do Tesseract.js
+        // e unico e nao suporta recognize() concorrente.
+        const resultado = await executarReconhecimentoSerializado(() => worker.recognize(imagemRotacionada));
         const texto = (resultado && resultado.data && resultado.data.text) || '';
         const { cnpjsCandidatos, razaoSocialCandidata } = extrairCandidatos(texto);
         if (deAtendimentoAtual && !state.clienteIdentificado) {
@@ -2589,6 +3334,8 @@ function iniciarApp() {
         <div class="tela" id="tela"></div>
         <div class="teclado" id="teclado"></div>
         <div class="modal-fundo" id="modalFundo"><div class="modal-caixa" id="modalCaixa"></div></div>
+        <div class="modal-fundo modal-fundo-confirma-nota" id="modalConfirmCancelNotaFundo"><div class="modal-caixa" id="modalConfirmCancelNotaCaixa"></div></div>
+        <div class="modal-fundo modal-fundo-inatividade" id="modalInatividadeFundo"><div class="modal-caixa" id="modalInatividadeCaixa"></div></div>
         <div id="toastErro" style="display:none;position:fixed;bottom:16px;left:16px;right:16px;background:#a32d2d;color:#fff;padding:12px 16px;border-radius:8px;font-size:14px;text-align:center;z-index:60"></div>
     `;
     montarTeclado();

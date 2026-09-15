@@ -106,7 +106,7 @@ $nomeSensivel = 'MOTORISTA TESTE SANITIZACAO';
 $categoriasParaTestar = ['erro_validacao', 'erro_autenticacao', 'nao_encontrado', 'conflito', 'erro_servidor', 'erro_conexao'];
 
 foreach ($categoriasParaTestar as $categoria) {
-    $fix = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', strtoupper(substr(md5($categoria), 0, 7)), '11222333000181', 'SP');
+    $fix = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', strtoupper(substr(md5($categoria), 0, 7)), '11222333000181', 'SP', true, '12345678', 'CAMINHAO', 'OC-' . strtoupper(substr(md5($categoria), 0, 7)));
     $idsAtendimento[] = $fix['id_atendimento'];
     $pastas[] = $fix['pasta_completa'];
     // Sobrescreve motorista com CPF/nome sensiveis conhecidos, para procurar

@@ -117,4 +117,30 @@ class AtendimentoNotaDao
             'id_nota'      => $idNota,
         ]);
     }
+
+    /**
+     * Grava o numero da NF-e (ja normalizado pelo chamador —
+     * App\Controller\NotaController::definirNumero — nunca confia em
+     * normalizacao do front) para uma nota especifica. $origem e sempre
+     * 'OCR' ou 'MANUAL'. A UNIQUE KEY uk_atendimento_numero_nota
+     * (id_atendimento, numero_nota) e a defesa final contra duplicado
+     * dentro do mesmo atendimento — o chamador captura a violacao de
+     * constraint (PDOException) e traduz para um erro amigavel, nunca deixa
+     * vazar a excecao bruta.
+     */
+    public function atualizarNumero(int $idNota, string $numeroNormalizado, string $origem): bool
+    {
+        $stmt = $this->pdo->prepare('
+            UPDATE tb_atendimento_nota
+            SET numero_nota = :numero, numero_nota_origem = :origem
+            WHERE id_nota = :id_nota
+        ');
+        $stmt->execute([
+            'numero' => $numeroNormalizado,
+            'origem' => $origem,
+            'id_nota' => $idNota,
+        ]);
+
+        return $stmt->rowCount() > 0;
+    }
 }

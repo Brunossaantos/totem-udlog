@@ -13,6 +13,7 @@ use App\Dao\VioCacheDao;
 use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
 use App\Dao\OrdemColetaDao;
+use App\Dao\OrdemColetaPendenteBaixaDao;
 use App\Rn\AtendimentoRn;
 use App\Rn\OrdemColetaClient;
 use App\Rn\TalentRn;
@@ -46,7 +47,9 @@ $controller = new AtendimentoController(
     new AtendimentoNotaDao($pdo),
     $documentoRn,
     new TotemDao($pdo),
-    new EmpresaDao($pdo)
+    new EmpresaDao($pdo),
+    $ordemColetaClient,
+    new OrdemColetaPendenteBaixaDao($pdo)
 );
 
 $acao = $_GET['acao'] ?? '';
