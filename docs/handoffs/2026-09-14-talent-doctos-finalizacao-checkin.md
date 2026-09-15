@@ -1581,3 +1581,43 @@ incluindo cronometragem real do bug original corrigido), a demanda
 ### Próximo passo
 
 `/04-commit-e-push`.
+
+## Commit
+
+**Hash completo**: `2369f9680d99a689f0525862c911f3dc909f5e6d`
+**Mensagem**: `feat(talent): finaliza check-in com doctos e impressao`
+**Data**: 2026-09-15
+
+Staging seletivo por arquivo — 41 arquivos incluídos, correspondendo
+exatamente aos arquivos desta demanda (backend, frontend, testes,
+documentação), conforme listado na seção "Arquivos criados/alterados"
+acima, mais os arquivos das rodadas curtas de correção de front-end
+(`app.js`/`app.css`, `ia_development_state.md`, este handoff).
+
+**Excluídos deliberadamente do commit** (não fazem parte desta demanda ou
+são descartáveis):
+- `tests/manual/_diagnostico_talent_731.php` (não versionado, script de
+  diagnóstico pré-existente com POST real fixo contra `id_atendimento=731`
+  — nunca fez parte desta demanda).
+- `tests/manual/_preparacao_fase2_teste_producao_talent.php` (não
+  versionado, script de preparação one-off da Fase 2 do protocolo de
+  teste controlado — não está na lista oficial de "Arquivos criados/
+  alterados" desta demanda, criado registro sintético `id_atendimento=1573`
+  ligado ao banco de dev local, tratado como descartável).
+
+Validações executadas antes do commit: `git diff --cached --check` (sem
+whitespace erro), `php -l` em 32 arquivos PHP staged (todos OK), `node
+--check` em `app.js` (OK), reexecução das 10 suítes automatizadas
+(202/202 asserções, todas passando), inspeção da migration
+`012_talent_doctos_finalizacao_checkin.sql` (idempotente, padrão já
+usado, não executada contra produção nesta etapa), confirmação de
+`.env.example` com `TALENT_CHECKIN_ATIVO=false` e `TALENT_API_KEY=`
+vazio, busca por segredos/CPF/CNH no diff staged (nenhum encontrado),
+confirmação de que nenhum código staged faz chamada real ao Talent ou à
+impressora fora do fluxo já existente (protegido por
+`TALENT_CHECKIN_ATIVO` fail-closed).
+
+## Push
+
+Em andamento — ver atualização abaixo após confirmação de
+`HEAD == origin/main`.

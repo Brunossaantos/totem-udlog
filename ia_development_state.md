@@ -1916,3 +1916,14 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   `/04-commit-e-push`**. Ver
   `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
   "Resultado da revisão — /03-revisao final (2026-09-15, 3ª tentativa)".
+
+- 2026-09-15 — **`/04-commit-e-push` de `talent-doctos-finalizacao-checkin`**:
+  commit principal `2369f9680d99a689f0525862c911f3dc909f5e6d`
+  (`feat(talent): finaliza check-in com doctos e impressao`), 41 arquivos,
+  staging seletivo (excluídos os 2 scripts descartáveis não versionados —
+  `_diagnostico_talent_731.php` e `_preparacao_fase2_teste_producao_talent.php`).
+  Todas as validações pré-commit passaram (sintaxe PHP/JS, 202/202
+  asserções, sem segredos/dados pessoais no diff, migration inspecionada
+  sem execução contra produção). Ver
+  `docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md`, seção
+  "Commit".
