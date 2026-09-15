@@ -2087,3 +2087,14 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   executado nesta rodada, por restricao explicita do usuario). Ver
   `docs/handoffs/2026-09-15-talent-http409-limpeza-pendencias.md`,
   secao "Resultado da revisao — /03-revisao final (2026-09-15)".
+
+- 2026-09-15 — **`/04-commit-e-push` de `talent-http409-limpeza-pendencias`**:
+  commit `5332a86b62a80934aba9f7e40c982967c86630ce`
+  (`test(talent): valida conflito HTTP 409 e encerra limpeza`), 5
+  arquivos (`.gitignore`, `docs/manual_talent.md`,
+  `ia_development_state.md`, `tests/manual/_fixtures_talent.php`, novo
+  handoff da demanda). Todas as validacoes pre-commit passaram
+  (`TALENT_CHECKIN_ATIVO` ausente, zero residuo de banco/disco da
+  fixture `1885`/placa `ZZZ9Z99`, sintaxe PHP, sem whitespace/segredos
+  no diff). Ver `docs/handoffs/2026-09-15-talent-http409-limpeza-pendencias.md`,
+  secao "Commit".

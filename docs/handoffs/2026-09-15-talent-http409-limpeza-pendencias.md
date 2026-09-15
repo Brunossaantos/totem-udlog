@@ -871,3 +871,33 @@ autorizacao explicita do usuario, conforme workflow).
 
 `/04-commit-e-push` (nao executado nesta rodada, conforme restricao
 explicita do usuario de nao fazer commit/push aqui).
+
+## Commit
+
+**Hash completo**: `5332a86b62a80934aba9f7e40c982967c86630ce`
+**Mensagem**: `test(talent): valida conflito HTTP 409 e encerra limpeza`
+**Data**: 2026-09-15
+
+Staging seletivo por arquivo — exatamente os 5 arquivos autorizados:
+- `.gitignore`
+- `docs/handoffs/2026-09-15-talent-http409-limpeza-pendencias.md`
+- `docs/manual_talent.md`
+- `ia_development_state.md`
+- `tests/manual/_fixtures_talent.php`
+
+Validacoes executadas antes do commit: `TALENT_CHECKIN_ATIVO` confirmado
+ausente no `.env` real; zero residuo de banco (`tb_atendimento`/
+`tb_atendimento_nota` para `id_atendimento=1885`/placa `ZZZ9Z99`); zero
+residuo de disco (pasta sintetica e arquivos de auditoria confirmados
+inexistentes); `php -l` em `tests/manual/_fixtures_talent.php` sem
+erros; `git diff --check`/`git diff --cached --check` sem problema de
+whitespace; diff completo inspecionado; busca por segredos/CPF/CNPJ/
+token/base64 no diff staged sem nenhum achado (so o CPF sintetico ja
+conhecido do projeto e o fingerprint SHA-256 do payload, que nao e
+segredo); confirmado que nenhuma validacao desta etapa chamou o Talent,
+imprimiu, ou alterou registro real; `git fetch` sem divergencia com
+`origin/main` antes do commit.
+
+## Push
+
+Em andamento.
