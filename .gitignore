@@ -29,3 +29,9 @@ Thumbs.db
 # Dumps de banco externo com dado sensível (hash de token de API de
 # produção, IPs reais) — nunca versionar
 /docs/udlogo59_db_gestao_coletas.sql
+
+# Scripts de teste manual descartáveis/de uso pontual (prefixo "_" em
+# tests/manual/) — costumam bypassar a idempotência local para exercitar
+# chamadas HTTP reais a APIs externas (ex: Talent) e nunca devem ser
+# versionados, mesmo sem dado pessoal explícito no próprio arquivo
+tests/manual/_*.php

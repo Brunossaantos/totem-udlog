@@ -322,6 +322,39 @@ explicito antes de cada chamada real:
 confirmarem — ate la, `409` e uma categoria propria que NAO dispara
 retry automatico (por precaucao).
 
+**ATUALIZACAO 2026-09-15 (demanda `talent-http409-limpeza-pendencias`)**:
+script de teste controlado PRONTO — `tests/manual/_teste_http409_talent.php`
+(nunca versionado, coberto por `.gitignore`). Implementa o protocolo acima
+via `TalentClient::checkin()` chamado diretamente (bypass do CAS de
+idempotencia local), com o MESMO payload (montado uma unica vez via
+Reflection em `TalentRn::montarPayload()`) reutilizado sem alteracao entre
+as duas tentativas; orcamento maximo de 2 chamadas reais, uma por
+execucao (`--tentativa=1`/`--tentativa=2`), com bloqueio estrutural de uma
+3a tentativa via auditoria local sanitizada. Validado nesta demanda em
+modo mock/dry-run antes da execucao real.
+
+**ATUALIZACAO 2026-09-15 (RESULTADO REAL CONFIRMADO)**: as 2 chamadas
+reais autorizadas foram executadas pelo usuario (fixture sintetica
+id_atendimento=1885, placa ZZZ9Z99, cliente ja aprovado). Tentativa 1
+(--tentativa=1 --modo=real): HTTP 200, sucesso=true, nrRegAcesso=35912.
+Tentativa 2 (--tentativa=2 --modo=real), MESMO payload byte-identico
+(mesmo fingerprint SHA-256, fixture inalterada): HTTP 409, categoria
+interna 'conflito', sucesso=false. **CONFIRMADO EMPIRICAMENTE**: o
+Talent usa controle de duplicidade real e retorna HTTP 409 ao receber
+o mesmo payload (doctos[]/veiculo/depositante identicos) mais de uma
+vez para o mesmo check-in — nao houve necessidade de alterar nenhum
+dado para provocar o conflito, confirmando a hipotese central deste
+protocolo. A classificacao ja existente em TalentClient::checkin()
+(409 => 'conflito', tratada como ERRO_REPROCESSAVEL, nunca
+reconciliada automaticamente) corresponde ao comportamento real do
+sistema externo. Orcamento de 2 chamadas reais totalmente consumido -
+bloqueio da 3a tentativa confirmado por execucao real (nao so leitura
+de codigo). 1 check-in real permanece no Talent (placa ZZZ9Z99,
+nrRegAcesso=35912), a ser excluido manualmente pelo usuario. Ver
+docs/handoffs/2026-09-15-talent-http409-limpeza-pendencias.md, secoes
+"Resultado da tentativa real 1" e "Resultado da tentativa real 2 e
+CONFIRMACAO FINAL do HTTP 409".
+
 ## Pendencias — reclassificacao final (2026-09-09, segunda rodada)
 
 Taxonomia usada nesta rodada, substituindo a anterior: `RESOLVIDA` /
@@ -488,10 +521,14 @@ não executado).
 
 `409 Conflict` permanece uma categoria própria (`'conflito'`) na
 classificação de resposta do `TalentClient`, **nunca** reclassificado
-automaticamente como sucesso ou duplicidade. Continua pendente de
-confirmação real via o protocolo de teste controlado em Produção
-descrito na seção "HTTP 409 — protocolo de teste controlado planejado"
-acima — não executado nesta demanda.
+automaticamente como sucesso ou duplicidade. **CONCLUÍDO E CONFIRMADO
+EMPIRICAMENTE em 2026-09-15** (demanda `talent-http409-limpeza-pendencias`): o
+protocolo de teste controlado em Produção foi executado (2 chamadas
+reais, fixture sintética, mesmo payload repetido) e confirmou que o
+Talent de fato retorna HTTP 409 para o mesmo payload enviado duas
+vezes, sem necessidade de alterar nenhum dado para provocar o
+conflito. Ver seção "HTTP 409 — protocolo de teste controlado
+planejado" acima para o resultado completo.
 
 ### Pendências resolvidas nesta rodada
 

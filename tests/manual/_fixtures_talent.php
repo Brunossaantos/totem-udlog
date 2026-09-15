@@ -128,3 +128,47 @@ function talentLimparPasta(string $pastaCompleta): void
     }
     @rmdir($pastaCompleta);
 }
+
+// As 2 funcoes abaixo sao guardadas por function_exists() porque
+// tests/manual/teste_preparacao_producao_checkin.php (arquivo VERSIONADO,
+// fora do escopo desta extracao) ja declara sua propria mascararPlaca()
+// local e tambem inclui este arquivo — sem a guarda, incluir os dois
+// arquivos juntos causaria "Cannot redeclare mascararPlaca()" fatal. Nao
+// alteramos aquele arquivo versionado (fora do escopo pedido); a guarda
+// preserva o comportamento dele intacto e ainda disponibiliza as versoes
+// genericas abaixo para qualquer outro script que so inclua este arquivo.
+
+if (!function_exists('mascararDocumento')) {
+    /**
+     * Mascara um documento (CPF/CNPJ) para exibicao em console/log — nunca
+     * expoe o valor completo. Extraida de
+     * tests/manual/_preparacao_fase2_teste_producao_talent.php (demanda
+     * talent-http409-limpeza-pendencias, 2026-09-15) para reuso genérico
+     * entre os testes manuais do Talent — sem nenhum dado pessoal/
+     * credencial embutido aqui, so a lógica de mascaramento.
+     */
+    function mascararDocumento(string $valor): string
+    {
+        $len = strlen($valor);
+        if ($len <= 6) {
+            return str_repeat('*', $len);
+        }
+        return substr($valor, 0, 4) . str_repeat('*', $len - 6) . substr($valor, -2);
+    }
+}
+
+if (!function_exists('mascararPlaca')) {
+    /**
+     * Mascara uma placa de veiculo para exibicao em console/log. Extraida
+     * de tests/manual/_preparacao_fase2_teste_producao_talent.php (demanda
+     * talent-http409-limpeza-pendencias, 2026-09-15).
+     */
+    function mascararPlaca(string $placa): string
+    {
+        $len = strlen($placa);
+        if ($len <= 3) {
+            return str_repeat('*', $len);
+        }
+        return substr($placa, 0, 3) . str_repeat('*', $len - 3);
+    }
+}
