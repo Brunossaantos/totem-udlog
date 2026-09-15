@@ -1619,5 +1619,15 @@ impressora fora do fluxo já existente (protegido por
 
 ## Push
 
-Em andamento — ver atualização abaixo após confirmação de
-`HEAD == origin/main`.
+Executado com sucesso, sem divergência (`git fetch` confirmou
+`origin/main` no mesmo commit base esperado, sem commits remotos
+novos). `git push origin main`: `9285147..d5aa514  main -> main`.
+
+**Confirmação explícita**: `git rev-parse HEAD` e
+`git rev-parse origin/main` (após novo `git fetch` pós-push)
+retornaram o MESMO hash: `d5aa514487000e38c20aaff6c834af7f2656f9a3`.
+`HEAD` local == `origin/main` confirmado.
+
+Commits enviados:
+1. `2369f9680d99a689f0525862c911f3dc909f5e6d` — `feat(talent): finaliza check-in com doctos e impressao`
+2. `d5aa514487000e38c20aaff6c834af7f2656f9a3` — `docs(talent-doctos-finalizacao-checkin): fecha handoff com hash do commit`
