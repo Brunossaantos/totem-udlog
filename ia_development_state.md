@@ -2098,3 +2098,163 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   fixture `1885`/placa `ZZZ9Z99`, sintaxe PHP, sem whitespace/segredos
   no diff). Ver `docs/handoffs/2026-09-15-talent-http409-limpeza-pendencias.md`,
   secao "Commit".
+
+- 2026-09-15 — **`/00-planejamento` da demanda `impressao-arquitetura-producao-ux`
+  concluido**. Mapeamento completo confirmou o UNICO ponto real de
+  acoplamento entre producao e teste do fluxo de impressao:
+  `public/totem/assets/app.js` (`imprApiConfiguracaoServicoLocal()`)
+  chama diretamente `impressao-teste.php?acao=configuracao-servico-local`
+  (endpoint criado para o diagnostico) — nao existe hoje rota
+  equivalente em `impressao.php`/`ImpressaoAtendimentoController`. Todo
+  o resto (geracao de PDF, gates de posse/status, allowlist revalidada
+  a cada chamada no servico Node, idempotencia por identificador
+  sempre novo, timeout/indeterminado sem retry) ja esta corretamente
+  isolado. Plano de arquitetura consolidado: nova classe compartilhada
+  `Util\ConfiguracaoServicoImpressao` (fail-closed, nunca loga token),
+  novo endpoint de producao `impressao.php?acao=configuracao-servico-local`,
+  `impressao-teste.php` mantido exclusivo do diagnostico (nao removido),
+  migracao em 5 etapas reversiveis, deploy atomico backend+frontend.
+  Revisao formal de UX encontrou achados BLOQUEANTES (mensagens de erro
+  tecnicas expostas ao motorista sem traducao) e de ATENCAO (alvo de
+  toque abaixo do padrao de 64px do projeto, ausencia de indicador de
+  progresso, hierarquia tipografica inconsistente em telas de erro,
+  ausencia de trava de reentrancia contra toque duplo — confirmada
+  tambem pelo `frontend-especialista` de forma independente). Seguranca
+  sem achados bloqueantes; reconfirmado que a comparacao de token do
+  servico Node ja usa `crypto.timingSafeEqual` (achado antigo de `!==`
+  estava desatualizado, ja corrigido desde 2026-09-14). `origensPermitidas`
+  permanece vazio/fail-closed, pendencia independente nao resolvida
+  nesta demanda. 4 decisoes de produto pendentes antes de partes do
+  `/01-implementacao` (persistencia de impressora no backend vs.
+  localStorage; botao explicito de trocar impressora; escopo da
+  traducao de mensagens de erro; extracao opcional de arquivo JS
+  proprio). Nenhuma implementacao, chamada real, impressao ou alteracao
+  de banco nesta etapa. Ver
+  `docs/handoffs/2026-09-15-impressao-arquitetura-producao-ux.md`.
+
+- 2026-09-15 — **`/01-implementacao` de `impressao-arquitetura-producao-ux`
+  concluida**. Eliminada a dependencia do fluxo real de impressao em
+  `impressao-teste.php?acao=configuracao-servico-local`: nova classe
+  estatica `Util\ConfiguracaoServicoImpressao` (fail-closed, nunca loga
+  token), novo endpoint de producao `impressao.php?acao=configuracao-servico-local`
+  (protegido por `Auth::validarTotem()`, `Cache-Control: no-store` em
+  toda resposta apos correcao de consistencia), `ImpressaoTesteController`
+  refatorado para reaproveitar a mesma classe SEM mudar contrato externo
+  (`impressao-teste.php` continua 100% funcional, exclusivo do
+  diagnostico, nao removido). Front-end: nova `public/totem/assets/impressao.js`
+  (maquina de estados de impressao extraida de `app.js`), migrada para o
+  endpoint novo; nova `imprMensagemAmigavel()` traduz erros tecnicos
+  para portugues simples (nunca `e.message`/URL/token na tela); trava de
+  reentrancia `imprState.processando` contra toque duplo; spinner CSS
+  (`.impr-spinner`); alvo de toque `.impr-btn-alvo` (min 64px); hierarquia
+  visual melhorada em telas de erro/indeterminado (`.titulo`). Nenhum
+  botao publico de "trocar impressora" adicionado (decisao do usuario —
+  fica para painel administrativo futuro). `security-especialista`
+  aprovou apos correcao pontual de `Cache-Control` no caminho de erro;
+  achado de atencao sobre ausencia de rate-limit server-side em
+  reimpressoes repetidas confirmado como PRE-EXISTENTE (nao introduzido
+  por esta demanda, `gerarEtiqueta()` intocado) — registrado como
+  decisao de produto pendente, nao implementado. `qa-testes` validou
+  16/16 itens (endpoint novo testado por execucao real via curl,
+  isolamento de `impressao-teste.php` confirmado por grep, allowlist do
+  servico Node confirmada como unica fonte real de autorizacao mesmo com
+  `localStorage` adulterado, 10 suites de regressao Talent/Recebimento/
+  Expedicao com 0 falhas) — sem acesso a navegador real nesta sessao,
+  roteiro de 11 itens preparado para `/02-testes`. `docs/deploy-checklist.md`
+  e `.env.example` atualizados. Nenhuma chamada real ao Talent, nenhuma
+  impressao, nenhuma alteracao de banco/registro real, nenhum commit/push.
+  Ver `docs/handoffs/2026-09-15-impressao-arquitetura-producao-ux.md`,
+  secao "Resultado da implementacao (2026-09-15)".
+
+- 2026-09-15 — **`/02-testes` de `impressao-arquitetura-producao-ux` =
+  APROVADO (Etapa 1 + Etapa 2)**. Etapa 1 (automatizada/estatica):
+  24/24 itens PASSOU (`qa-testes`) + revisao de seguranca independente
+  APROVADA (`security-especialista`, reconfirmou correcao de
+  `Cache-Control`, 1 observacao nao bloqueante sobre trava de
+  reentrancia so client-side). **Etapa 2 (visual real, executada pelo
+  proprio usuario no navegador, SEM documentos fisicos/CNH/ordem de
+  coleta)**: metodo de teste ISOLADO orientado pelo orquestrador —
+  injecao direta de `imprState` via Console do DevTools + `imprRender()`,
+  sem passar pelo fluxo real da aplicacao, sem nenhuma chamada real ao
+  Talent/impressora. Confirmados visualmente: alvo de toque 64px real
+  (medido), spinner de fato visivel ("circulo rodando"), mensagens sem
+  termos tecnicos em nenhuma tela (erro tecnico so no console, nunca na
+  UI), hierarquia clara de sucesso/erro/indeterminado, ausencia de
+  botao de "trocar impressora", cancelar/voltar ("Novo atendimento")
+  funcionando sem travar mesmo apos ciclos repetidos. Achado incidental
+  confirmado como comportamento CORRETO (nao bug): `atendimento.php?acao=finalizar`
+  rejeitou corretamente um `id_atendimento` invalido/nulo do teste
+  isolado ("Atendimento nao encontrado"), sem nenhum efeito colateral.
+  3 itens (botao desabilitado durante requisicao, toques repetidos,
+  reimpressao manual) validados so por automacao/mock real na Etapa 1
+  (21/21 asserções) — confirmacao visual ao vivo completa fica pendente
+  para quando o ambiente fisico (servico local + impressora) estiver
+  disponivel, nao bloqueante. **Demanda pronta para `/03-revisao`.**
+  Ver `docs/handoffs/2026-09-15-impressao-arquitetura-producao-ux.md`,
+  secoes "Resultado dos testes — /02-testes, Etapa 1" e "Etapa 2".
+
+- 2026-09-15 — **`/03-revisao` final de `impressao-arquitetura-producao-ux`
+  = APROVADO**. 4 revisoes independentes concluidas sem alteracao de
+  codigo: arquitetura (`backend-especialista`) confirmou os 12 pontos
+  planejados e a ausencia de qualquer implementacao fora de escopo
+  (painel administrativo, `tb_totem`, botao publico de trocar
+  impressora, `origensPermitidas`, paleta de cores, remocao do
+  diagnostico); seguranca (`security-especialista`) reavaliou do zero
+  (incluindo verificacao especifica de XSS em nome de impressora/
+  mensagens vindas do servico Node — `escapeHtml()` confirmado em toda
+  superficie) e reconfirmou zero achado bloqueante; UX
+  (`ui-ux-especialista`) confirmou os 13 pontos ja validados ao vivo no
+  `/02-testes`; validacoes tecnicas finais (`qa-testes`) confirmaram
+  202/202 asserções de regressao e worktree limpo. **2 achados de
+  ATENCAO nao bloqueantes** registrados como pendencia: (1)
+  `docs/deploy-checklist.md` nao documenta explicitamente a
+  recomendacao de deploy atomico backend+frontend (correcao trivial de
+  texto); (2) tela `selecionar_impressora` nao tem botao de saida/
+  cancelamento (decisao de produto/UX pendente, nao implementada).
+  Nenhum achado bloqueante em nenhuma das 4 revisoes. **Demanda PRONTA
+  PARA `/04-commit-e-push`.** Ver
+  `docs/handoffs/2026-09-15-impressao-arquitetura-producao-ux.md`,
+  secao "Resultado da revisao — /03-revisao final (2026-09-15)".
+
+- 2026-09-15 — **Rodada curta de `/01-implementacao` de
+  `impressao-arquitetura-producao-ux` corrige os 2 achados de atencao do
+  `/03-revisao` final**. (1) `docs/deploy-checklist.md` ganhou item
+  explicito de DEPLOY ATOMICO (backend+frontend juntos, nunca
+  separados). (2) `imprTelaSelecionarImpressora()` ganhou botao "Novo
+  atendimento" — confirmado que a tela SEMPRE aparece com o atendimento
+  ja `concluido` (check-in com o Talent ja confirmado), nunca "em
+  andamento", entao a acao correta e so reset local (`novoAtendimento()`
+  ja existente), nunca cancelamento. Confirmado que `localStorage` da
+  impressora e preservado. `qa-testes` validou 12/12 itens + 10 suites
+  de regressao (202/202 asserções). Zero chamada real ao Talent, zero
+  impressao, zero alteracao de registro real, zero commit/push. **Demanda
+  pronta para `/03-revisao` curta de confirmacao.** Ver
+  `docs/handoffs/2026-09-15-impressao-arquitetura-producao-ux.md`, secao
+  "Rodada curta de /01-implementacao — correcao dos 2 achados de atencao
+  (2026-09-15)".
+
+- 2026-09-15 — **`/03-revisao` curta de confirmacao de
+  `impressao-arquitetura-producao-ux` = APROVADO**. Revisao restrita aos
+  2 ajustes da ultima rodada (botao "Novo atendimento" + deploy atomico
+  documentado): seguranca aprovou sem achados (sem cancelamento indevido,
+  sem XSS, `localStorage` preservado, sem botao publico de trocar
+  impressora, sem dado sensivel no checklist); `qa-testes` reconfirmou
+  os 12 itens + 202/202 asserções de regressao + isolamento de
+  `impressao-teste.php` mantido. Zero achado bloqueante ou de atencao.
+  **Demanda `impressao-arquitetura-producao-ux` PRONTA PARA
+  `/04-commit-e-push`.** Ver
+  `docs/handoffs/2026-09-15-impressao-arquitetura-producao-ux.md`, secao
+  "Resultado da /03-revisao curta de confirmacao (2026-09-15)".
+
+- 2026-09-15 — **`/04-commit-e-push` de `impressao-arquitetura-producao-ux`**:
+  commit `b6b5129f92f2a5e2499206bdb7e51953fd2676eb`
+  (`refactor(impressao): separa fluxos de teste e producao`), 10
+  arquivos (backend: `ConfiguracaoServicoImpressao.php` novo,
+  `ImpressaoAtendimentoController.php`, `ImpressaoTesteController.php`,
+  `impressao.php`; frontend: `impressao.js` novo, `app.js`, `app.css`,
+  `index.php`; docs: `deploy-checklist.md`, `.env.example`). Todas as
+  validacoes pre-commit passaram (sintaxe PHP/JS, sem whitespace/
+  segredos no diff, isolamento de `impressao-teste.php` confirmado,
+  202/202 asserções de regressao). Ver
+  `docs/handoffs/2026-09-15-impressao-arquitetura-producao-ux.md`,
+  secao "Commit".
