@@ -2526,3 +2526,18 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   commit/push. **Liberado para `/04-commit-e-push` curto.** Ver
   `docs/handoffs/2026-09-16-netum-preview-captura-resolucao.md`, secao
   "Revisão curta de confirmação (2026-09-16, /03-revisao)".
+- 2026-09-16 — **`/04-commit-e-push` curto de
+  `netum-preview-captura-resolucao` concluído**. Identidade Git local
+  `Bruno Santos <brunossaantos@gmail.com>` reutilizada (configurada
+  anteriormente neste repositório), sem nenhuma atribuição de IA.
+  Commit `effab4bf137c8788a933c35c1db77bc439913150`
+  (`docs(netum-preview-captura-resolucao): corrige registro de
+  pendencia ja resolvida`). Arquivos versionados:
+  `ia_development_state.md`, `docs/handoffs/2026-09-16-netum-preview-captura-resolucao.md`
+  (novo). Push para `origin/main` confirmado (`6510634..effab4b`),
+  `HEAD == origin/main` reconfirmado, worktree final limpo. Zero
+  captura física, zero Talent, zero impressão, zero alteração de
+  banco/configuração operacional. **Demanda `netum-preview-captura-resolucao`
+  encerrada.** Ver
+  `docs/handoffs/2026-09-16-netum-preview-captura-resolucao.md`, secao
+  "Commit e push (2026-09-16, /04-commit-e-push curto)".

@@ -386,3 +386,33 @@ sem divergência.
 ### Veredito
 
 **APROVADO.** Nenhum achado. **Pronta para `/04-commit-e-push` curto.**
+
+## Commit e push (2026-09-16, /04-commit-e-push curto)
+
+Identidade Git local já configurada neste repositório (demanda
+`impressao-origens-permitidas`), reutilizada sem alteração:
+`Bruno Santos <brunossaantos@gmail.com>`.
+
+Commit único (documental, sem nenhuma atribuição de IA):
+
+```
+effab4bf137c8788a933c35c1db77bc439913150
+docs(netum-preview-captura-resolucao): corrige registro de pendencia ja resolvida
+autor/committer: Bruno Santos <brunossaantos@gmail.com>
+```
+
+Arquivos versionados: `ia_development_state.md` (modificado),
+`docs/handoffs/2026-09-16-netum-preview-captura-resolucao.md` (novo).
+Nenhum código, configuração operacional ou segredo no commit.
+
+Push para `origin/main` confirmado: `6510634..effab4b`. `HEAD ==
+origin/main` reconfirmado após `git fetch`
+(`effab4bf137c8788a933c35c1db77bc439913150` nos dois lados). Worktree
+final limpo (`git status --porcelain` vazio).
+
+Zero captura física, zero Talent, zero impressão, zero alteração de
+banco/configuração operacional nesta etapa.
+
+### Veredito final
+
+**Demanda `netum-preview-captura-resolucao` encerrada com sucesso.**
