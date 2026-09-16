@@ -1119,3 +1119,18 @@ stack traces/`e.message`/base64/dados pessoais sem nenhum achado real
 so com placeholders vazios; confirmado que nenhuma impressao real,
 chamada ao Talent, ou alteracao de banco ocorreu durante esta etapa;
 `git fetch` sem divergencia com `origin/main` antes do commit.
+
+## Push
+
+Executado com sucesso, sem divergencia (`git fetch` confirmou
+`origin/main` no mesmo commit base esperado antes de cada push).
+`git push origin main`: `f7bbbdd..93dc551  main -> main`.
+
+**Confirmacao explicita**: `git rev-parse HEAD` e `git rev-parse
+origin/main` (apos novo `git fetch` pos-push) retornaram o MESMO hash:
+`93dc5513d0688a96c3e6ded81651213998f11db3`. `HEAD` local ==
+`origin/main` confirmado.
+
+Commits enviados:
+1. `b6b5129f92f2a5e2499206bdb7e51953fd2676eb` — `refactor(impressao): separa fluxos de teste e producao`
+2. `93dc5513d0688a96c3e6ded81651213998f11db3` — `docs(impressao-arquitetura): fecha handoff com hash do commit`
