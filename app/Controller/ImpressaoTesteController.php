@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use FPDF;
+use Util\ConfiguracaoServicoImpressao;
 use Util\Resposta;
 
 /**
@@ -63,26 +64,17 @@ class ImpressaoTesteController
      */
     public function configuracaoServicoLocal(): void
     {
-        $url = $_ENV['IMPRESSAO_LOCAL_URL'] ?? '';
-        $token = $_ENV['IMPRESSAO_LOCAL_TOKEN'] ?? '';
-        $frontendTimeoutMs = $_ENV['IMPRESSAO_FRONTEND_TIMEOUT_MS'] ?? '';
+        header('Cache-Control: no-store');
 
-        if (
-            $url === ''
-            || $token === ''
-            || !is_numeric($frontendTimeoutMs)
-            || (int) $frontendTimeoutMs <= 0
-        ) {
-            error_log('impressao-teste configuracao-servico-local: IMPRESSAO_LOCAL_URL/IMPRESSAO_LOCAL_TOKEN/IMPRESSAO_FRONTEND_TIMEOUT_MS ausentes ou invalidos no .env');
+        try {
+            $config = ConfiguracaoServicoImpressao::obter();
+        } catch (\RuntimeException $e) {
+            error_log('impressao-teste configuracao-servico-local: ' . $e->getMessage());
             Resposta::erro('Servico local de impressao nao configurado', 503);
             return;
         }
 
-        Resposta::sucesso([
-            'url' => $url,
-            'token' => $token,
-            'frontend_timeout_ms' => (int) $frontendTimeoutMs,
-        ]);
+        Resposta::sucesso($config);
     }
 
     /**

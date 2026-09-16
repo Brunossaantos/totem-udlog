@@ -31,6 +31,9 @@ switch ($acao) {
     case 'gerar-etiqueta':
         $controller->gerarEtiqueta($entrada, (int) $totem['id_totem'], $reimpressao);
         break;
+    case 'configuracao-servico-local':
+        $controller->configuracaoServicoLocal();
+        break;
     default:
         Resposta::erro('Acao invalida', 404);
 }

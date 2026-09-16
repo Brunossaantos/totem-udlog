@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use FPDF;
 use App\Dao\AtendimentoDao;
+use Util\ConfiguracaoServicoImpressao;
 use Util\Resposta;
 
 /**
@@ -28,6 +29,34 @@ use Util\Resposta;
 class ImpressaoAtendimentoController
 {
     public function __construct(private AtendimentoDao $atendimentoDao) {}
+
+    /**
+     * Devolve URL/token do servico local de impressao (mini PC Windows) para
+     * o fluxo REAL de impressao — equivalente de producao da rota exclusiva
+     * de diagnostico App\Controller\ImpressaoTesteController::configuracaoServicoLocal()
+     * (impressao-teste.php), criada originalmente so para a tela de
+     * diagnostico e ate 2026-09-15 reaproveitada indevidamente pelo front-end
+     * de producao (achado do planejamento impressao-arquitetura-producao-ux).
+     *
+     * NAO recebe id_atendimento nem nenhum parametro: e configuracao de
+     * totem/ambiente, nao de atendimento especifico. Autenticacao
+     * (Util\Auth::validarTotem) ja e a primeira linha executada em
+     * public/api/impressao.php, antes de qualquer chamada a este metodo.
+     */
+    public function configuracaoServicoLocal(): void
+    {
+        header('Cache-Control: no-store');
+
+        try {
+            $config = ConfiguracaoServicoImpressao::obter();
+        } catch (\RuntimeException $e) {
+            error_log('impressao configuracao-servico-local: ' . $e->getMessage());
+            Resposta::erro('Servico local de impressao nao configurado', 503);
+            return;
+        }
+
+        Resposta::sucesso($config);
+    }
 
     /**
      * Reimpressao manual (nunca automatica) sempre gera um NOVO

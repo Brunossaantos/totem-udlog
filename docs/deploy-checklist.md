@@ -93,6 +93,38 @@ duplica o manual, só serve de lista de verificação.
       `taskkill /PID <pid especifico> /T /F` — ver README seção 4.6 para
       o passo a passo completo.
 
+- [ ] **Deploy ATÔMICO obrigatório para a demanda
+      impressao-arquitetura-producao-ux (2026-09-15) — backend e
+      front-end sobem juntos, na mesma janela, nunca separados.** Esta
+      mudança tem os dois lados acoplados por contrato de endpoint:
+  - Backend novo: `util/ConfiguracaoServicoImpressao.php` (classe
+    compartilhada), `app/Controller/ImpressaoAtendimentoController.php`
+    (novo método `configuracaoServicoLocal()`) e `public/api/impressao.php`
+    (nova acao/rota `impressao.php?acao=configuracao-servico-local`).
+  - Front-end novo/alterado: `public/totem/assets/impressao.js` (novo
+    arquivo), `public/totem/assets/app.js` (bloco de impressao extraido
+    para o arquivo acima), `public/totem/assets/app.css` (novas classes)
+    e `public/totem/index.php` (novo `<script>` apontando para
+    `impressao.js`).
+  - **Nunca publicar um lado sem o outro.** Se o front-end novo for
+    publicado antes do endpoint `impressao.php?acao=configuracao-servico-local`
+    existir em producao, a tela de impressao real quebra (chamada a um
+    endpoint inexistente) ate o backend ser publicado. Da mesma forma,
+    publicar o backend novo sem o front-end atualizado deixa o totem
+    ainda chamando o fluxo antigo, sem se beneficiar da mudanca e com
+    risco de incompatibilidade de contrato entre as duas versoes. Os
+    arquivos acima devem ser enviados ao servidor na mesma operacao de
+    deploy.
+- [ ] **Fluxo real de impressao usa o endpoint de producao, nao o de
+      teste/diagnostico.** Desde a demanda impressao-arquitetura-producao-ux
+      (2026-09-15), o front-end de producao (public/totem/assets/impressao.js)
+      chama impressao.php?acao=configuracao-servico-local (producao) —
+      NUNCA mais impressao-teste.php?acao=configuracao-servico-local
+      (que continua existindo, mas exclusivo da tela de diagnostico,
+      acessada por toque longo). Ao validar um deploy novo, confirmar
+      via DevTools/Network que o fluxo real de impressao do atendimento
+      nao faz nenhuma chamada a impressao-teste.php.
+
 ## 2. Chromium kiosk e scanner Netum SD-2000 (mini PC)
 
 Pontos levantados no planejamento da digitalização de notas fiscais via

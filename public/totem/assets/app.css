@@ -194,6 +194,29 @@ input.campo-texto {
    planejamento reaproveitada nesta implementacao. */
 .diag-hotspot { position: fixed; bottom: 0; right: 0; width: 56px; height: 56px; }
 
+/* telas de impressao real pos-Talent (exp_impressao/rec_impressao) —
+   demanda impressao-arquitetura-producao-ux. Botoes com alvo de toque
+   minimo de 64px (item 4), igual ao padrao ja usado em .tecla-numerica/
+   .btn-saida-modal-nota — restrito a estas telas via .impr-btn-alvo, sem
+   afetar botoes de outras telas do projeto. */
+.impr-btn-alvo { min-height: 64px; }
+
+/* indicador visual de processamento (item 2) — spinner CSS simples,
+   reaproveitando as cores ja existentes do projeto (navy + branco), sem
+   cor nova. Usado nos 4 momentos de espera das telas de impressao. */
+.impr-spinner {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto;
+    border: 5px solid #dbe4ea;
+    border-top-color: #0b2a45;
+    border-radius: 50%;
+    animation: impr-girar 0.9s linear infinite;
+}
+@keyframes impr-girar {
+    to { transform: rotate(360deg); }
+}
+
 .diag-overlay { position: fixed; inset: 0; background: rgba(11,42,69,0.6); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 70; }
 .diag-caixa { background: #fff; border-radius: 14px; max-width: 420px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; }
 .diag-cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #e2e8ee; font-size: 13px; color: #5b6b7a; font-weight: 600; }
