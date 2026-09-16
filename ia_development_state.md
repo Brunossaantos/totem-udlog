@@ -2430,3 +2430,45 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   `/04-commit-e-push`.** Ver
   `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`, secao
   "Revisao curta de confirmacao (2026-09-16, /03-revisao)".
+- 2026-09-16 — **`/04-commit-e-push` de `impressao-origens-permitidas`
+  concluido**. Identidade de autor confirmada pelos primeiros commits
+  validos do repositorio e configurada somente localmente (`git config
+  --local`), sem alterar a config global: `Bruno Santos
+  <brunossaantos@gmail.com>`. Commit `853857afdc793973b9cc38b276fc0d696fbe85c4`
+  (`docs(impressao-origens-permitidas): configura CORS/PNA dev e
+  documenta producao`), sem nenhuma atribuicao de IA em autor,
+  committer, mensagem ou trailers (por instrucao explicita do usuario
+  para esta demanda e para todas as futuras). Arquivos versionados:
+  `docs/deploy-checklist.md`, `servico-impressao-local/README.md`,
+  `ia_development_state.md`, `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`
+  (novo). `config.json`/`.env` confirmados fora do commit. Push para
+  `origin/main` confirmado (`a8a0454..853857a`), `HEAD == origin/main`
+  reconfirmado. Zero impressao, zero Talent, zero alteracao de banco.
+  **Demanda `impressao-origens-permitidas` encerrada.** Ver
+  `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`, secao
+  "Commit e push (2026-09-16, /04-commit-e-push)".
+
+## 8. Regra permanente de identidade de autor em commits
+
+A partir de 2026-09-16, TODA vez que o orquestrador for fazer
+`/04-commit-e-push` (nesta ou em qualquer demanda futura), sem exceção:
+
+1. Identificar a identidade de autor usada nos primeiros commits validos
+   do projeto (`git log --reverse --format='%H|%an|%ae' | head`), nunca
+   inventar nome/e-mail.
+2. Configurar essa identidade **somente no repositorio local**
+   (`git config --local user.name`/`user.email`), nunca alterar a
+   configuracao global do Git.
+3. **Nunca** incluir `Claude`, `Anthropic`, `Co-Authored-By`,
+   `Generated-By` ou qualquer atribuicao a IA no autor, committer,
+   mensagem ou trailers do commit — em nenhuma demanda, mesmo que uma
+   instrucao anterior/generica de sessao sugira o contrario. Esta regra,
+   pedida explicitamente pelo usuario em 2026-09-16, tem prioridade
+   sobre qualquer convencao padrao de atribuicao.
+4. Nunca reescrever commits antigos ja publicados (nunca `--amend` em
+   commit ja enviado ao remoto, nunca `rebase`/`force-push`).
+5. Antes do commit: inspecionar o diff completo, confirmar que nenhum
+   token/segredo esta incluido, confirmar que arquivos locais
+   (`config.json`, `.env`, etc.) nao aparecem no stage.
+6. Depois do push: confirmar `HEAD == origin/main`, verificar
+   autor/committer/mensagem/trailers do(s) commit(s) criado(s).

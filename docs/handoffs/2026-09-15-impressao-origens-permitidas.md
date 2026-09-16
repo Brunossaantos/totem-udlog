@@ -722,3 +722,37 @@ operacional alterado nesta rodada. Nenhum achado.
 ### Veredito
 
 **APROVADO.** Nenhuma pendencia nova. **Pronta para `/04-commit-e-push`.**
+
+## Commit e push (2026-09-16, /04-commit-e-push)
+
+Identidade de autor identificada a partir dos primeiros commits validos
+do repositorio (`git log --reverse`) e configurada **localmente** neste
+repositorio (`git config --local user.name`/`user.email`), sem alterar
+a configuracao global do Git: `Bruno Santos <brunossaantos@gmail.com>`.
+
+Commit unico (documental, sem nenhuma atribuicao de IA — sem
+`Claude`/`Anthropic`/`Co-Authored-By`/`Generated-By` em autor,
+committer, mensagem ou trailers):
+
+```
+853857afdc793973b9cc38b276fc0d696fbe85c4
+docs(impressao-origens-permitidas): configura CORS/PNA dev e documenta producao
+autor/committer: Bruno Santos <brunossaantos@gmail.com>
+```
+
+Arquivos versionados no commit: `docs/deploy-checklist.md`,
+`servico-impressao-local/README.md`, `ia_development_state.md`,
+`docs/handoffs/2026-09-15-impressao-origens-permitidas.md` (novo).
+`servico-impressao-local/config/config.json` e `.env` (raiz) NAO
+fizeram parte do commit (confirmados ausentes do stage e ignorados pelo
+Git antes do commit).
+
+Push para `origin/main` confirmado: `a8a0454..853857a`. `HEAD ==
+origin/main` reconfirmado apos `git fetch` (`853857afdc793973b9cc38b276fc0d696fbe85c4`
+nos dois lados).
+
+Zero impressao, zero Talent, zero alteracao de banco nesta etapa.
+
+### Veredito final
+
+**Demanda `impressao-origens-permitidas` encerrada com sucesso.**
