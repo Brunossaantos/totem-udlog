@@ -2258,3 +2258,175 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   202/202 asserções de regressao). Ver
   `docs/handoffs/2026-09-15-impressao-arquitetura-producao-ux.md`,
   secao "Commit".
+
+- 2026-09-15 — **`/00-planejamento` da demanda `impressao-origens-permitidas`
+  concluido**. Mapeamento completo confirmou que o mecanismo atual de
+  CORS/PNA (`servico-impressao-local/src/middleware/cors.js`,
+  `src/config.js`) ja e seguro e suficiente sem mudanca de codigo:
+  comparacao EXATA de origem via `Array.includes()` (sem
+  wildcard/startsWith/regex em lugar nenhum), bind fixo em `127.0.0.1`
+  (hardcoded, nao configuravel), `Access-Control-Allow-Origin` nunca
+  `*`, PNA so liberado se a origem ja e autorizada, autenticacao por
+  token independente do CORS, mensagens de erro sem vazamento.
+  `security-especialista` confirmou zero achado bloqueante (2
+  observacoes de baixo risco sobre case-sensitivity/porta implicita,
+  sem necessidade de correcao). `devops-especialista` planejou a
+  estrategia dev/producao: dev recebe
+  `origensPermitidas: ["http://localhost:8080"]` (valor exato ja
+  fornecido pelo usuario); producao permanece fail-closed (`[]`) ate o
+  deploy real confirmar a origem exata na barra de enderecos apos
+  redirecionamento (nunca supor `http://udlog.online` vs
+  `https://udlog.online` antecipadamente). Plano de 17 testes de
+  seguranca/funcionais definido, incluindo 1 chamada real pelo
+  navegador em `http://localhost:8080/totem` (so `/saude`/`/impressoras`,
+  nunca `/imprimir`). Nenhuma decisao bloqueante pendente — o valor de
+  dev ja foi fornecido pelo usuario, a pendencia de producao e
+  esperada e ja tratada como fail-closed. Nenhuma implementacao,
+  alteracao de `.env`/`config.json` real, ou habilitacao de producao
+  nesta etapa. Ver
+  `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`.
+
+- 2026-09-16 — **`/01-implementacao` de `impressao-origens-permitidas`
+  concluida**. `servico-impressao-local/config/config.json` (real,
+  gitignored, nunca exibido/versionado) teve `origensPermitidas`
+  alterado de `[]` para `["http://localhost:8080"]` — unico campo
+  tocado, demais preservados. Nenhum codigo de CORS/PNA/bind foi
+  alterado (mecanismo ja confirmado seguro no planejamento, sem
+  divergencia encontrada entre plano e codigo real). Validacoes: JSON
+  valido, exatamente 1 origem sem `/totem`/barra final/`127.0.0.1`/
+  origem de producao/wildcard, arquivo confirmado ignorado pelo Git,
+  teste isolado de carregamento (`host==='127.0.0.1'`,
+  `origensPermitidas` correto), comparacao exata simulada rejeitando
+  todas as variantes maliciosas/producao/wildcard. `servico-impressao-local/README.md`
+  e `docs/deploy-checklist.md` atualizados: dev ativo
+  (`http://localhost:8080`), producao documentada
+  (`https://udlog.online`, NAO ativada — so no deploy final, com
+  reconfirmacao pos-deploy), `http://udlog.online` (sem HTTPS)
+  explicitamente marcado como nao autorizado, regra de nunca habilitar
+  dev+producao juntas nem usar `*`, rollback seguro documentado
+  (`[]`). Zero impressao, zero Talent, zero alteracao de banco/registro
+  real, zero commit/push. **Pronta para `/02-testes`.** Ver
+  `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`, secao
+  "Resultado da implementacao (2026-09-16)".
+- 2026-09-16 — **`/02-testes` de `impressao-origens-permitidas`
+  concluida — APROVADO**. 17 cenarios de CORS/PNA/auth executados de
+  verdade (curl/PowerShell) contra o servico rodando em
+  `127.0.0.1:4747`, todos PASSOU: origem `http://localhost:8080`
+  aceita com `Access-Control-Allow-Origin`/`Vary: Origin`/preflight/PNA
+  corretos; todas as origens nao autorizadas testadas (`.../`,
+  `.../totem`, `127.0.0.1:8080`, `localhost` sem porta, `localhost:80`,
+  `https://udlog.online`, `http://udlog.online`, dois dominios
+  maliciosos semelhantes, `Origin: null`) rejeitadas com 403 sem
+  `Access-Control-Allow-Origin`; ausencia de wildcard confirmada;
+  ausencia de `Origin`/token valido-invalido-ausente/lista vazia ou
+  malformada (teste isolado) com o comportamento esperado. Revisao de
+  seguranca independente (`security-especialista`, leitura de codigo em
+  paralelo) confirmou sem achado novo: bind `127.0.0.1` hardcoded,
+  comparacao exata sem wildcard, autenticacao independente do CORS,
+  erros sanitizados, `config.json` fora do Git, distincao
+  `http://`/`https://udlog.online` explicita na documentacao. Teste
+  real pelo navegador (`http://localhost:8080/totem`, Console do
+  DevTools) executado com o usuario: `GET /saude` e `GET /impressoras`
+  responderam corretamente, sem bloqueio de CORS/PNA, `POST /imprimir`
+  nao foi chamado. Servicos iniciados durante os testes controlados
+  exclusivamente por PID (28156 na rodada automatizada, 30056 na rodada
+  do navegador), ambos encerrados ao final restaurando o estado
+  "parado" anterior. Regressao: sem suite automatizada formal no
+  servico (lacuna pre-existente registrada), `git diff --check` sem
+  problema, busca por segredo nos arquivos versionados sem achado. Zero
+  impressao, zero Talent, zero alteracao de banco/registro real, zero
+  commit/push; producao continua nao ativada/nao testada. **Achado
+  operacional nao bloqueante**: usuario colou no chat o token real
+  durante o teste manual pelo navegador (nao houve vazamento pela
+  aplicacao) — rotacao do token recomendada por precaucao. **Liberado
+  para `/03-revisao`.** Ver
+  `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`, secao
+  "Resultado dos testes (2026-09-16, /02-testes)".
+- 2026-09-16 — **Remediacao de seguranca em `impressao-origens-permitidas`
+  (rotacao de token) concluida**. Motivo: durante o teste real pelo
+  navegador do `/02-testes`, o token do servico local de impressao foi
+  colado pelo usuario no chat (comando ja preenchido) — vazamento por
+  operacao manual, nao pela aplicacao/codigo. Token anterior revogado;
+  novo token (256 bits, hex) gerado e sincronizado atomicamente em
+  `servico-impressao-local/config/config.json` (`token`) e `.env` real
+  do backend (`IMPRESSAO_LOCAL_TOKEN`), preservando integralmente
+  `origensPermitidas`/porta/impressoras/timeouts/demais campos.
+  Validado sem exibir nenhum valor: token antigo → 401 em
+  `/impressoras`; token novo → 200; sem token → 401; `/saude` inalterado
+  (200, sem token); CORS continua aceitando so `http://localhost:8080`;
+  `https://udlog.online` ausente; bind so em `127.0.0.1`; nenhum token
+  (antigo ou novo) encontrado em arquivo versionado; `config.json`/`.env`
+  confirmados ignorados pelo Git. Servico controlado exclusivamente por
+  PID (33708) durante a validacao, devolvido ao estado "parado" ao
+  final. Zero impressao, zero Talent, zero alteracao de banco, zero
+  commit/push. Regra operacional registrada: nunca colar comando
+  preenchido com token/segredo em chat, terminal compartilhado ou
+  documentacao. **Liberado para `/03-revisao`.** Ver
+  `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`, secao
+  "Remediacao de seguranca — rotacao de token (2026-09-16)".
+- 2026-09-16 — **`/03-revisao` final de `impressao-origens-permitidas`
+  concluida — APROVADO**. Tres revisoes independentes em paralelo:
+  `security-especialista` (CORS/PNA + rotacao de token + documentacao,
+  por leitura) confirmou comparacao exata via `Array.includes()` sem
+  wildcard, `Access-Control-Allow-Origin` so para origem autorizada,
+  PNA condicionado a mesma checagem, autenticacao independente do CORS,
+  bind `127.0.0.1` hardcoded, mensagens sanitizadas, nenhum token em
+  arquivo versionado; `devops-especialista` (config.json/.env +
+  documentacao) confirmou `origensPermitidas` exata
+  (`["http://localhost:8080"]`), JSON/dotenv validos, token sincronizado
+  entre os dois arquivos (comparacao booleana em memoria), ambos fora
+  do Git; `qa-testes` (unico agente autorizado a controlar o servico
+  nesta rodada, PID 23664) reconfirmou 11 testes focados pos-rotacao ao
+  vivo: token antigo 401, token novo 200, sem token 401, `/saude`
+  publico 200, `https://udlog.online`/`http://udlog.online` continuam
+  rejeitadas (403), preflight/PNA corretos, bind so em `127.0.0.1` —
+  todos PASS; servico devolvido ao estado parado ao final. `git diff
+  --check` sem problema real; busca por segredo no diff e no
+  repositorio versionado sem achado. **1 achado de atencao NAO
+  BLOQUEANTE** (convergente entre security e devops): a regra
+  operacional "nunca colar comando preenchido com token em chat/
+  terminal/documentacao" existe so no handoff/log historico, nao foi
+  replicada em `servico-impressao-local/README.md` (secao 2.4) nem em
+  `docs/deploy-checklist.md` — registrado como pendencia, nao corrigido
+  nesta etapa (fora de escopo do `/03-revisao`). Zero impressao, zero
+  Talent, zero alteracao de banco, zero commit/push. Producao continua
+  nao ativada. **Liberado para `/04-commit-e-push`.** Ver
+  `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`, secao
+  "Revisao final (2026-09-16, /03-revisao)".
+- 2026-09-16 — **`/01-implementacao` curta de `impressao-origens-permitidas`
+  (correcao documental)** — resolve o achado de atencao nao bloqueante da
+  `/03-revisao` acima: a regra operacional "nunca colar comando ja
+  preenchido com token em chat/terminal compartilhado/documentacao"
+  passa a existir tambem nos documentos operacionais vivos, nao so no
+  handoff/log historico. Adicionada em
+  `servico-impressao-local/README.md` (secao 2.4, bloco visivel "REGRA
+  OBRIGATORIA — manuseio do token", com notas cruzadas nas secoes
+  4.3/4.4) e em `docs/deploy-checklist.md` (sub-item do item "Token do
+  serviço gerado com segurança", secao 1.X), com o mesmo conteudo
+  essencial nos dois: nunca em URL/querystring, nunca como argumento de
+  linha de comando visivel, nunca em print/log/documentacao/Trello,
+  autenticacao sempre via header `Authorization: Bearer <token>`, testes
+  manuais por script que le o token do arquivo de config (nunca
+  digitado/colado, so exibe `PASS`/`FAIL`/codigo HTTP), qualquer
+  exposicao (mesmo parcial) exige rotacao imediata nos dois pontos
+  sincronizados (`config/config.json` chave `token`, `.env` chave
+  `IMPRESSAO_LOCAL_TOKEN`) com confirmacao de `401` no token antigo.
+  Escopo estritamente documental — nenhum codigo, `.env`, `config.json`
+  real ou config operacional alterado; servico Node nao foi
+  iniciado/parado; zero impressao, zero Talent, zero banco, zero
+  commit/push nesta rodada. Nenhum valor de token exposto em nenhum
+  diff. Ver `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`,
+  secao "Correcao documental — regra de token replicada (2026-09-16,
+  /01-implementacao curta)".
+- 2026-09-16 — **`/03-revisao` curta de confirmacao em
+  `impressao-origens-permitidas` concluida — APROVADO**. Revisao
+  independente (`security-especialista`) restrita aos 4 arquivos
+  documentais da rodada anterior (README, deploy-checklist, handoff,
+  este log). Confirmado: regra operacional de manuseio de token
+  consistente entre README e deploy-checklist; `git diff --check`
+  limpo; nenhum token/credencial real presente nos 4 arquivos;
+  `config.json`/`.env` confirmados fora do Git; nenhum codigo/config
+  operacional alterado. Nenhum achado. **Liberado para
+  `/04-commit-e-push`.** Ver
+  `docs/handoffs/2026-09-15-impressao-origens-permitidas.md`, secao
+  "Revisao curta de confirmacao (2026-09-16, /03-revisao)".

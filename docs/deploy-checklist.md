@@ -56,6 +56,24 @@ duplica o manual, só serve de lista de verificação.
       `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
       — nunca reaproveitar token do totem, do Trello ou do Talent (README
       seção 2.4).
+  - [ ] **REGRA OBRIGATÓRIA de manuseio do token (README seção 2.4, não
+        opcional):** nunca colar comando já preenchido com o valor real do
+        token em chat (inclusive com IA/assistentes), terminal
+        compartilhado, ticket ou documentação; nunca em URL/querystring;
+        nunca como argumento de linha de comando visível (histórico do
+        shell); nunca em print de tela, log, documentação ou comentário do
+        Trello. Autenticação sempre via header HTTP
+        `Authorization: Bearer <token>` — nunca outro mecanismo. Testes
+        manuais que precisem do token devem ser feitos por script que leia
+        o valor direto do arquivo de config (nunca digitado/colado
+        manualmente) e mostre só `PASS`/`FAIL` ou código HTTP — nunca o
+        valor, prefixo, sufixo, tamanho ou hash do token; remover script
+        temporário ao final. **Qualquer exposição, mesmo
+        acidental/parcial**, torna o token comprometido: rotacionar
+        IMEDIATAMENTE nos dois pontos sincronizados —
+        `config/config.json` (chave `token`) e `.env` do backend PHP
+        (chave `IMPRESSAO_LOCAL_TOKEN`) — e confirmar que o token ANTIGO
+        passa a responder `401` (prova de revogação).
 - [ ] **`config/config.json` criado a partir de `config/config.example.json`.**
       Nunca commitado (já coberto por `config/config.json` em
       `servico-impressao-local/.gitignore`). Preencher, no mínimo:
@@ -65,10 +83,18 @@ duplica o manual, só serve de lista de verificação.
         impressora virtual/interativa (`Microsoft Print to PDF`, `Fax`,
         etc.) — pode travar a tela do totem esperando interação humana.
   - [ ] `timeoutMs`: default `30000` (30s) se omitido.
-  - [ ] `origensPermitidas`: **permanece vazio/fail-closed por enquanto**
-        — a URL real de produção do totem ainda não foi definida; não
-        decidir esse valor aqui, só manter vazio até a pendência ser
-        resolvida (README seção 2.5 e seção 6).
+  - [ ] `origensPermitidas`: em **desenvolvimento** já configurado e
+        ativo com `["http://localhost:8080"]`. Em **produção**, a origem
+        `https://udlog.online` já está confirmada e documentada, mas só
+        deve ser ativada neste arquivo **no deploy final no mini PC** —
+        nunca antes, e nunca junto com a origem de desenvolvimento na
+        mesma lista. `http://udlog.online` (sem HTTPS) não é a origem
+        autorizada. Nenhuma origem deve incluir path (ex.: `/totem`) nem
+        `*` (wildcard). Após ativar a origem de produção no deploy final,
+        reconfirmar visualmente na barra de endereço do navegador do
+        totem que a origem servida é exatamente `https://udlog.online`
+        antes de considerar o CORS/PNA validado (README seção 2.5 e seção
+        4.5). Rollback seguro: voltar `origensPermitidas` para `[]`.
   - [ ] Espelhar manualmente `IMPRESSORAS_PERMITIDAS`,
         `IMPRESSAO_TIMEOUT_MS` e `IMPRESSAO_FRONTEND_TIMEOUT_MS` no `.env`
         do backend PHP — não há sincronização automática entre os dois

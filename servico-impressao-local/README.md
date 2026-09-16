@@ -75,6 +75,30 @@ Trello ou do Talent). Gerar um valor aleatorio forte:
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
+> **REGRA OBRIGATORIA — manuseio do token (nunca opcional):**
+> - **Nunca** colar um comando ja preenchido com o valor real do token em
+>   chat (inclusive conversas com IA/assistentes), terminal compartilhado,
+>   ticket ou qualquer lugar que fique registrado.
+> - **Nunca** colocar o token em URL/querystring.
+> - **Nunca** passar o token como argumento de linha de comando visivel
+>   (evitar que apareca no historico do shell).
+> - **Nunca** registrar o token em print de tela, log, documentacao,
+>   ticket ou comentario do Trello.
+> - **Sempre** autenticar via header HTTP `Authorization: Bearer <token>`
+>   — nunca outro mecanismo.
+> - Testes manuais que precisem do token (secoes 4.3/4.4) devem ser feitos
+>   por script que leia o valor direto de `config/config.json`/`.env`
+>   (nunca digitado/colado manualmente num comando visivel) e exiba
+>   somente `PASS`/`FAIL` ou o codigo HTTP — nunca o valor, prefixo,
+>   sufixo, tamanho ou hash persistente do token. Remover qualquer script
+>   temporario usado no teste ao final.
+> - **Qualquer exposicao, mesmo acidental/parcial** (colado em chat, print,
+>   log, etc.), torna o token comprometido: rotacionar IMEDIATAMENTE nos
+>   dois pontos que precisam permanecer sincronizados com o MESMO valor —
+>   `config/config.json` (chave `token`) e o `.env` real do backend PHP
+>   (chave `IMPRESSAO_LOCAL_TOKEN`). Apos rotacionar, confirmar que o
+>   token ANTIGO passa a responder `401` (prova de revogacao efetiva).
+
 ### 2.5. Criar `config/config.json`
 
 1. Copiar `config/config.example.json` para `config/config.json` (esse
@@ -85,13 +109,35 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    - `maxPdfBytesDecodificado`: limite de tamanho do PDF decodificado, em
      bytes (padrao sugerido `2097152` = 2 MB, ajustar conforme o tamanho
      real dos PDFs de etiqueta gerados pelo backend).
-   - `origensPermitidas`: lista de origens (protocolo + dominio, sem
-     barra final) autorizadas a chamar este servico via navegador.
-     **PENDENCIA**: a URL real de producao/dev do totem ainda nao foi
-     fixada no projeto — preencher esta lista assim que existir. Ate la o
-     servico so responde a chamadas sem cabecalho `Origin` (diagnostico
-     local via curl/PowerShell), rejeitando qualquer chamada de navegador
-     (fail-closed).
+   - `origensPermitidas`: lista de origens (protocolo + dominio, **sem**
+     path e **sem** barra final — o cabecalho HTTP `Origin` enviado pelo
+     navegador nunca inclui path) autorizadas a chamar este servico via
+     navegador. Cada ambiente mantem **so a sua propria origem**:
+     - **Desenvolvimento (ja ativo agora)**:
+       ```json
+       "origensPermitidas": ["http://localhost:8080"]
+       ```
+     - **Producao (documentado, NAO ativado ainda — so no deploy final no
+       mini PC)**:
+       ```json
+       "origensPermitidas": ["https://udlog.online"]
+       ```
+       Repare que e `https://udlog.online` (com HTTPS) — `http://udlog.online`
+       (sem HTTPS) **nao** e a origem autorizada e nao deve ser incluida.
+     - **Nunca** deixar dev e producao juntas na mesma lista "por
+       garantia" — cada ambiente usa exclusivamente a origem que
+       corresponde a ele.
+     - **Nunca** usar `*` (wildcard) nesta lista.
+     - Enquanto a lista estiver vazia (`[]`), o servico permanece
+       fail-closed: so responde a chamadas sem cabecalho `Origin`
+       (diagnostico local via curl/PowerShell), rejeitando qualquer
+       chamada de navegador. Voltar a lista para `[]` e o rollback seguro
+       caso a origem ativa cause algum problema.
+     - No deploy final em producao, depois de ativar
+       `["https://udlog.online"]` no mini PC, reconfirmar visualmente na
+       barra de endereco do navegador do totem que a origem realmente
+       servida e exatamente `https://udlog.online`, sem path, antes de
+       considerar o CORS/PNA validado em producao.
    - `idempotencia.ttlMs` / `idempotencia.maxEntries`: controle de
      deduplicacao de impressao por identificador de job (padrao sugerido
      `600000` ms / `500` entradas).
@@ -244,6 +290,11 @@ pasta `daemon/` criada pelo `node-windows` ao lado do script, que guarda
 curl -H "Authorization: Bearer SEU_TOKEN_AQUI" http://127.0.0.1:4747/impressoras
 ```
 
+`SEU_TOKEN_AQUI` e um placeholder — **nunca** substituir pelo valor real
+diretamente num comando colado em chat, terminal compartilhado ou
+documentacao (ver regra obrigatoria na secao 2.4). Testes manuais
+repetidos devem ler o token direto do arquivo de config via script.
+
 Resposta esperada (200): lista com o nome exato de cada impressora
 instalada, incluindo a `EPSON TM-T88VII Receipt`. Se a impressora
 esperada nao aparecer aqui, o problema e o driver (ver secao 2.2), nao
@@ -259,6 +310,10 @@ curl -X POST http://127.0.0.1:4747/imprimir \
   -H "Content-Type: application/json" \
   -d "{\"pdf_base64\":\"<base64 de um PDF real>\",\"impressora\":\"EPSON TM-T88VII Receipt\",\"identificador\":\"teste-manual-001\"}"
 ```
+
+`SEU_TOKEN_AQUI` e um placeholder — mesma regra obrigatoria da secao 2.4
+se aplica aqui (nunca colar o valor real preenchido num comando
+compartilhado).
 
 - Repetir a mesma chamada com o mesmo `identificador` deve retornar
   `{"status":"ja_impresso", ...}` sem imprimir de novo.
@@ -278,11 +333,16 @@ teste/dev, nunca em cima de uma impressora fisica ou virtual real.
 
 ### 4.5. CORS / Private Network Access
 
-Enquanto `origensPermitidas` estiver vazio em `config/config.json`
-(pendencia — ver secao 2.5), qualquer chamada do navegador do totem com
-cabecalho `Origin` deve ser rejeitada com `403` de proposito
-(fail-closed). Isso e esperado ate a URL real do totem ser preenchida
-naquela lista.
+`origensPermitidas` em `config/config.json` (ver secao 2.5) hoje esta
+ativa em desenvolvimento com `["http://localhost:8080"]`. A origem de
+producao `https://udlog.online` esta documentada mas **nao** ativada
+neste arquivo — sera ligada somente no deploy final no mini PC, com
+reconfirmacao da origem na barra do navegador depois do deploy (ver
+secao 2.5). Enquanto `origensPermitidas` estiver vazio (`[]`), qualquer
+chamada do navegador do totem com cabecalho `Origin` deve ser rejeitada
+com `403` de proposito (fail-closed) — esse e o comportamento padrao
+antes de qualquer ambiente ser configurado, e tambem o rollback seguro
+caso a origem ativa precise ser desativada.
 
 ### 4.6. Parar o servico manualmente (teste/depuracao)
 
@@ -329,9 +389,10 @@ pessoa.
 
 ## 6. Pendencias conhecidas
 
-- **URL real de producao/dev do totem** para preencher
-  `origensPermitidas` em `config/config.json` — ainda nao fixada no
-  projeto.
+- **Ativacao de `origensPermitidas` para producao** (`https://udlog.online`)
+  em `config/config.json` — origem ja confirmada e documentada na secao
+  2.5, mas so sera ativada no arquivo real durante o deploy final no mini
+  PC (nao antes disso).
 - **Validacao no hardware fisico** (mini PC + `EPSON TM-T88VII Receipt`
   via USB + Epson Advanced Printer Driver 6) — nada disso foi testado de
   verdade ainda; este README e o roteiro para quando o equipamento
