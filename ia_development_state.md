@@ -2733,3 +2733,21 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   `git diff --check` limpo. **Liberado para `/04-commit-e-push`.** Ver
   `docs/handoffs/2026-09-16-saneamento-lista-pendencias-projeto.md`,
   secao "Nova revisão curta de confirmação (2026-09-16, /03-revisao)".
+- 2026-09-16 — **`/04-commit-e-push` de
+  `saneamento-lista-pendencias-projeto` concluído**. Identidade Git
+  local `Bruno Santos <brunossaantos@gmail.com>` reutilizada, sem
+  nenhuma atribuição de IA. Commit
+  `e4d53ea95ed7e762e84607110b17133a165462d5`
+  (`docs(saneamento-lista-pendencias-projeto): audita e reorganiza
+  pendencias do projeto`). Arquivos versionados:
+  `ia_development_state.md`,
+  `docs/handoffs/2026-09-16-saneamento-lista-pendencias-projeto.md`
+  (novo). Push para `origin/main` confirmado (`8ddf399..e4d53ea`),
+  `HEAD == origin/main` reconfirmado, worktree final limpo. A subseção
+  `### 5.1. Lista ativa consolidada e categorizada` passa a ser a fonte
+  única e confiável das pendências reais do projeto. Zero teste físico,
+  zero chamada externa, zero alteração de banco/configuração
+  operacional. **Demanda `saneamento-lista-pendencias-projeto`
+  encerrada.** Ver
+  `docs/handoffs/2026-09-16-saneamento-lista-pendencias-projeto.md`,
+  secao "Commit e push (2026-09-16, /04-commit-e-push)".

@@ -309,3 +309,39 @@ confirmado existente; `git diff --check` limpo.
 
 **APROVADO.** Nenhum achado remanescente. **Pronta para
 `/04-commit-e-push`.**
+
+## Commit e push (2026-09-16, /04-commit-e-push)
+
+Identidade Git local já configurada neste repositório, reutilizada sem
+alteração: `Bruno Santos <brunossaantos@gmail.com>`.
+
+Commit único (documental, sem nenhuma atribuição de IA):
+
+```
+e4d53ea95ed7e762e84607110b17133a165462d5
+docs(saneamento-lista-pendencias-projeto): audita e reorganiza pendencias do projeto
+autor/committer: Bruno Santos <brunossaantos@gmail.com>
+```
+
+Arquivos versionados: `ia_development_state.md` (modificado),
+`docs/handoffs/2026-09-16-saneamento-lista-pendencias-projeto.md`
+(novo). Nenhum código, banco, migration ou configuração operacional no
+commit.
+
+Push para `origin/main` confirmado: `8ddf399..e4d53ea`. `HEAD ==
+origin/main` reconfirmado após `git fetch`
+(`e4d53ea95ed7e762e84607110b17133a165462d5` nos dois lados). Worktree
+final limpo (`git status --porcelain` vazio).
+
+Zero teste físico, zero chamada externa (Talent/VIO/impressão), zero
+alteração de banco/configuração operacional nesta etapa.
+
+A subseção `### 5.1. Lista ativa consolidada e categorizada` de
+`ia_development_state.md` passa a ser a fonte única e confiável das
+pendências reais do projeto — a tabela histórica da seção 5 permanece
+íntegra como registro, mas qualquer consulta rápida sobre "o que está
+genuinamente pendente hoje" deve usar a seção 5.1.
+
+### Veredito final
+
+**Demanda `saneamento-lista-pendencias-projeto` encerrada com sucesso.**
