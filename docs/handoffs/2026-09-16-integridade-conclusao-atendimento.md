@@ -1236,6 +1236,39 @@ as observacoes permanecem nao bloqueantes, ja registradas em
 
 card_id: 6aabd13455e22411f07b0da4
 
+
+## Commit
+
+Commit funcional criado com sucesso:
+
+- **Hash completo**: `a4b8e0af8b746309360bf44532d0f167297dd85f`
+- **Mensagem**: `fix(atendimento): protege conclusao e sanitiza falhas de banco`
+- **Autor/committer**: `Bruno Santos <brunossaantos@gmail.com>` (identidade
+  local do repositorio, confirmada nos primeiros commits validos via
+  `git log --reverse`), sem nenhuma atribuicao de IA em autor,
+  committer, mensagem ou trailers.
+- **Arquivos versionados** (9, exatamente os autorizados):
+  `app/Dao/AtendimentoDao.php`, `app/Rn/AtendimentoRn.php`,
+  `app/Controller/AtendimentoController.php`,
+  `app/Controller/DocumentoController.php`,
+  `app/Controller/NotaController.php`,
+  `tests/manual/teste_integridade_conclusao_atendimento.php` (novo),
+  `tests/manual/teste_rate_limit_identificar_cliente_pdo.php` (novo),
+  `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`
+  (novo), `ia_development_state.md`.
+- **Validacoes pre-commit**: `git fetch` sem divergencia (0/0 com
+  `origin/main`); inspecao de higiene/segredos por
+  `security-especialista` independente (LIBERADO PARA COMMIT --
+  nenhum segredo, CPF/placa real, caminho de maquina, log/backup
+  residual encontrado; `git diff --check`/`git diff --cached --check`
+  limpos; `php -l` sem erro nos 7 arquivos PHP); reexecucao propria
+  dos 2 testes obrigatorios: `teste_rate_limit_identificar_cliente_pdo.php`
+  = 24/24, `teste_integridade_conclusao_atendimento.php` = 43/43.
+- Zero chamada real ao Talent, zero impressao, zero alteracao de
+  registro real durante esta etapa.
+
 ## Proximo passo
 
-Rodar `/04-commit-e-push`.
+Registrar este hash em `ia_development_state.md` se necessario, criar
+o segundo commit documental fechando este handoff, fazer push, e
+atualizar o cartao Trello.
