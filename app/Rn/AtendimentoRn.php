@@ -198,14 +198,32 @@ class AtendimentoRn
         $this->atendimentoDao->salvarAjudante($idAtendimento, $nome, $cpf);
     }
 
-    public function cancelar(int $idAtendimento): void
+    /**
+     * Repassa o CAS de App\Dao\AtendimentoDao::cancelar() — true se a
+     * transicao aconteceu, false se o atendimento ja estava concluido
+     * (nenhuma alteracao no banco nesse caso).
+     */
+    public function cancelar(int $idAtendimento): bool
     {
-        $this->atendimentoDao->cancelar($idAtendimento);
+        return $this->atendimentoDao->cancelar($idAtendimento);
     }
 
-    public function bloquear(int $idAtendimento): void
+    /**
+     * Repassa o CAS de App\Dao\AtendimentoDao::bloquear() — mesma semantica
+     * de cancelar() acima.
+     */
+    public function bloquear(int $idAtendimento): bool
     {
-        $this->atendimentoDao->bloquear($idAtendimento);
+        return $this->atendimentoDao->bloquear($idAtendimento);
+    }
+
+    /**
+     * Repassa o CAS dedicado de concluirDigitalizacao() — ver
+     * App\Dao\AtendimentoDao::concluirDigitalizacaoNotas().
+     */
+    public function concluirDigitalizacaoNotas(int $idAtendimento, string $novaEtapa): bool
+    {
+        return $this->atendimentoDao->concluirDigitalizacaoNotas($idAtendimento, $novaEtapa);
     }
 
     public function buscar(int $idAtendimento): ?array

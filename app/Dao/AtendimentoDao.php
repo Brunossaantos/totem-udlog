@@ -405,16 +405,92 @@ class AtendimentoDao
         return $stmt->rowCount() > 0;
     }
 
-    public function cancelar(int $id): void
+    /**
+     * CAS (demanda integridade-conclusao-atendimento, 2026-09-16): status=
+     * 'concluido' e terminal e imutavel do lado do motorista — a clausula
+     * AND status != 'concluido' impede que este UPDATE reabra um atendimento
+     * ja concluido. Retorna true se a transicao efetivamente aconteceu, OU
+     * se o atendimento ja estava no estado-alvo ('cancelado', reafirmacao
+     * idempotente); false so quando o atendimento estava, de fato,
+     * 'concluido' — unico caso em que o Controller responde HTTP 409.
+     *
+     * Correcao (mesma demanda, bug encontrado pelo qa-testes em
+     * 2026-09-17): sem PDO::MYSQL_ATTR_FOUND_ROWS (nao habilitado
+     * globalmente — fora de escopo avaliar o impacto na conexao inteira),
+     * rowCount()==0 e AMBIGUO: tanto "0 linhas casadas pelo WHERE" (o
+     * atendimento existe mas esta 'concluido' — bloqueio real) quanto "1
+     * linha casada mas nenhuma coluna mudou porque status ja era
+     * 'cancelado'" (MySQL/PDO reportam rowCount()==0 nesse caso tambem, por
+     * padrao) produzem o mesmo rowCount()==0, e antes disso as duas
+     * situacoes eram tratadas identicamente como bloqueio — respondendo 409
+     * mesmo quando o atendimento nao estava 'concluido'. Agora, quando o
+     * UPDATE nao afeta nenhuma linha, um SELECT dedicado confirma o status
+     * real antes de decidir: 'concluido' => bloqueio de verdade (false);
+     * 'cancelado' (o proprio estado-alvo) => reafirmacao idempotente,
+     * sucesso (true); qualquer outro residual (ex.: linha some entre o
+     * UPDATE e o SELECT) => decisao conservadora de tratar como sucesso, ja
+     * que nao ha evidencia de que o atendimento esteja 'concluido'.
+     */
+    public function cancelar(int $id): bool
     {
-        $stmt = $this->pdo->prepare('UPDATE tb_atendimento SET status = "cancelado" WHERE id_atendimento = :id');
+        $stmt = $this->pdo->prepare('UPDATE tb_atendimento SET status = "cancelado" WHERE id_atendimento = :id AND status != "concluido"');
         $stmt->execute(['id' => $id]);
+
+        if ($stmt->rowCount() > 0) {
+            return true;
+        }
+
+        return $this->statusAtual($id) !== 'concluido';
     }
 
-    public function bloquear(int $id): void
+    /**
+     * Mesmo CAS de cancelar() acima — status='concluido' tambem bloqueia
+     * bloquear-excesso-notas. Mesma correcao de ambiguidade de rowCount()==0
+     * descrita em cancelar(): estado-alvo aqui e 'bloqueado'.
+     */
+    public function bloquear(int $id): bool
     {
-        $stmt = $this->pdo->prepare('UPDATE tb_atendimento SET status = "bloqueado", etapa_atual = "balcao_portaria" WHERE id_atendimento = :id');
+        $stmt = $this->pdo->prepare('UPDATE tb_atendimento SET status = "bloqueado", etapa_atual = "balcao_portaria" WHERE id_atendimento = :id AND status != "concluido"');
         $stmt->execute(['id' => $id]);
+
+        if ($stmt->rowCount() > 0) {
+            return true;
+        }
+
+        return $this->statusAtual($id) !== 'concluido';
+    }
+
+    /**
+     * Leitura dedicada de status usada exclusivamente por cancelar()/
+     * bloquear() para desambiguar rowCount()==0 (ver comentario acima).
+     */
+    private function statusAtual(int $id): ?string
+    {
+        $stmt = $this->pdo->prepare('SELECT status FROM tb_atendimento WHERE id_atendimento = :id');
+        $stmt->execute(['id' => $id]);
+        $status = $stmt->fetchColumn();
+
+        return $status === false ? null : (string) $status;
+    }
+
+    /**
+     * CAS dedicado para concluirDigitalizacao() (demanda
+     * integridade-conclusao-atendimento, 2026-09-16) — evita corrida entre
+     * duas requisicoes quase simultaneas do mesmo atendimento: so tem efeito
+     * se o atendimento ainda estiver em_andamento/digitalizacao_notas no
+     * momento exato do UPDATE. AtendimentoDao::atualizarEtapa() generico NAO
+     * e alterado (outros chamadores ja fazem sua propria checagem em PHP
+     * antes de escrever) — este metodo e exclusivo desse caminho.
+     */
+    public function concluirDigitalizacaoNotas(int $id, string $novaEtapa): bool
+    {
+        $stmt = $this->pdo->prepare('
+            UPDATE tb_atendimento SET etapa_atual = :nova_etapa
+            WHERE id_atendimento = :id AND status = "em_andamento" AND etapa_atual = "digitalizacao_notas"
+        ');
+        $stmt->execute(['nova_etapa' => $novaEtapa, 'id' => $id]);
+
+        return $stmt->rowCount() > 0;
     }
 
     private function gerarUuid(): string

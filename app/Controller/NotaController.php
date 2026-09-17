@@ -29,6 +29,24 @@ class NotaController
         private ?RateLimitOcrDao $rateLimitOcrDao = null
     ) {}
 
+    /**
+     * Loga falha de banco de forma minima e segura: nunca inclui getMessage(),
+     * getTraceAsString(), getFile() ou getLine() da excecao (podem conter SQL,
+     * valores de parametro ou dado pessoal). O SQLSTATE so entra no log se
+     * bater estritamente no formato esperado (5 caracteres alfanumericos
+     * maiusculos) — nunca confiamos as cegas em getCode().
+     */
+    private function logFalhaBancoPdo(string $contexto, \PDOException $e): void
+    {
+        $sqlstate = (string) $e->getCode();
+        $sqlstateValidado = preg_match('/^[A-Z0-9]{5}$/', $sqlstate) === 1 ? $sqlstate : null;
+
+        error_log(
+            $contexto . ': falha de banco (PDOException)'
+            . ($sqlstateValidado !== null ? " [SQLSTATE={$sqlstateValidado}]" : '')
+        );
+    }
+
     public function processar(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
@@ -44,27 +62,40 @@ class NotaController
             Resposta::erro('Ordem da nota invalida');
         }
 
-        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+        // PDOException sanitizada (demanda integridade-conclusao-atendimento,
+        // 2026-09-16): cobre tambem buscarAtendimentoDoTotem()/contarNotas()/
+        // ordemJaRegistrada(), que antes ficavam fora de qualquer protecao —
+        // uma falha de banco nao tratada aqui propagaria ate o handler padrao
+        // do PHP, cuja exposicao de detalhe depende de display_errors do
+        // ambiente (nao confirmado em producao). Nunca loga payload/imagem do
+        // motorista, nunca inclui $e->getMessage() na resposta ao cliente.
+        try {
+            $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
-        if ($atendimento['tipo'] !== 'recebimento') {
-            // mensagem generica: nao revela que o atendimento existe mas eh de outro tipo/totem
-            Resposta::erro('Atendimento nao encontrado', 404);
-        }
+            if ($atendimento['tipo'] !== 'recebimento') {
+                // mensagem generica: nao revela que o atendimento existe mas eh de outro tipo/totem
+                Resposta::erro('Atendimento nao encontrado', 404);
+            }
 
-        if ($atendimento['status'] !== 'em_andamento') {
-            Resposta::erro('Atendimento nao esta em andamento');
-        }
+            if ($atendimento['status'] !== 'em_andamento') {
+                Resposta::erro('Atendimento nao esta em andamento');
+            }
 
-        if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
-            Resposta::erro('Atendimento nao esta na etapa de digitalizacao de notas');
-        }
+            if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
+                Resposta::erro('Atendimento nao esta na etapa de digitalizacao de notas');
+            }
 
-        if ($this->notaFiscalRn->contarNotas($idAtendimento) >= 5) {
-            Resposta::erro('Limite de 5 notas fiscais ja atingido para esse atendimento');
-        }
+            if ($this->notaFiscalRn->contarNotas($idAtendimento) >= 5) {
+                Resposta::erro('Limite de 5 notas fiscais ja atingido para esse atendimento');
+            }
 
-        if ($this->notaFiscalRn->ordemJaRegistrada($idAtendimento, $ordem)) {
-            Resposta::erro('Ja existe uma nota registrada para essa ordem');
+            if ($this->notaFiscalRn->ordemJaRegistrada($idAtendimento, $ordem)) {
+                Resposta::erro('Ja existe uma nota registrada para essa ordem');
+            }
+        } catch (\PDOException $e) {
+            $this->logFalhaBancoPdo('processar', $e);
+            Resposta::erro('Nao foi possivel registrar a nota', 500);
+            return;
         }
 
         $base64Limpo = null;
@@ -118,7 +149,22 @@ class NotaController
         // quem despachou para este metodo (nota.php), ja que o limite e por
         // totem autenticado (nao por IP anonimo). Responde 429 + Retry-After
         // e encerra a requisicao (Resposta::erro faz exit()) se excedido.
-        $this->verificarRateLimit($idTotem);
+        //
+        // PDOException sanitizada (achado do qa-testes/security-especialista
+        // na revisao de 2026-09-16 desta mesma demanda): incrementarEContar()
+        // executa 2 queries reais (INSERT ... ON DUPLICATE KEY UPDATE +
+        // SELECT) e antes rodava fora de qualquer try/catch deste metodo —
+        // uma falha de banco aqui propagaria ate o handler padrao do PHP.
+        // Retorna imediatamente em caso de excecao, antes de qualquer OCR ou
+        // outra logica; nao ha reexecucao de incrementarEContar() apos a
+        // captura, entao nao ha risco de dupla contabilizacao do rate limit.
+        try {
+            $this->verificarRateLimit($idTotem);
+        } catch (\PDOException $e) {
+            $this->logFalhaBancoPdo('identificarCliente (rate limit)', $e);
+            Resposta::erro('Nao foi possivel identificar o cliente', 500);
+            return;
+        }
 
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
         $ordem = (int) ($entrada['ordem'] ?? 0);
@@ -140,24 +186,33 @@ class NotaController
             $razaoSocialCandidata = null;
         }
 
-        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+        // PDOException sanitizada (ver processar() acima) — cobre
+        // buscarAtendimentoDoTotem()/buscarNotaDaOrdem(), antes fora de
+        // qualquer protecao.
+        try {
+            $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
-        if ($atendimento['tipo'] !== 'recebimento') {
-            // mensagem generica: nao revela que o atendimento existe mas eh de outro tipo/totem
-            Resposta::erro('Atendimento nao encontrado', 404);
-        }
+            if ($atendimento['tipo'] !== 'recebimento') {
+                // mensagem generica: nao revela que o atendimento existe mas eh de outro tipo/totem
+                Resposta::erro('Atendimento nao encontrado', 404);
+            }
 
-        if ($atendimento['status'] !== 'em_andamento') {
-            Resposta::erro('Atendimento nao esta em andamento');
-        }
+            if ($atendimento['status'] !== 'em_andamento') {
+                Resposta::erro('Atendimento nao esta em andamento');
+            }
 
-        if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
-            Resposta::erro('Atendimento nao esta na etapa de digitalizacao de notas');
-        }
+            if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
+                Resposta::erro('Atendimento nao esta na etapa de digitalizacao de notas');
+            }
 
-        $nota = $this->notaFiscalRn->buscarNotaDaOrdem($idAtendimento, $ordem);
-        if ($nota === null) {
-            Resposta::erro('Nota nao encontrada para essa ordem', 404);
+            $nota = $this->notaFiscalRn->buscarNotaDaOrdem($idAtendimento, $ordem);
+            if ($nota === null) {
+                Resposta::erro('Nota nao encontrada para essa ordem', 404);
+            }
+        } catch (\PDOException $e) {
+            $this->logFalhaBancoPdo('identificarCliente', $e);
+            Resposta::erro('Nao foi possivel identificar o cliente', 500);
+            return;
         }
 
         try {
@@ -205,20 +260,32 @@ class NotaController
             Resposta::erro('Ordem da nota invalida');
         }
 
-        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+        // PDOException sanitizada (ver processar() acima) — cobre
+        // buscarAtendimentoDoTotem(), antes fora de qualquer protecao.
+        try {
+            $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
-        if ($atendimento['tipo'] !== 'recebimento') {
-            Resposta::erro('Atendimento nao encontrado', 404);
-        }
-        if ($atendimento['status'] !== 'em_andamento') {
-            Resposta::erro('Atendimento nao esta em andamento');
-        }
-        if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
-            Resposta::erro('Atendimento nao esta na etapa de digitalizacao de notas');
+            if ($atendimento['tipo'] !== 'recebimento') {
+                Resposta::erro('Atendimento nao encontrado', 404);
+            }
+            if ($atendimento['status'] !== 'em_andamento') {
+                Resposta::erro('Atendimento nao esta em andamento');
+            }
+            if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
+                Resposta::erro('Atendimento nao esta na etapa de digitalizacao de notas');
+            }
+        } catch (\PDOException $e) {
+            $this->logFalhaBancoPdo('definirNumero', $e);
+            Resposta::erro('Nao foi possivel gravar o numero da nota', 500);
+            return;
         }
 
         try {
             $resultado = $this->notaFiscalRn->atualizarNumeroNota($idAtendimento, $ordem, trim($numero), $origem);
+        } catch (\PDOException $e) {
+            $this->logFalhaBancoPdo('definirNumero', $e);
+            Resposta::erro('Nao foi possivel gravar o numero da nota', 500);
+            return;
         } catch (\InvalidArgumentException $e) {
             Resposta::erro('Numero de nota invalido — informe apenas os digitos da NF-e', 400);
             return;
@@ -241,9 +308,19 @@ class NotaController
 
     public function algumaIdentificada(int $idAtendimento, int $idTotem): void
     {
-        $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+        // PDOException sanitizada (ver processar() acima) — antes este
+        // metodo nao tinha NENHUM try/catch, cobre buscarAtendimentoDoTotem()
+        // e algumaNotaIdentificouCliente().
+        try {
+            $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
-        $identificada = $this->notaFiscalRn->algumaNotaIdentificouCliente($idAtendimento);
+            $identificada = $this->notaFiscalRn->algumaNotaIdentificouCliente($idAtendimento);
+        } catch (\PDOException $e) {
+            $this->logFalhaBancoPdo('algumaIdentificada', $e);
+            Resposta::erro('Nao foi possivel consultar a identificacao do cliente', 500);
+            return;
+        }
+
         Resposta::sucesso(['cliente_identificado' => $identificada]);
     }
 

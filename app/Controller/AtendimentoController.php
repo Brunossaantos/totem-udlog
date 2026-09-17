@@ -245,7 +245,16 @@ class AtendimentoController
             Resposta::erro('Atendimento nao encontrado', 404);
         }
 
-        $this->atendimentoRn->bloquear($idAtendimento);
+        // CAS no banco (App\Dao\AtendimentoDao::bloquear) — status='concluido'
+        // e terminal e imutavel (demanda integridade-conclusao-atendimento,
+        // 2026-09-16). false so acontece se o atendimento ja estava
+        // concluido no momento exato do UPDATE; nenhuma alteracao no banco
+        // nesse caso.
+        if (!$this->atendimentoRn->bloquear($idAtendimento)) {
+            Resposta::erro('Atendimento ja concluido, nao pode mais ser bloqueado', 409);
+            return;
+        }
+
         Resposta::sucesso(['ok' => true]);
     }
 
@@ -272,6 +281,32 @@ class AtendimentoController
             Resposta::erro('Atendimento nao esta em andamento');
         }
         if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
+            // Correcao (mesma demanda, bug encontrado pelo qa-testes em
+            // 2026-09-17): antes esta checagem de precondicao rodava ANTES
+            // de qualquer tentativa de CAS/releitura, entao a requisicao
+            // perdedora de uma corrida (que so chega aqui DEPOIS que a
+            // vencedora ja terminou completamente, etapa_atual ja avancada)
+            // caia direto neste erro 400 generico, violando a exigencia do
+            // handoff de que so ha conflito real se o estado nao corresponde
+            // nem a origem nem ao destino. Antes de falhar, confere se
+            // etapa_atual ja e 'rec_cnh_frente'/'cliente' (destino possivel
+            // desta chamada) ou uma etapa legitima posterior do fluxo de
+            // Recebimento — reaproveitando a MESMA lista/logica usada
+            // abaixo para o caso "CAS perdeu a corrida" — e, se for,
+            // responde sucesso idempotente sem repetir nenhum efeito
+            // colateral. So permanece erro de precondicao quando a etapa
+            // atual nao e nem a origem, nem nenhum destino/etapa posterior
+            // plausivel (situacao genuinamente anomala).
+            $etapaDestinoPossivel = $this->notaDao->algumaNotaComStatusIdentificada($idAtendimento) || $this->notaDao->algumaIdentificada($idAtendimento)
+                ? 'rec_cnh_frente'
+                : 'cliente';
+
+            if ($this->etapaEhAlvoOuPosterior((string) $atendimento['etapa_atual'], $etapaDestinoPossivel)) {
+                $proximaTelaIdempotente = $etapaDestinoPossivel === 'rec_cnh_frente' ? 'rec_cnh_frente' : 'rec_cliente';
+                Resposta::sucesso(['proxima_tela' => $proximaTelaIdempotente, 'etapa' => $etapaDestinoPossivel]);
+                return;
+            }
+
             Resposta::erro('Atendimento nao esta na etapa de digitalizacao de notas');
         }
 
@@ -314,9 +349,60 @@ class AtendimentoController
             $proximaTela = 'rec_cliente';
         }
 
-        $this->atendimentoRn->atualizarEtapa($idAtendimento, $etapa);
+        // CAS dedicado (demanda integridade-conclusao-atendimento,
+        // 2026-09-16) contra a corrida entre 2 requisicoes quase
+        // simultaneas de concluirDigitalizacao() do mesmo atendimento: so
+        // grava se etapa_atual ainda for 'digitalizacao_notas' e status
+        // ainda for 'em_andamento' no momento exato do UPDATE.
+        $venceuCas = $this->atendimentoRn->concluirDigitalizacaoNotas($idAtendimento, $etapa);
+
+        if (!$venceuCas) {
+            // CAS perdeu — outra requisicao concorrente ja avancou esta
+            // etapa antes desta chamada. Rele o estado atual: se ja e a
+            // mesma etapa-alvo que esta chamada calculou (ou uma etapa
+            // legitima posterior do fluxo de Recebimento), responde sucesso
+            // idempotente com os MESMOS dados que a chamada vencedora
+            // devolveria, sem repetir nenhum efeito colateral (nenhuma nova
+            // escrita, nenhuma contagem de notas de novo). Qualquer outro
+            // estado e anomalo — 409.
+            $atual = $this->atendimentoRn->buscar($idAtendimento);
+
+            if ($atual !== null && $atual['status'] === 'em_andamento' && $this->etapaEhAlvoOuPosterior((string) $atual['etapa_atual'], $etapa)) {
+                Resposta::sucesso(['proxima_tela' => $proximaTela, 'etapa' => $etapa]);
+                return;
+            }
+
+            Resposta::erro('Nao foi possivel concluir a digitalizacao agora — tente novamente', 409);
+            return;
+        }
 
         Resposta::sucesso(['proxima_tela' => $proximaTela, 'etapa' => $etapa]);
+    }
+
+    /**
+     * Ordem legitima das etapas do Recebimento apos digitalizacao_notas —
+     * usada exclusivamente para decidir se a segunda requisicao concorrente
+     * de concluirDigitalizacao() (que perdeu o CAS) pode responder sucesso
+     * idempotente: a etapa atual do banco precisa ser a etapa-alvo desta
+     * chamada, ou qualquer etapa posterior legitima ja alcancada por quem
+     * venceu a corrida (ambos os ramos, com ou sem identificacao automatica
+     * de cliente, convergem para 'rec_cnh_frente' e seguem a mesma
+     * sequencia dai em diante).
+     */
+    private const SEQUENCIA_POS_DIGITALIZACAO_RECEBIMENTO = [
+        'cliente', 'rec_cnh_frente', 'rec_cnh_verso', 'rec_crlv', 'rec_aguarde_documentos', 'rec_confirmacao', 'impressao',
+    ];
+
+    private function etapaEhAlvoOuPosterior(string $etapaAtual, string $etapaAlvo): bool
+    {
+        $indiceAtual = array_search($etapaAtual, self::SEQUENCIA_POS_DIGITALIZACAO_RECEBIMENTO, true);
+        $indiceAlvo = array_search($etapaAlvo, self::SEQUENCIA_POS_DIGITALIZACAO_RECEBIMENTO, true);
+
+        if ($indiceAtual === false || $indiceAlvo === false) {
+            return false;
+        }
+
+        return $indiceAtual >= $indiceAlvo;
     }
 
     /**
@@ -609,10 +695,21 @@ class AtendimentoController
     public function cancelar(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
-        // sem restricao de tipo/status: cancelar precisa funcionar em qualquer
-        // tela/tipo/status do fluxo (Expedicao e Recebimento) — so valida posse
+        // sem restricao de tipo/status em PHP: cancelar precisa funcionar em
+        // qualquer tela/tipo/status do fluxo (Expedicao e Recebimento) — so
+        // valida posse aqui. A UNICA restricao (status='concluido' e
+        // terminal/imutavel, demanda integridade-conclusao-atendimento,
+        // 2026-09-16) e aplicada diretamente no CAS do UPDATE
+        // (App\Dao\AtendimentoDao::cancelar), nunca checada em PHP antes —
+        // checar em PHP aqui abriria uma janela de corrida (TOCTOU) entre
+        // este SELECT de posse e o UPDATE.
         $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
-        $this->atendimentoRn->cancelar($idAtendimento);
+
+        if (!$this->atendimentoRn->cancelar($idAtendimento)) {
+            Resposta::erro('Atendimento ja concluido, nao pode mais ser cancelado', 409);
+            return;
+        }
+
         Resposta::sucesso(['ok' => true]);
     }
 

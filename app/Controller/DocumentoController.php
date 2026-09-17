@@ -216,44 +216,70 @@ class DocumentoController
         $chaveLock = "vio_validar_{$idAtendimento}_{$tipo}";
         $this->obterLock($chaveLock);
 
+        // Correcao (demanda integridade-conclusao-atendimento, 2026-09-16):
+        // Resposta::erro()/exit() NUNCA e chamado dentro deste try/finally —
+        // exit() dentro de um try pula o finally em PHP, entao o
+        // RELEASE_LOCK explicito abaixo nao aconteceria. A intencao de erro
+        // (mensagem + codigo HTTP) e capturada em variaveis locais; a
+        // resposta HTTP so e emitida DEPOIS do try/finally ja ter liberado o
+        // lock. Mensagens/codigos HTTP e a gravacao de 'ERRO' em cada catch
+        // sao EXATAMENTE as mesmas de antes — so mudou onde a resposta e
+        // emitida.
+        $erroMensagem = null;
+        $erroCodigoHttp = null;
+        $resultado = null;
+
         try {
             try {
                 $vio = new VioDecodeClient();
             } catch (\Throwable $e) {
                 error_log('iniciar-processamento: falha ao inicializar VioDecodeClient: ' . $e->getMessage());
                 $this->atendimentoDao->gravarResultadoProcessamento($idAtendimento, $tipo, $tentativaId, 'ERRO');
-                Resposta::erro('Servico de validacao de documento indisponivel no momento', 503);
+                $erroMensagem = 'Servico de validacao de documento indisponivel no momento';
+                $erroCodigoHttp = 503;
             }
 
-            try {
-                $resultado = $tipo === 'cnh'
-                    ? $this->documentoRn->validarCnh($atendimento, $vio, $bytesQrBrutos)
-                    : $this->documentoRn->validarCrlv($atendimento, $vio, $bytesQrBrutos);
-            } catch (\Throwable $e) {
-                error_log('iniciar-processamento: falha nao prevista: ' . $e->getMessage());
-                $this->atendimentoDao->gravarResultadoProcessamento($idAtendimento, $tipo, $tentativaId, 'ERRO');
-                Resposta::erro('Nao foi possivel validar o documento agora', 500);
+            if ($erroMensagem === null) {
+                try {
+                    $resultado = $tipo === 'cnh'
+                        ? $this->documentoRn->validarCnh($atendimento, $vio, $bytesQrBrutos)
+                        : $this->documentoRn->validarCrlv($atendimento, $vio, $bytesQrBrutos);
+                } catch (\Throwable $e) {
+                    error_log('iniciar-processamento: falha nao prevista: ' . $e->getMessage());
+                    $this->atendimentoDao->gravarResultadoProcessamento($idAtendimento, $tipo, $tentativaId, 'ERRO');
+                    $erroMensagem = 'Nao foi possivel validar o documento agora';
+                    $erroCodigoHttp = 500;
+                }
             }
 
-            // status_processamento = "o backend terminou de tentar"
-            // (ortogonal a origem/aprovacao): CONCLUIDO sempre que a VIO
-            // respondeu de forma definitiva (mesmo se os dados nao passaram
-            // nas regras de negocio — nesse caso o front direciona para
-            // preenchimento manual, nao para nova tentativa de QR); ERRO so
-            // para falha TECNICA (rede/timeout/indisponibilidade/excecao),
-            // que permite nova tentativa de processamento.
-            $statusFinal = $resultado['ok'] ? 'CONCLUIDO' : 'ERRO';
-            $gravou = $this->atendimentoDao->gravarResultadoProcessamento($idAtendimento, $tipo, $tentativaId, $statusFinal);
+            if ($erroMensagem === null) {
+                // status_processamento = "o backend terminou de tentar"
+                // (ortogonal a origem/aprovacao): CONCLUIDO sempre que a VIO
+                // respondeu de forma definitiva (mesmo se os dados nao
+                // passaram nas regras de negocio — nesse caso o front
+                // direciona para preenchimento manual, nao para nova
+                // tentativa de QR); ERRO so para falha TECNICA
+                // (rede/timeout/indisponibilidade/excecao), que permite nova
+                // tentativa de processamento.
+                $statusFinal = $resultado['ok'] ? 'CONCLUIDO' : 'ERRO';
+                $gravou = $this->atendimentoDao->gravarResultadoProcessamento($idAtendimento, $tipo, $tentativaId, $statusFinal);
 
-            if (!$gravou) {
-                // "Tentativa zumbi": uma tentativa mais nova ja sobrescreveu
-                // o tentativa_id antes desta resposta chegar — descartada
-                // silenciosamente do ponto de vista do banco, so logada para
-                // debug tecnico (nunca loga o QR bruto nem dado pessoal).
-                error_log("iniciar-processamento: resultado descartado (tentativa obsoleta) id_atendimento={$idAtendimento} tipo={$tipo}");
+                if (!$gravou) {
+                    // "Tentativa zumbi": uma tentativa mais nova ja
+                    // sobrescreveu o tentativa_id antes desta resposta
+                    // chegar — descartada silenciosamente do ponto de vista
+                    // do banco, so logada para debug tecnico (nunca loga o
+                    // QR bruto nem dado pessoal).
+                    error_log("iniciar-processamento: resultado descartado (tentativa obsoleta) id_atendimento={$idAtendimento} tipo={$tipo}");
+                }
             }
         } finally {
             $this->liberarLock($chaveLock);
+        }
+
+        if ($erroMensagem !== null) {
+            Resposta::erro($erroMensagem, $erroCodigoHttp);
+            return;
         }
 
         Resposta::sucesso($resultado);

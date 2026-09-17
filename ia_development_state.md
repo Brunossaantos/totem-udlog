@@ -8,7 +8,7 @@
 > Este arquivo é atualizado ao final de cada ciclo de implementação
 > (etapa 01-implementacao e 04-commit-e-push do workflow).
 
-Última atualização: 2026-09-15
+Última atualização: 2026-09-16
 
 ---
 
@@ -223,20 +223,101 @@ de código/commit/handoff, não por descrição textual.
 
 #### 1. PENDENTE — AÇÃO TÉCNICA
 
-- `cancelar`/`bloquear-excesso-notas` não checam status terminal —
-  permitem reverter atendimento já `concluido` (`AtendimentoController.php`,
-  `AtendimentoDao.php`). Severidade: atenção.
-- Ausência de lock/transação em `concluirDigitalizacao()` contra corrida
-  de cliques quase simultâneos. Severidade: observação/atenção.
-- `GET_LOCK`/`RELEASE_LOCK` em `DocumentoController` não liberado
-  explicitamente em erro (`exit()` pula o `finally`) — mitigação já
-  documentada no próprio código (CAS por `tentativa_id` é a proteção
-  real). Severidade: observação.
-- Ausência de handler global de `PDOException` em `NotaController` —
-  potencial exposição de stack trace dependendo de `display_errors` do
-  PHP em produção (confirmação de config depende de `devops-especialista`
-  em produção, mas a correção de código em si não depende). Severidade:
-  atenção.
+- ~~`cancelar`/`bloquear-excesso-notas` não checam status terminal~~
+  — IMPLEMENTADA em 2026-09-16 (demanda
+  `integridade-conclusao-atendimento`, `/01-implementacao`): CAS no
+  `UPDATE` (`WHERE status != 'concluido'`) em `AtendimentoDao::cancelar()`/
+  `bloquear()`, retornando `bool`; `AtendimentoController` responde
+  HTTP 409 com mensagem segura e zero alteração no banco quando
+  `false`. Bug real encontrado e corrigido na mesma etapa: `rowCount()
+  == 0` era ambíguo entre "bloqueio real por concluído" e
+  "reafirmação idempotente sem mudança de coluna" — resolvido com
+  novo método `statusAtual()` consultado só nesse caso. Testado
+  (11/11 itens do roteiro + regressão de 16 suítes, 100% aprovado).
+  Ver `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`.
+- ~~Ausência de lock/transação em `concluirDigitalizacao()` contra
+  corrida de cliques quase simultâneos~~ — IMPLEMENTADA em
+  2026-09-16 (mesma demanda): CAS via novo método dedicado
+  `AtendimentoDao::concluirDigitalizacaoNotas()` (`UPDATE ... WHERE
+  etapa_atual='digitalizacao_notas' AND status='em_andamento'`),
+  sem transação/lock novos. Segunda requisição concorrente perdedora
+  responde sucesso idempotente. Bug real encontrado e corrigido na
+  mesma etapa: quando o vencedor terminava completamente antes do
+  perdedor buscar o atendimento, a checagem de precondição em PHP
+  respondia HTTP 400 genérico em vez de idempotência — corrigido
+  reaproveitando `etapaEhAlvoOuPosterior()` antes dessa checagem.
+  Testado com `proc_open()` real (2 conclusões simultâneas + timing
+  sequencial exato), 100% aprovado.
+- ~~`GET_LOCK`/`RELEASE_LOCK` em `DocumentoController` não liberado
+  explicitamente em erro (`exit()` pula o `finally`)~~ — IMPLEMENTADA
+  em 2026-09-16 (mesma demanda): `iniciarProcessamento()`
+  reestruturado para capturar a intenção de erro em variável local
+  e só chamar `Resposta::erro()`/`exit` depois do `try/finally` já
+  ter liberado o lock. Mensagens/códigos HTTP (503/500) preservados.
+  Testado: `RELEASE_LOCK` confirmado via `SELECT IS_USED_LOCK(...)`
+  retornando `NULL` após erro, em ambos os caminhos (falha na
+  inicialização e falha durante a validação).
+- ~~Ausência de handler global de `PDOException` em `NotaController`~~
+  — IMPLEMENTADA em 2026-09-16 (demanda
+  `integridade-conclusao-atendimento`): `processar()`,
+  `identificarCliente()`, `definirNumero()` e `algumaIdentificada()`
+  têm `try/catch (PDOException)` cobrindo integralmente
+  `buscarAtendimentoDoTotem`/`contarNotas`/`ordemJaRegistrada`/
+  `buscarNotaDaOrdem`/`algumaNotaIdentificouCliente`/
+  `atualizarNumeroNota`/`verificarRateLimit` (rate limit),
+  respondendo HTTP 500 genérico sem vazar SQL/stack trace. Gap
+  encontrado em `/02-testes` (rate limit de `identificarCliente()`
+  desprotegido) foi corrigido numa rodada curta de
+  `/01-implementacao` e revalidado (8/8 itens PASSOU, marcador
+  sintético `RTL0917`, zero resíduo, zero regressão em 27 suítes).
+  Ver `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`,
+  seção "Rodada curta de /01-implementacao — correção do gap de
+  PDOException no rate limit". Log dos 6 catches sanitizado numa
+  segunda rodada curta (2026-09-16): substituído `error_log(...$e->getMessage())`
+  por método `logFalhaBancoPdo()` — nunca loga `getMessage()`/
+  `getTraceAsString()`/`getFile()`/`getLine()`, só contexto fixo +
+  SQLSTATE validado por regex estrita. Testado com 5 marcadores
+  sintéticos (SQL, caminho, CPF, placa, credencial) em 4 locais
+  (resposta HTTP, stdout, arquivo de log isolado, repositório) —
+  zero vazamento confirmado.
+- `AtendimentoController::etapaEhAlvoOuPosterior()` (novo método da
+  demanda `integridade-conclusao-atendimento`, 2026-09-16) é um cheque
+  puramente posicional na sequência de etapas — se `etapa_atual` for
+  forçada fora de ordem por um bug futuro em outro ponto do código
+  (hoje inalcançável por qualquer chamada real da API), o método
+  trataria como "posterior legítimo" em vez de conflito. Achado do
+  `qa-testes` em `/02-testes`, severidade observação, não bloqueante,
+  não explorável hoje. Registrado para avaliação futura.
+- `NotaController.php` (linhas 232, 293, 297, 301) tem catches de
+  `Throwable`/`RuntimeException` (distintos de `PDOException`)
+  que ainda logam `$e->getMessage()` em `error_log()` — nunca vaza ao
+  cliente (mensagem ao cliente sempre fixa), mas sem a mesma
+  sanitizacao/validacao aplicada ao `PDOException` via
+  `logFalhaBancoPdo()`. Achado do `security-especialista` em
+  `/02-testes` (demanda `integridade-conclusao-atendimento`,
+  2026-09-16), severidade observação, não bloqueante. Registrado para
+  avaliação futura.
+- `teste_consulta_ordem_coleta.php` falha (12/17) hoje NAO por
+  indisponibilidade do banco externo `udlogo59_db_gestao_coletas`
+  (corrigido registro em 2026-09-17 — o usuário confirmou acesso via
+  phpMyAdmin, e o `explorer` confirmou conexão real bem-sucedida via
+  `UtilConexaoGestaoColetas::obter()`, mesmas credenciais do
+  `.env`). Causa real: divergência de dados de fixture — não existe
+  `numero_ordem_coleta='OC-TESTE-005'`/`placa_prevista='TST0A01'`
+  em `tb_ordens_coleta` nesta cópia do banco, e a ordem
+  `OC-TESTE-001` (placa `ABC1D23`) mudou para `status='INATIVA'`,
+  reduzindo de 3 para 2 as ordens ATIVAS esperadas pelo cenário de
+  "múltiplas ordens". Não corrigido (fixture, não código) — pendência
+  de higiene de dados de teste, fora do escopo de qualquer demanda de
+  código.
+- `DocumentoController::obterLock()` ignora seu próprio valor de
+  retorno — se `GET_LOCK(...,0)` falhar por lock já detido, o código
+  prossegue mesmo assim chamando a VIO Decode sem o lock. Pré-existente
+  (linha não tocada por `integridade-conclusao-atendimento`), não
+  regressão. Achado do `backend-especialista` em `/03-revisao`
+  (2026-09-17), severidade observação — o próprio comentário do código
+  já documenta que a proteção real contra duplicidade é o CAS por
+  `tentativa_id`, não esse lock. Registrado para avaliação futura.
 - JPEG truncado aceito na validação (`UploadHelper.php`, sem checagem
   de marcador EOI/FFD9). Severidade: observação.
 - `tb_rate_limit_ocr` cresce indefinidamente sem job de limpeza — sem
@@ -265,9 +346,15 @@ de código/commit/handoff, não por descrição textual.
 
 #### 2. AGUARDANDO DECISÃO DE PRODUTO
 
-- Se `cancelar`/`bloquear-excesso-notas` devem ser recusados para
-  atendimento `concluido` (ligado ao item técnico acima — a correção de
-  código depende de uma decisão de regra de negócio primeiro).
+- ~~Se `cancelar`/`bloquear-excesso-notas` devem ser recusados para
+  atendimento `concluido`~~ — RESOLVIDA em 2026-09-16 (demanda
+  `integridade-conclusao-atendimento`, `/00-planejamento`): decisão
+  de produto CONFIRMADA pelo usuário — `concluido` é terminal e
+  imutável para o motorista; `cancelar`/`bloquear-excesso-notas`
+  devem responder HTTP 409 sem alterar o banco. Reabertura fica
+  para painel administrativo futuro, fora de escopo. Movida para a
+  seção 1 (PENDENTE — AÇÃO TÉCNICA) acima como PLANEJADA — falta só
+  a implementação (`/01-implementacao`).
 - Diversos campos do payload real do Talent sem fonte de captura no
   totem (reboque, exigePesagem, transportadora, telefones, paletes,
   etc.) — quais são realmente necessários.
@@ -2751,3 +2838,182 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   encerrada.** Ver
   `docs/handoffs/2026-09-16-saneamento-lista-pendencias-projeto.md`,
   secao "Commit e push (2026-09-16, /04-commit-e-push)".
+
+- 2026-09-16 — `/00-planejamento` e `/01-implementacao` da demanda
+  `integridade-conclusao-atendimento` concluidos. Decisao de produto
+  confirmada pelo usuario: atendimento `concluido` e terminal e
+  imutavel para o motorista. Investigacao (explorer +
+  backend-especialista + security-especialista, independentes)
+  confirmou que `AtendimentoController::cancelar()`/
+  `bloquearPorExcessoDeNotas()` eram os UNICOS dois caminhos capazes
+  de reverter um atendimento `concluido` (UPDATEs incondicionais em
+  `AtendimentoDao.php`); `concluirDigitalizacao()` sem CAS/lock/
+  transacao contra corrida; `GET_LOCK` de `DocumentoController` nao
+  liberado explicitamente em erro (mas sem `PDO::ATTR_PERSISTENT` no
+  projeto, sem vulnerabilidade ativa); `NotaController.php` sem
+  nenhum tratamento de `PDOException`. Implementado: CAS via
+  `UPDATE ... WHERE status != 'concluido'` em `cancelar()`/`bloquear()`
+  (retorno `bool`, HTTP 409 sem alteracao no banco quando `concluido`);
+  novo metodo `AtendimentoDao::concluirDigitalizacaoNotas()` (CAS por
+  `etapa_atual`+`status`) usado por `concluirDigitalizacao()`, com
+  resposta idempotente na segunda requisicao concorrente perdedora;
+  `DocumentoController::iniciarProcessamento()` reestruturado para
+  liberar o lock antes de qualquer `Resposta::erro()`/`exit`;
+  `NotaController.php` com `try/catch (PDOException)` sanitizado em
+  4 metodos publicos. Dois bugs reais encontrados pelo qa-testes na
+  validacao (ambiguidade de `rowCount()==0` em `cancelar/bloquear`
+  sobre estado ja igual, e HTTP 400 em vez de idempotencia quando o
+  vencedor da corrida terminava antes do perdedor buscar o
+  atendimento) foram corrigidos na mesma etapa e revalidados: 11/11
+  itens do roteiro completo PASSOU, 16 suites de regressao
+  (Recebimento/Expedicao/Talent/impressao/ordem de coleta) 100%
+  aprovadas, zero residuo no banco, zero chamada real ao Talent, zero
+  impressao real, zero commit/push nesta etapa. Ver
+  `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`.
+  Cartao Trello: `card_id 6aabd13455e22411f07b0da4`.
+- 2026-09-16 — `/02-testes` da demanda `integridade-conclusao-atendimento`
+  concluido com veredito PRECISA DE AJUSTE. Dois revisores
+  independentes (qa-testes + security-especialista, sem participacao
+  na implementacao) reexecutaram do zero, com ceticismo, o roteiro
+  completo de inspecao estatica (9 itens) e testes reais (20 itens),
+  mais frontend e regressao (28 suites, 27/28 passou; 1 falha
+  pre-existente e nao relacionada, dependente de fixture de banco
+  externo). Todos os 20 testes reais passaram; das 9 checagens
+  estaticas, 8 confirmadas integralmente e 1 (item 7, sanitizacao de
+  PDOException nos 4 metodos do NotaController) confirmada como
+  PARCIAL: gap real encontrado em `identificarCliente()`, chamada de
+  rate limit fora de qualquer try/catch. Por instrucao explicita do
+  usuario de bloquear o avanco se algum item do checklist falhar,
+  a demanda RETORNA para uma rodada curta de `/01-implementacao`
+  restrita a esse gap. Nenhum achado critico de seguranca; observacao
+  tecnica nao bloqueante registrada sobre `etapaEhAlvoOuPosterior()`
+  (cheque posicional, nao explorável hoje). Zero residuo no banco,
+  zero chamada real ao Talent, zero impressao real, zero commit/push.
+  Ver `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`,
+  secao "Resultado dos testes". Cartao Trello:
+  `card_id 6aabd13455e22411f07b0da4`.
+- 2026-09-16 — Rodada curta de `/01-implementacao` da demanda
+  `integridade-conclusao-atendimento` fecha o gap encontrado no
+  `/02-testes` anterior: `NotaController::identificarCliente()`
+  agora protege `verificarRateLimit()` (que chama
+  `RateLimitOcrDao::incrementarEContar()`, 2 queries PDO reais) com
+  `try/catch (PDOException)`, respondendo HTTP 500 genérico e
+  interrompendo antes de qualquer OCR/logica posterior, sem risco de
+  dupla contabilizacao. `qa-testes` validou os 8 itens pedidos (100%
+  PASSOU, marcador sintetico RTL0917, zero residuo) e reexecutou 27
+  suites de regressao (100% PASSOU) mais a suite completa da demanda
+  (43/43). Falha pre-existente e nao relacionada de
+  `teste_consulta_ordem_coleta.php` (fixture de banco externo ausente)
+  isolada e nao contabilizada como regressao. Veredito: LIBERADO para
+  nova `/02-testes` curta ou avanco direto para `/03-revisao`. Zero
+  chamada real ao Talent, zero impressao real, zero commit/push. Ver
+  `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`.
+  Cartao Trello: `card_id 6aabd13455e22411f07b0da4`.
+- 2026-09-16 — Segunda rodada curta de `/01-implementacao` da demanda
+  `integridade-conclusao-atendimento`: sanitizado o log dos 6 pontos
+  de `catch (PDOException)` em `NotaController.php`, que registravam
+  `$e->getMessage()` bruto (risco apontado pelo usuario — pode conter
+  SQL/valores de parametro). Novo metodo privado `logFalhaBancoPdo()`
+  loga so contexto fixo + SQLSTATE validado por regex estrita
+  (`^[A-Z0-9]{5}$`), nunca `getMessage()`/`getTraceAsString()`/
+  `getFile()`/`getLine()`. `qa-testes` forcou uma `PDOException` real
+  com 5 marcadores sinteticos (SQL, caminho, CPF, placa, credencial)
+  passando pelo caminho real de producao, com
+  `display_errors=1`/`log_errors=1`/log direcionado a arquivo
+  temporario isolado: zero vazamento em resposta HTTP, stdout, arquivo
+  de log e repositorio. Regressao: 43/43 (suite completa da demanda) +
+  23/24 (suite de rate limit, 1 falso positivo de asercao do proprio
+  script de teste que mistura stdout/stderr, sem vazamento real — nao
+  corrigido por ser fora do escopo, registrado para manutencao
+  futura). Zero residuo, zero chamada real ao Talent, zero impressao
+  real, zero commit/push. Veredito: LIBERADO para `/02-testes` curta.
+  Ver `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`.
+  Cartao Trello: `card_id 6aabd13455e22411f07b0da4`.
+- 2026-09-16 — Correcao final da demanda `integridade-conclusao-atendimento`
+  (ainda dentro de `/01-implementacao`): corrigida a metodologia de
+  `tests/manual/teste_rate_limit_identificar_cliente_pdo.php` (nao e
+  codigo de producao) para isolar corretamente resposta HTTP, stdout,
+  stderr e arquivo de log dedicado, eliminando um falso positivo do
+  Item 5 (a asercao anterior misturava stdout+stderr e reagia ao
+  literal `PDOException`, que so aparece no log de servidor,
+  intencional e sem vazamento real). Prova de deteccao de vazamento
+  real feita e revertida (injecao temporaria de marcador sensivel
+  derrubou 2 asserçoes, confirmando que o teste corrigido funciona).
+  Resultados: 24/24 (suite de rate limit) + 43/43 (suite completa da
+  demanda) + zero ocorrencia de `getMessage()`/`getTraceAsString()`/
+  `getFile()`/`getLine()` nos 6 catches de PDOException do
+  NotaController (inalterado desde a rodada anterior). Nenhum arquivo
+  de `app/`/`util/` tocado. Observacao pre-existente registrada, nao
+  corrigida: 4 catches de `\Throwable`/`\RuntimeException` (distintos
+  de `\PDOException`) em `NotaController.php` ainda usam
+  `getMessage()` — fora do escopo desta demanda. Zero residuo, zero
+  chamada real ao Talent, zero impressao real, zero commit/push.
+  Veredito: LIBERADO para `/02-testes` curta e independente. Ver
+  `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`.
+  Cartao Trello: `card_id 6aabd13455e22411f07b0da4`.
+- 2026-09-16 — `/02-testes` curta e independente da demanda
+  `integridade-conclusao-atendimento` concluida com veredito
+  APROVADO. Dois revisores independentes (qa-testes +
+  security-especialista, sem participacao na correcao anterior)
+  reexecutaram do zero, com ceticismo: metodologia do teste de rate
+  limit confirmada (stdout/stderr/log isolados, prova negativa
+  controlada independente reproduziu a falha esperada e reverteu com
+  sucesso), 24/24 + 43/43 confirmados, zero uso de
+  getMessage()/getTraceAsString()/getFile()/getLine() nos 6 catches
+  de PDOException do NotaController, contratos principais da demanda
+  (409 para concluido, CAS de concluirDigitalizacao, lock de
+  DocumentoController, rate limit sem dupla contabilizacao)
+  reconfirmados intactos, 24 suites de regressao adicionais 100%
+  aprovadas (1 falha ambiental preexistente e nao relacionada,
+  isolada corretamente). Zero achado critico de seguranca; 2
+  observacoes nao bloqueantes registradas (cobertura por lista fechada
+  de marcadores no script de teste; assimetria de sanitizacao entre
+  PDOException e outras excecoes em NotaController, que nunca vazam ao
+  cliente). Zero residuo, zero chamada real ao Talent, zero impressao
+  real, zero commit/push. **Demanda liberada para `/03-revisao`.** Ver
+  `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`.
+  Cartao Trello: `card_id 6aabd13455e22411f07b0da4`.
+- 2026-09-17 — Correcao de registro (fora do fluxo formal de
+  demanda/handoff, a pedido direto do usuario): o registro repetido em
+  varias rodadas de `/02-testes` da demanda
+  `integridade-conclusao-atendimento` de que
+  `teste_consulta_ordem_coleta.php` falhava por "banco externo
+  udlogo59_db_gestao_coletas ausente/indisponivel" estava IMPRECISO. O
+  usuario confirmou acesso real ao banco via phpMyAdmin local; o
+  `explorer` confirmou por conexao PDO direta e via
+  `Util\ConexaoGestaoColetas::obter()` (classe real do projeto) que o
+  MySQL local esta rodando, o banco existe, e a conexao com as
+  credenciais do `.env` funciona normalmente. A causa real das 5
+  falhas (12/17) e divergencia de dados de fixture: nao existe
+  `numero_ordem_coleta='OC-TESTE-005'`/`placa_prevista='TST0A01'` em
+  `tb_ordens_coleta` nesta copia do banco, e a ordem `OC-TESTE-001`
+  (placa `ABC1D23`) mudou para `status='INATIVA'`, reduzindo de 3 para
+  2 as ordens ATIVAS esperadas. Nenhum impacto no veredito de nenhuma
+  etapa da demanda `integridade-conclusao-atendimento` (confirmado por
+  `git diff --stat` que nenhum arquivo do fluxo de ordem de coleta foi
+  tocado por essa demanda) — a falha permanece pre-existente e nao
+  relacionada, mas com a causa correta registrada. Nao corrigido
+  (fixture de dados, nao codigo) — pendencia de higiene de dados de
+  teste registrada na seção de pendencias. Ver
+  `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`,
+  seção "Correcao de registro — banco de gestao de coletas esta
+  disponivel (2026-09-17)".
+- 2026-09-17 — `/03-revisao` da demanda `integridade-conclusao-atendimento`
+  concluida com veredito APROVADO. Dois revisores independentes
+  (backend-especialista + security-especialista, sem participacao na
+  implementacao) releram todo o codigo do zero e reexecutaram os
+  testes de forma propria (24/24 + 43/43 confirmados por ambos, cada
+  um com sua propria prova negativa independente de deteccao de
+  vazamento). Escrutinio rigoroso do ponto mais critico
+  (`etapaEhAlvoOuPosterior()`, fragilidade posicional) por ambos os
+  revisores, com varredura completa e independente de todo escritor
+  de `etapa_atual` — nenhuma rota publica real capaz de produzir bypass
+  encontrada, mantido como observacao nao bloqueante. Nova observacao
+  registrada (pre-existente, fora do escopo): `obterLock()` de
+  `DocumentoController` ignora seu proprio retorno. Nenhum outro
+  achado bloqueante. Escopo de arquivos alterados confirmado (5
+  arquivos de producao + 2 novos testes + handoff + este arquivo,
+  nenhum outro tocado). **Demanda LIBERADA para `/04-commit-e-push`.**
+  Ver `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`,
+  secao "Resultado da revisao". Cartao Trello:
+  `card_id 6aabd13455e22411f07b0da4`.
