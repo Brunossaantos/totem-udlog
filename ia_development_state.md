@@ -152,7 +152,7 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
 | ~~IDOR em `selecionarOrdem`~~ (ação `selecionar-ordem`) | `app/Controller/AtendimentoController.php` | CORRIGIDA em 2026-09-11 (demanda `expedicao-consulta-ordem-coleta-teste`) — agora valida posse/tipo/status/etapa do atendimento (mesmo padrão já usado em outras ações) e RECONSULTA as ordens reais para a placa do atendimento, só aceitando a seleção se o `numero` enviado bater com uma ordem realmente retornada; dados gravados (`cliente_nome`/`cliente_cnpj`) vêm sempre do servidor, nunca do que o front enviou. Testado (múltiplas asserções dedicadas, incluindo tentativa de ordem forjada e IDOR clássico de totem alheio). `finalizar` (ação `finalizar`, envio ao Talent) tinha o mesmo tipo de IDOR mas já foi corrigido em 2026-09-09 (ver linha "IMPLEMENTADA em 2026-09-09" mais abaixo) — a menção anterior desta linha estava desatualizada. |
 | Ausência de lock/transação em `concluirDigitalizacao` contra corrida (cliques quase simultâneos em "Finalizar digitalização") | `app/Controller/AtendimentoController.php` | Severidade baixa segundo o security-especialista — não bloqueante, registrado para decisão futura |
 | Retomada de atendimento ao recarregar a página (contador de notas em `state` não é sincronizado com o banco) | `public/totem/assets/app.js` | Limitação pré-existente do projeto (sem mecanismo de sessão/retomada) — não criado nesta demanda, apenas confirmado que não existe |
-| JPEG truncado (sem marcador de fim) é aceito pela validação atual (`getimagesizefromstring()` não detecta truncamento) | `util/UploadHelper.php` | Achado médio dos testes reais de `/02-testes` — pode comprometer integridade de nota fiscal como evidência; decisão pendente se vale a pena validação adicional |
+| ~~JPEG truncado (sem marcador de fim) e aceito pela validacao atual~~ (getimagesizefromstring() nao detecta truncamento) | util/UploadHelper.php | RESOLVIDA COM RISCO RESIDUAL ACEITO em 2026-09-17 (demanda validacao-jpeg-segura) -- estrategia hibrida implementada (checagem estrutural de EOI exato + limite de dimensao 5000px/13M pixels + decodificacao completa via GD fail-closed), 22/22 controles obrigatorios aprovados. Bug ORIGINAL (truncamento acidental sem EOI) corrigido e validado. Risco residual formalmente aceito pelo usuario: JPEG truncado com EOI forjado deliberadamente pode ser aceito nesta instalacao de GD (limitacao confirmada da biblioteca, nao do codigo do projeto) -- cenario de ameaca mais restrito (exige acesso ja comprometido ao pipeline). Ver docs/handoffs/2026-09-17-validacao-jpeg-segura.md. |
 | `bloquear-excesso-notas` e `cancelar` permitem reverter um atendimento já `concluido` (sem checagem de status terminal) | `app/Controller/AtendimentoController.php` | Achado novo dos testes reais de `/02-testes` (confirmado por exploração real) — decisão de produto pendente sobre se deve ser recusado |
 | Teste físico do Netum SD-2000 não executado (roteiro de 20 itens pronto, aguardando hardware/usuário) | Hardware do mini PC Windows | `/02-testes` retornou veredito INCONCLUSIVO por esse motivo — ver roteiro no handoff. **RECLASSIFICADO em 2026-09-15 (demanda `talent-http409-limpeza-pendencias`)**: redação anterior ("aguardando hardware/usuário") estava desatualizada — a linha 410 já registra que o Scanner físico Netum SD-2000 foi validado no hardware real em 2026-09-04. Status correto: **HARDWARE DISPONÍVEL — TESTE FÍSICO EM DEMANDA FUTURA** (o roteiro de 20 itens completo desta pendência específica ainda não foi formalmente reexecutado/fechado). Nota: não confundir com a pendência distinta da linha seguinte (preview/resolução insuficiente da captura), que permanece real e não é afetada por esta reclassificação |
 | ~~Preview/captura do Netum SD-2000 corta a imagem do documento e a resolução capturada é insuficiente (texto ilegível)~~ | `public/totem/assets/app.js` (`abrirStreamScanner`, `capturarFotoScannerNota`, CSS `.caixa-scanner`) | **RESOLVIDA em 2026-09-04, registro aqui estava DESATUALIZADO (corrigido em 2026-09-16, demanda `netum-preview-captura-resolucao`)**: o texto anterior desta linha descrevia a causa raiz ORIGINAL (antes da correção), sem refletir o resultado final. Handoff `docs/handoffs/2026-09-03-recebimento-scanner-netum-sd2000.md` e a seção 7 (log de 2026-09-04) registram a correção completa no mesmo dia: `getUserMedia` do scanner passou a pedir `width/height ideal 4096x3072`; nova função DEDICADA `capturarFotoScannerNota()` (linha ~1756) substituiu o uso de `capturarFotoBase64` (que tinha o downscale fixo de 900px, usada só por CNH/CRLV, nunca mais pelo scanner) — canvas dimensionado com `video.videoWidth`/`videoHeight` reais, sem downscale; guia visual sincronizada via polling ativo (250ms) após o listener `resize` isolado se mostrar insuficiente. Validação física real confirmada pelo usuário em 2026-09-04: resolução de captura real **3264×2448 (4:3)**, documento inteiro visível sem corte, texto legível, preview estável — `/02-testes` = APROVADO COM RESSALVAS, `/03-revisao` = APROVADO. Reconfirmado por leitura de código em 2026-09-16 (`frontend-especialista`): nenhuma regressão encontrada, mecanismo atual continua correto. Pendência REAL remanescente (distinta desta, ver linha acima): roteiro fisico completo de 20 itens ainda nao formalmente reexecutado/fechado. Ver `docs/handoffs/2026-09-16-netum-preview-captura-resolucao.md` |
@@ -318,8 +318,6 @@ de código/commit/handoff, não por descrição textual.
   (2026-09-17), severidade observação — o próprio comentário do código
   já documenta que a proteção real contra duplicidade é o CAS por
   `tentativa_id`, não esse lock. Registrado para avaliação futura.
-- JPEG truncado aceito na validação (`UploadHelper.php`, sem checagem
-  de marcador EOI/FFD9). Severidade: observação.
 - `tb_rate_limit_ocr` cresce indefinidamente sem job de limpeza — sem
   cron configurado. Severidade: observação.
 - Rate limit "fail-open" silencioso se `RateLimitOcrDao`/`RateLimitVioStatusDao`
@@ -3017,3 +3015,243 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   Ver `docs/handoffs/2026-09-16-integridade-conclusao-atendimento.md`,
   secao "Resultado da revisao". Cartao Trello:
   `card_id 6aabd13455e22411f07b0da4`.
+- 2026-09-17 — `/00-planejamento` da demanda `validacao-jpeg-segura`
+  concluido. Investigacao (explorer + backend-especialista +
+  security-especialista, independentes) confirmou: a validacao atual
+  de JPEG (unica no backend, `util/UploadHelper.php::salvarImagemBase64()`)
+  usa magic bytes + `getimagesizefromstring()`, que so le o cabecalho
+  SOF do JPEG (dimensoes) sem avancar ate o marcador de fim EOI
+  (FFD9) — um JPEG truncado no meio dos dados de scan passa pela
+  validacao sem erro. Afeta os 4 fluxos (CNH, CRLV, nota fiscal,
+  scanner Netum) porque todos passam pelo mesmo unico ponto de
+  validacao. Nenhum limite de dimensao maxima existe hoje (so limite
+  de bytes, unico para todos os tipos). Duas estrategias comparadas —
+  decodificacao completa via GD (mais forte, requer checagem de
+  dimensao ANTES de decodificar para evitar bomba de descompressao) ou
+  checagem estrutural leve de EOI + limite de dimensao (mais barata em
+  CPU/memoria, suficiente para o bug relatado mas com vetor teorico de
+  EOI forjado) — divergencia entre os dois revisores sobre qual
+  adotar, registrada como decisao bloqueante do usuario antes de
+  `/01-implementacao`. GD confirmado disponivel localmente; nao
+  confirmado em producao Hostgator (pendencia ja existente). Nenhum
+  codigo alterado, nenhum dado real usado, nenhuma chamada externa.
+  Ver `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`. Cartao
+  Trello: `card_id 6aac49f6059d69343f93e626`.
+- 2026-09-17 — `/01-implementacao` da demanda `validacao-jpeg-segura`
+  parcialmente concluida. Estrategia HIBRIDA implementada em
+  `util/UploadHelper.php::salvarImagemBase64()` (15 etapas, limites
+  5000px por lado / 13.000.000px de area, GD fail-closed, sem nova
+  dependencia/variavel .env). `qa-testes` executou 24 casos + prova
+  negativa com fixtures 100% sinteticas: 22/24 PASSOU, incluindo o
+  bug ORIGINAL relatado (truncamento acidental sem EOI, corretamente
+  rejeitado) e regressao de CNH/CRLV/nota (sem quebra). ACHADO
+  CRITICO: decodificacao completa via GD nesta instalacao (bundled,
+  Windows) nao rejeita JPEG truncado com EOI forjado manualmente no
+  final -- decodifica silenciosamente sem warning. Prova negativa
+  obrigatoria do usuario (item 3) NAO confirmada. Decisao arquitetural
+  devolvida ao usuario (aceitar risco residual / parser estrutural
+  completo / investigar flag do GD) -- nao decidida por conta propria.
+  Zero dado real, zero chamada externa, zero commit/push. Ver
+  `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`. Cartao Trello:
+  `card_id 6aac49f6059d69343f93e626`.
+- 2026-09-17 — Rodada curta de `/01-implementacao` da demanda
+  `validacao-jpeg-segura` testou a decisao do usuario de usar
+  `gd.jpeg_ignore_warning=0` temporariamente durante
+  `imagecreatefromstring()`, sem parser JPEG proprio. Implementacao
+  correta e segura (leitura/alteracao/confirmacao/restauracao
+  garantida em `finally`, fail-closed se a diretiva nao existir ou
+  nao puder ser confirmada em '0'). RESULTADO: a diretiva EXISTE
+  nesta instalacao (bundled, PHP 8.0.30, Windows) e a alteracao
+  FUNCIONA (confirmada por `ini_get()`), mas NAO TEM EFEITO
+  PERCEPTIVEL contra o EOI forjado -- `imagecreatefromstring()`
+  continua aceitando silenciosamente o JPEG truncado com EOI colado
+  manualmente, com ou sem a diretiva alterada. Criterio de
+  interrupcao explicito do usuario foi ACIONADO -- rodada interrompida
+  sem implementar parser proprio, sem aceitar risco residual por
+  conta propria. Bug ORIGINAL (truncamento acidental sem EOI)
+  permanece corrigido e validado pela checagem estrutural (inalterada
+  nesta rodada). Nova decisao arquitetural devolvida ao usuario (
+  aceitar risco residual / reconfirmar comportamento em producao
+  Hostgator / parser estrutural completo). Zero dado real, zero
+  chamada externa, zero commit/push. Ver
+  `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`, secao "Rodada
+  curta de /01-implementacao — teste do modo rigoroso
+  gd.jpeg_ignore_warning". Cartao Trello:
+  `card_id 6aac49f6059d69343f93e626`.
+- 2026-09-17 — Demanda `validacao-jpeg-segura` concluida em
+  `/01-implementacao` com veredito LIBERADO. Decisao final do usuario:
+  risco residual de JPEG truncado com EOI forjado deliberadamente
+  (baixo/moderado) formalmente ACEITO — a tentativa de mitigar via
+  `gd.jpeg_ignore_warning` foi testada e nao teve efeito nesta
+  instalacao de GD, e um parser JPEG proprio foi descartado por
+  complexidade desproporcional sem garantia adicional real (nao
+  elimina o risco, so aumenta manutencao). Estrategia final:
+  `util/UploadHelper.php::salvarImagemBase64()` com checagem
+  estrutural de EOI exato no ultimo byte (cobre o bug ORIGINAL,
+  truncamento acidental) + limites de dimensao (5000px por lado,
+  13.000.000px de area, constantes no codigo, sem nova variavel
+  `.env`) + decodificacao completa via GD como camada adicional +
+  fail-closed se GD ausente. Tentativa de `gd.jpeg_ignore_warning`
+  removida do codigo e da documentacao. 22/22 controles obrigatorios
+  aprovados, 2 diagnosticos de limitacao conhecida documentados
+  separadamente (mesma causa raiz: leniencia do GD/libjpeg nesta
+  instalacao especifica, nao um bug do codigo). Regressao de
+  CNH/CRLV/nota/Netum sem quebra. `docs/deploy-checklist.md`
+  atualizado com o limite real da solucao (protege corrupcao
+  acidental, nao autenticidade documental). Pendencia de JPEG
+  truncado marcada RESOLVIDA COM RISCO RESIDUAL ACEITO e retirada da
+  lista ativa da secao 5.1 — nenhuma pendencia equivalente criada.
+  Recomendacao futura registrada (nao implementada): tratar
+  legibilidade/autenticidade via OCR/VIO/conferencia operacional, se
+  necessario. Zero dado real, zero chamada externa, zero commit/push.
+  Ver `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`. Cartao
+  Trello: `card_id 6aac49f6059d69343f93e626`.
+- 2026-09-17 — `/02-testes` independente da demanda
+  `validacao-jpeg-segura` concluido com veredito APROVADO. Dois
+  revisores independentes (qa-testes + security-especialista, sem
+  participacao na implementacao) reexecutaram tudo do zero: 22/22
+  controles obrigatorios confirmados por 2 execucoes independentes
+  (scripts proprios, nao reaproveitados cegamente), 7/7 confirmacoes
+  do risco residual aceito, medicao de memoria ISOLADA em
+  subprocessos separados (pico ~56,6MB no pior caso legitimo de 13M
+  pixels, margem de 56% em 128M, sem acumulo em 2 imagens
+  sequenciais, zero arquivo parcial em estouro forcado) confirmando
+  que a recomendacao de 128M minimo/256M recomendado permanece
+  valida, sem correcao documental necessaria. Zero achado critico de
+  seguranca; 1 observacao nao bloqueante sobre `.gitignore` (scripts
+  de teste com prefixo `_` nunca versionados, convencao
+  pre-existente do projeto). Regressao de CNH/CRLV/nota/Netum sem
+  quebra (11/11 + 30/30). Zero dado real, zero chamada externa, zero
+  acesso a producao/Hostgator, zero commit/push. **Demanda liberada
+  para `/03-revisao`.** Ver
+  `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`. Cartao Trello:
+  `card_id 6aac49f6059d69343f93e626`.
+- 2026-09-17 — `/03-revisao` da demanda `validacao-jpeg-segura`
+  concluida com veredito PRECISA DE AJUSTE. Dois revisores
+  independentes (backend-especialista + security-especialista, sem
+  participacao na implementacao) confirmaram os 20 pontos de
+  implementacao SEM ACHADO (base64 estrito, limites de bytes/
+  dimensao/area, ordem de validacao, fail-closed de GD, restauracao
+  de error handler, gravacao so apos validacoes, zero dependencia
+  nova, compatibilidade PHP 8.0) e o checklist Hostgator sem achado.
+  ACHADO BLOQUEANTE confirmado empiricamente pelo
+  `backend-especialista`: `tests/manual/teste_validacao_jpeg_seguro.php`
+  (script RASTREADO pelo Git, entregue nesta demanda) depende de
+  forma obrigatoria (require_once sem guard + exec()) de dois
+  arquivos NAO rastreados (`_fixtures_jpeg_seguro.php`,
+  `_caso_gd_indisponivel_mock.php`, cobertos por `.gitignore:
+  tests/manual/_*.php`) — testado em diretorio isolado simulando
+  clone limpo, script falha imediatamente com erro fatal de
+  `require` ausente, ANTES de executar qualquer caso. A suite de
+  teste desta demanda especifica NAO E reproduzivel a partir de um
+  clone limpo do repositorio — a convencao pre-existente do
+  `.gitignore` nao justifica isso neste caso, pois o proprio script
+  entregue depende dos arquivos ignorados. Precisa retornar para
+  rodada curta de `/01-implementacao` para versionar as 2
+  dependencias ou inline-ar seu conteudo no script principal.
+  Achado de ATENCAO nao bloqueante adicional: residuo fisico
+  encontrado em `storage/atendimentos/2026-09-17/TST0A01_142344/nota_01.jpg`
+  (3264x2448, marcador sintetico, nao dado real) — contradiz a
+  alegacao de "zero residuo" do handoff, precisa investigacao/limpeza
+  na mesma rodada. Risco residual de EOI forjado (ja formalmente
+  aceito pelo usuario) reconfirmado CONSISTENTE entre codigo e
+  documentacao, sem contradicao — NAO reaberto como pendencia. Zero
+  dado real, zero chamada externa, zero commit/push. Ver
+  `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`, secao
+  "Resultado da revisao". Cartao Trello mantido em "Sprint Bruno -
+  Fazendo [Semanal]": `card_id 6aac49f6059d69343f93e626`.
+- 2026-09-17 — Rodada curta de `/01-implementacao` da demanda
+  `validacao-jpeg-segura`, restrita aos 2 achados do `/03-revisao`
+  anterior. `util/UploadHelper.php` NAO foi tocado (nenhuma regra de
+  validacao/limite/risco residual alterada).
+  **Reprodutibilidade (BLOQUEANTE, corrigido)**: os 2 arquivos que
+  causavam o `Fatal error` em clone limpo foram RENOMEADOS no
+  filesystem (removendo o prefixo `_` que batia com
+  `.gitignore:tests/manual/_*.php`), sem tocar `.gitignore` e sem
+  `git add -f`: `_fixtures_jpeg_seguro.php` ->
+  `tests/manual/fixtures_jpeg_seguro.php`,
+  `_caso_gd_indisponivel_mock.php` ->
+  `tests/manual/caso_gd_indisponivel_mock.php`.
+  `tests/manual/teste_validacao_jpeg_seguro.php` atualizado
+  (`require_once`/`exec()` apontando para os novos nomes, ambos via
+  `__DIR__`). Confirmado `git check-ignore -v` sem retorno para os 2
+  novos nomes (nao mais ignorados) e `git status` mostrando ambos como
+  untracked prontos para `git add`. Zero referencia viva aos nomes
+  antigos fora de trechos historicos do proprio handoff. Prova em
+  arvore limpa (fora do repositorio, sem nenhum arquivo `_*` de
+  rodadas anteriores): `teste_validacao_jpeg_seguro.php` executado
+  numa arvore isolada com `.env` SINTETICO minimo (so `STORAGE_PATH`/
+  `NOTA_IMAGEM_MAX_BYTES`, zero segredo real) -- **22/22 controles
+  obrigatorios PASSOU**, 2 diagnosticos de limitacao conhecida
+  separados (inalterados), prova negativa CONFIRMADA, zero acesso ao
+  worktree original durante a execucao. Arvore temporaria removida
+  integralmente ao final. **Limitacao honesta registrada**: a copia do
+  `.env` REAL do projeto (necessaria para os 2 testes de regressao
+  dependentes de banco) foi BLOQUEADA automaticamente pelo
+  classificador de seguranca do proprio ambiente do agente
+  ("Credential Leakage") antes de qualquer copia ocorrer; por decisao
+  de nao contornar esse bloqueio, `teste_fluxo_recebimento_documentos.php`
+  (11/11 PASSOU) e `teste_e2e_recebimento_expedicao_mock.php` (30/30
+  PASSOU) foram reexecutados no PROPRIO projeto real (que ja contem os
+  2 arquivos renomeados) em vez de numa arvore hermeticamente separada
+  — reprodutibilidade "clone limpo total" comprovada de forma completa
+  apenas para o script diretamente citado no achado BLOQUEANTE.
+  **Residuo fisico (ATENCAO, investigado e limpo)**: confirmados os 6
+  pontos pedidos para
+  `storage/atendimentos/2026-09-17/TST0A01_142344/nota_01.jpg` antes
+  da remocao — nao e symlink, nao rastreado pelo Git, placa `TST0A01`
+  e marcador sintetico ja convencionado (92 pastas analogas de outras
+  demandas, fora de escopo, preservadas), JPEG baseline 3264x2448
+  (resolucao do Netum, compativel com fixture sintetica, confirmado
+  sem inspecao visual do conteudo), linha correspondente em
+  `tb_atendimento` (`id_atendimento=2796`) com `motorista_nome`/
+  `motorista_cpf` **NULL** (zero dado pessoal, confirmado por 1 leitura
+  pontual no banco, zero escrita), origem provavel: rodada de
+  `/02-testes`/`/03-revisao` do mesmo dia (14:23:44) que exercitou o
+  fluxo real de upload sem limpeza completa de `storage/`. Removido
+  somente o arquivo exato + o diretorio `TST0A01_142344` (ficou vazio),
+  sem tocar em `storage/atendimentos/2026-09-17/` (preservada, ainda
+  existe vazia) nem em nenhuma outra pasta. Confirmado por busca que
+  nao ha mais nenhum outro residuo desta demanda especifica em
+  `storage/`. A alegacao anterior de "zero residuo" no handoff foi
+  CORRIGIDA com a ressalva completa. Zero commit/push, zero chamada
+  externa, zero escrita no banco real. Ver
+  `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`, secao "Rodada
+  curta de /01-implementacao -- correcao de reprodutibilidade +
+  limpeza de residuo". Cartao Trello: `card_id 6aac49f6059d69343f93e626`.
+  **Proximo passo**: nova confirmacao curta de `/02-testes`/`/03-revisao`
+  sobre estes 2 pontos antes de `/04-commit-e-push`.
+- 2026-09-17 — `/02-testes` curta e independente da demanda
+  `validacao-jpeg-segura` (focada exclusivamente nos 2 achados da
+  rodada anterior) concluida com veredito APROVADO. `qa-testes`
+  (sem participacao na correcao) reproduziu de forma independente:
+  reprodutibilidade confirmada (arquivos renomeados existem, nomes
+  antigos ausentes, zero ignorado pelo Git, zero referencia
+  funcional aos nomes antigos), nova arvore hermetica montada do
+  zero rodando o script a partir de diretorio corrente diferente do
+  script (teste ainda mais rigoroso que o da rodada anterior) —
+  22/22 controles obrigatorios PASSOU, residuo confirmado ausente
+  sem dano colateral a outras pastas de teste, regressao 11/11 +
+  30/30, `util/UploadHelper.php` confirmado intocado nesta rodada
+  curta (mtime anterior, diff identico ao ja aprovado). Zero dado
+  real, zero chamada externa, zero commit/push. **Demanda liberada
+  para `/03-revisao` curta de confirmacao.** Ver
+  `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`. Cartao Trello:
+  `card_id 6aac49f6059d69343f93e626`.
+- 2026-09-17 — `/03-revisao` curta de confirmacao da demanda
+  `validacao-jpeg-segura` concluida com veredito APROVADO. Dois
+  revisores independentes (backend-especialista + security-especialista,
+  sem participacao nas correcoes) reproduziram do zero: nova arvore
+  hermetica propria confirmando 22/22 controles obrigatorios,
+  reprodutibilidade confirmada, residuo confirmado ausente sem dano
+  colateral, integridade do diff confirmada (`util/UploadHelper.php`
+  intocado desde a aprovacao anterior, `.gitignore` inalterado, sem
+  `git add -f`, risco residual continua aceito e fora da lista ativa
+  5.1, sem parser proprio/`gd.jpeg_ignore_warning` reintroduzidos),
+  regressao 11/11 + 30/30 sem quebra, zero dependencia nova, zero
+  segredo/dado pessoal. Zero dado real, zero chamada externa, zero
+  commit/push nesta etapa. **Demanda LIBERADA para
+  `/04-commit-e-push`.** Ver
+  `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`, secao
+  "Resultado da revisao — /03-revisao curta de confirmacao". Cartao
+  Trello: `card_id 6aac49f6059d69343f93e626`.

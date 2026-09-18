@@ -32,6 +32,61 @@ como pendência, nunca suposto.
       sincronização automática entre os dois ambientes — ver
       `servico-impressao-local/README.md`, seção 2.5.1).
 
+### 1.Y Validação de JPEG segura (`util/UploadHelper.php`) — demanda validacao-jpeg-segura (2026-09-17)
+
+A partir desta demanda, `salvarImagemBase64()` exige decodificação
+completa via GD (`imagecreatefromstring()`) além das checagens
+estruturais já existentes — fail-closed: sem GD disponível, toda
+imagem (nota fiscal, CNH, CRLV) é rejeitada. Confirmar em produção
+**antes** do deploy desta funcionalidade:
+
+- [ ] PHP 8 ativo no plano de hospedagem.
+- [ ] Extensão GD carregada (`extension_loaded('gd')` retorna `true`).
+- [ ] Suporte a JPEG confirmado em `gd_info()` (chave `'JPEG Support'`
+      — confirmar o nome exato da chave para a versão de GD instalada
+      no plano, pode variar entre builds).
+- [ ] `imagecreatefromstring()` disponível
+      (`function_exists('imagecreatefromstring')` retorna `true`).
+- [ ] `memory_limit` de no mínimo 128M, com 256M recomendado (a
+      decodificação completa de uma imagem no limite de dimensão desta
+      demanda — 5000px por lado, até 13.000.000px de área — aloca um
+      buffer de pixels correspondente durante a validação).
+- [ ] Teste controlado com 1 JPEG sintético válido gerado localmente
+      (nunca documento/CNH/CRLV/nota real) — deve ser aceito.
+- [ ] Teste controlado com 1 JPEG sintético truncado (sem o marcador
+      EOI `FF D9` no final, ou com bytes cortados no meio dos dados de
+      scan) — deve ser rejeitado.
+- [ ] Remoção de qualquer diagnóstico temporário (ex. script de
+      verificação de `gd_info()`) imediatamente após a validação acima
+      — nunca deixar `phpinfo()` ou script de diagnóstico exposto
+      publicamente. A verificação deve ocorrer via terminal SSH/CLI da
+      hospedagem (ex. `php -r "var_dump(gd_info());"`) ou por um script
+      de diagnóstico temporário protegido por autenticação (mesmo
+      padrão de token do totem) e removido logo após o uso — nunca por
+      um endpoint público sem autenticação nem por `phpinfo()` público.
+
+**Observação sobre o alcance real desta validação (risco residual
+aceito pelo usuário em 2026-09-17)**: a combinação de checagem
+estrutural (SOI + EOI exato nos últimos 2 bytes) + limite de
+dimensão/área + decodificação completa via GD protege efetivamente
+contra CORRUPÇÃO ACIDENTAL (truncamento de hardware/rede/software sem
+marcador de fim), que foi o bug originalmente relatado. Ela **não
+comprova integridade visual completa dos pixels nem autenticidade
+documental**: testes desta demanda confirmaram que, nesta instalação
+de GD (bundled, PHP 8.0.30, Windows), um JPEG truncado no meio do
+stream de scan com um EOI (`FF D9`) colado manualmente no último byte
+é decodificado SILENCIOSAMENTE pelo GD (sem retornar `false` nem
+emitir warning) e, portanto, aceito pela validação. Uma tentativa de
+usar a diretiva nativa `gd.jpeg_ignore_warning` em modo rigoroso para
+fechar esse vetor foi testada e **confirmada sem efeito** contra esse
+caso específico nesta build — por isso essa diretiva não faz parte da
+implementação. O usuário aceitou esse risco residual (baixo/moderado)
+como está: um JPEG deliberadamente forjado dessa forma pode ser
+aceito; a barreira efetiva permanece sendo a rejeição do bug original
+de truncamento acidental sem EOI. Comportamento real em produção
+(Hostgator, provavelmente Linux/libjpeg do sistema) não confirmado —
+pode diferir do observado localmente, para melhor ou para pior.
+
 ### 1.X Serviço local de impressão (mini PC Windows)
 
 Checklist operacional resumido para o `servico-impressao-local/`
