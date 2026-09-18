@@ -1437,10 +1437,35 @@ inalterados -- zero dependencia nova.
 
 **APROVADO -- liberado para `/04-commit-e-push`.**
 
-## Trello
 
-card_id: 6aac49f6059d69343f93e626
+## Commit
 
-## Proximo passo
+Commit funcional criado com sucesso:
 
-Rodar `/04-commit-e-push`.
+- **Hash completo**: `03af1df971dd12188e5eaa30be2a730d41d4a97b`
+- **Mensagem**: `fix(upload): reforca validacao segura de imagens JPEG`
+- **Autor/committer**: `Bruno Santos <brunossaantos@gmail.com>` (identidade
+  local do repositorio), sem nenhuma atribuicao de IA em autor,
+  committer, mensagem ou trailers.
+- **Arquivos versionados** (7, exatamente os autorizados):
+  `util/UploadHelper.php`, `docs/deploy-checklist.md`,
+  `tests/manual/fixtures_jpeg_seguro.php` (novo),
+  `tests/manual/caso_gd_indisponivel_mock.php` (novo),
+  `tests/manual/teste_validacao_jpeg_seguro.php` (novo),
+  `docs/handoffs/2026-09-17-validacao-jpeg-segura.md` (novo),
+  `ia_development_state.md`.
+- **Validacoes pre-commit**: `git fetch` sem divergencia (0/0 com
+  `origin/main`); nomes antigos com `_` confirmados ausentes; novos
+  auxiliares confirmados NAO ignorados; `.gitignore` inalterado;
+  zero arquivo de `storage/` no diff; zero segredo/credencial/CPF/
+  placa/caminho de maquina; `gd.jpeg_ignore_warning` confirmado sem
+  uso ativo (so comentario historico); zero parser JPEG proprio;
+  `php -l` limpo nos 4 arquivos PHP; `git diff --check` e
+  `git diff --cached --check` limpos.
+- **Testes finais reexecutados**: `teste_validacao_jpeg_seguro.php`
+  = 22/22 controles obrigatorios (2 diagnosticos conhecidos
+  separados, prova negativa 1-2 confirmada); `teste_fluxo_recebimento_documentos.php`
+  = 11/11; `teste_e2e_recebimento_expedicao_mock.php` = 30/30. Zero
+  residuo novo criado em `storage/` pelos testes.
+- Zero chamada real ao Talent/VIO, zero impressao, zero alteracao de
+  registro real, zero acesso ao Hostgator/producao durante esta etapa.
