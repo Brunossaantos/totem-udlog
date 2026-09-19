@@ -162,13 +162,13 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
 | Heurística de extração de "razão social candidata" no OCR (`ocr-worker.js`) é escolha de implementação, não formalmente decidida no handoff | `public/totem/assets/ocr-worker.js` | Pode precisar de ajuste após teste físico com notas reais |
 | Valores de ajuste empírico (`LIMIAR_MINIMO`=80, `MARGEM_MINIMA`=15) definidos com valor inicial, não validados com volume real de produção; `CACHE_TTL_SEGUNDOS` não se aplica mais (era do cache HTTP da API externa, removido em 2026-09-08) | `util/RazaoSocialMatcher.php` | A recalibrar com dados reais após uso em produção |
 
-| `tb_rate_limit_ocr` cresce indefinidamente sem job de limpeza (linhas de janelas antigas nunca são apagadas) | `sql/migrations/004_tb_rate_limit_ocr.sql`, `app/Dao/RateLimitOcrDao.php` | Severidade baixa segundo o `security-especialista` (crescimento limitado pelo próprio rate limit, sem vetor de amplificação por atacante externo) — recomendado job de limpeza futuro, não urgente |
-| Rate limit de `identificar-cliente` é "fail-open" silencioso por design se `RateLimitOcrDao` não for injetado no `NotaController` (hoje sempre é injetado em `public/api/nota.php`, mas uma refatoração futura poderia desativar a proteção sem erro/log) | `app/Controller/NotaController.php` | Achado do `security-especialista` em 2026-09-08 — não é vulnerabilidade ativa hoje, registrado para avaliação futura (considerar fail-closed) |
+| ~~tb_rate_limit_ocr cresce indefinidamente sem job de limpeza~~ (linhas de janelas antigas nunca sao apagadas) | sql/migrations/004_tb_rate_limit_ocr.sql, app/Dao/RateLimitOcrDao.php | IMPLEMENTADA em 2026-09-18 (demanda robustez-rate-limit-migrations) -- novo cron/limpar-rate-limit-ocr.php (retencao 24h, lotes de 500, preserva janela atual/anterior), novo metodo RateLimitOcrDao::apagarJanelasExpiradas(). Ver docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md. |
+| ~~Rate limit de identificar-cliente e fail-open silencioso por design se RateLimitOcrDao nao for injetado no NotaController~~ (hoje sempre e injetado em public/api/nota.php, mas uma refatoracao futura poderia desativar a protecao sem erro/log) | app/Controller/NotaController.php | IMPLEMENTADA em 2026-09-18 (demanda robustez-rate-limit-migrations) -- RateLimitOcrDao obrigatorio no construtor (sem null); verificarRateLimit() com try/catch real, qualquer falha inesperada (incluindo Error/TypeError) responde HTTP 503 sanitizado, nunca prossegue para OCR. Ver docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md. |
 | ~~**[ALTO]** Seed dos 38 clientes podia não rodar em instalação nova~~ | `sql/migrations/003_tb_cliente_razao_normalizada.sql` | RESOLVIDA em 2026-09-08 — migration reescrita com padrão de SQL preparado condicional (SET @sql := IF(...); PREPARE; EXECUTE), verdadeiramente idempotente independente do método de execução. Validado por `qa-testes` de forma independente em banco de teste descartável simulando instalação nova |
 | ~~**[ALTO]** Mojibake se repetia em instalação nova sem SET NAMES~~ | `sql/migrations/003_tb_cliente_razao_normalizada.sql` | RESOLVIDA em 2026-09-08 — `SET NAMES utf8mb4;` adicionado como primeira instrução da migration. Validado por `qa-testes` via HEX() dos bytes gravados em banco de teste descartável |
 | ~~**[MÉDIO]** `identificarCliente()` sem `try/catch` defensivo~~ | `app/Controller/NotaController.php` | RESOLVIDA em 2026-09-08 — envolvido em `try/catch (Throwable)` espelhando `processar()`, log técnico via `error_log`, resposta genérica ao cliente. Validado por `security-especialista` sem vazamento de `$e->getMessage()` |
 | ~~**[MÉDIO]** `identificarCliente()` sem validação de status/etapa~~ | `app/Controller/NotaController.php` | RESOLVIDA em 2026-09-08 — validação de `status===em_andamento`/`etapa_atual===digitalizacao_notas` adicionada espelhando `processar()`. Confirmado por `security-especialista` que não quebra o early-stop (etapa só muda em `concluirDigitalizacao()`, chamado depois de todas as chamadas de identificação) |
-| `sql/migrations/001_uk_atendimento_nota_ordem.sql` e `002_status_ocr_atendimento_nota.sql` têm o mesmo padrão frágil que a 003 tinha (checagem manual prévia, sem SQL preparado condicional) — abortariam se executadas via `mysql banco < arquivo.sql` de uma vez só contra um banco onde as colunas/índices já existem | `sql/migrations/001_*.sql`, `sql/migrations/002_*.sql` | Achado registrado em 2026-09-08 durante a correção da migration 003 (`recebimento-clientes-tabela-local`) — reproduzido pelo `qa-testes` ao simular instalação nova. Não corrigido (fora do escopo desta correção pontual) — decisão futura do usuário sobre se vale a pena aplicar o mesmo padrão retroativamente |
+| ~~sql/migrations/001_uk_atendimento_nota_ordem.sql e 002_status_ocr_atendimento_nota.sql tem o mesmo padrao fragil que a 003 tinha~~ (checagem manual previa, sem SQL preparado condicional) -- abortariam se executadas via mysql banco < arquivo.sql de uma vez so contra um banco onde as colunas/indices ja existem | sql/migrations/001_*.sql, sql/migrations/002_*.sql | IMPLEMENTADA em 2026-09-18 (demanda robustez-rate-limit-migrations) -- 001/002/003 preservadas SEM alteracao (decisao confirmada do usuario); nova migration corretiva sql/migrations/013_convergencia_idempotente_migrations_historicas.sql converge os objetos de forma idempotente (padrao PREPARE/EXECUTE condicional da 003), reconhece indice equivalente com nome diferente. VERSAO INICIAL (mesma data) abortava com SIGNAL SQLSTATE via stored procedure auxiliar se schema incompativel; essa versao foi RESCRITA em 2026-09-18/19 (rodada curta de /01-implementacao apos /02-testes independente confirmar que exigia privilegios CREATE ROUTINE/ALTER ROUTINE nao confirmados no Hostgator) -- a VERSAO FINAL, hoje no repositorio, aborta por meio de erros nativos do proprio MySQL/MariaDB (ERROR 1061 Duplicate key name para colisao de indice; ERROR 1103 Incorrect table name para divergencia de tipo/nulabilidade), sem nenhuma stored procedure, SIGNAL, CREATE ROUTINE ou ALTER ROUTINE, com privilegios identicos aos ja exigidos por 001/002/003. Ver docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md. |
 
 | API VIO Decode (Serpro) para CNH/CRLV via QR: URL exata do endpoint de token OAuth2 não documentada oficialmente | `app/Rn/VioDecodeClient.php` (planejado) | Documentação confirmada em `docs/manual_vio_decode.md` descreve o fluxo client_credentials, mas não lista a URL do endpoint de token — bloqueia início da implementação real até confirmar |
 | VIO Decode Trial é documentado como ambiente de dados MOCK — sem confirmação categórica de que QR reais de CNH/CRLV funcionem lá | `docs/manual_vio_decode.md` | Tratamento adotado no planejamento: Trial valida a integração técnica, não a autenticidade de documento real — decisão de produto sobre testar a fronteira mock-vs-real com documento próprio (consentimento explícito) ainda pendente de aprovação do usuário |
@@ -222,6 +222,143 @@ independentes (`explorer` + `security-especialista`) com evidência real
 de código/commit/handoff, não por descrição textual.
 
 #### 1. PENDENTE — AÇÃO TÉCNICA
+
+- ~~**BLOQUEANTE, achado NOVO do /02-testes independente (2a rodada,
+  2026-09-18)**: em todos os 7 entrypoints corrigidos na rodada
+  anterior, `Dotenv::load()` roda ANTES e FORA do try/catch que
+  protege `Conexao::obter()` -- se o `.env` estiver ausente ou
+  malformado, a biblioteca lanca `Dotenv\Exception\
+  InvalidPathException`/`InvalidFileException` (nao `PDOException`),
+  nao capturada por nenhum catch existente, podendo reproduzir o
+  mesmo padrao de vazamento pre-autenticacao do achado 1 original~~
+  -- IMPLEMENTADA em 2026-09-18 (rodada curta de
+  `/01-implementacao`): novo `util/Bootstrap.php`, fronteira unica
+  cobrindo `.env` ausente/malformado, variavel obrigatoria
+  ausente/vazia e falha de conexao, sempre HTTP 503 sanitizado.
+  Aplicado aos 7 entrypoints e ao `cron/limpar-rate-limit-ocr.php`.
+  Testado com servidor HTTP real + curl em copia isolada do projeto
+  (nunca o `.env` real), prova negativa de deteccao revertida e
+  confirmada. Ver
+  docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md,
+  secao "Rodada curta de /01-implementacao -- correcao dos 2 achados
+  bloqueantes novos".
+- ~~**BLOQUEANTE, achado NOVO do /02-testes independente (2a rodada,
+  2026-09-18)**: a migration
+  `sql/migrations/013_convergencia_idempotente_migrations_historicas.sql`
+  exige privilegios `CREATE ROUTINE` + `ALTER ROUTINE`~~ --
+  IMPLEMENTADA em 2026-09-18 (mesma rodada): migration 013 reescrita
+  sem nenhuma stored procedure/SIGNAL -- colisao de nome de indice
+  agora falha nativamente via erro do proprio MySQL/MariaDB
+  ("Duplicate key name"); checagem de tipo via PREPARE/EXECUTE
+  contra tabela inexistente proposital. Testado com usuario MariaDB
+  restrito (sem CREATE ROUTINE/ALTER ROUTINE/EXECUTE/TRIGGER/EVENT)
+  -- migration roda com sucesso, privilegios minimos confirmados
+  identicos aos ja exigidos por 001/002/003 (SELECT via
+  INFORMATION_SCHEMA, CREATE, ALTER, INDEX, DROP). indice
+  `idx_rate_limit_ocr_limpeza` inalterado, EXPLAIN confirma uso
+  continuo sem full table scan. Ver mesmo handoff, mesma secao.
+- ~~Achado de ambiente, nao de codigo: `.env` local de dev esta com
+  `DB_PASS` igual a um valor de teste sintetico, residuo de uma
+  rodada de QA anterior nao restaurada corretamente~~ -- RESOLVIDO
+  pelo usuario em 2026-09-18 (fora do escopo de codigo): `DB_PASS`
+  real restaurado manualmente, marcador sintetico confirmado
+  ausente pelo orquestrador antes de iniciar a rodada seguinte,
+  conexao local reconfirmada funcionando. Timezone local do PHP
+  tambem corrigido pelo usuario para America/Sao_Paulo (-03:00),
+  registrado como remediacao de ambiente, sem alteracao de codigo
+  nesta demanda.
+
+- **INCIDENTE ACEITO, 2026-09-18**: durante a validacao da rodada
+  curta de `/01-implementacao` acima, o `backend-especialista`
+  executou `cron/limpar-rate-limit-ocr.php` contra o BANCO DE DEV
+  LOCAL REAL (nao um banco descartavel), removendo 1 linha real de
+  `tb_rate_limit_ocr` (expirada pela propria regra de retencao,
+  comportamento correto do cron em si, mas execucao nao autorizada
+  nesta etapa). Banco local contem so dado de teste, nenhum dado
+  pessoal envolvido, nenhum impacto em producao/Hostgator/operacao
+  real da UDLOG. Linha NAO foi e nao sera recriada. Usuario
+  informado e ACEITOU o incidente explicitamente. A alegacao de
+  "zero alteracao no banco"/"zero operacao real" presente em relatos
+  de outras rodadas desta demanda NAO se aplica a esta rodada
+  especifica. Nenhuma nova execucao do cron contra banco de dev
+  local ou producao autorizada dentro desta demanda a partir de
+  agora -- proxima `/02-testes` deve reaproveitar evidencias ja
+  produzidas ou usar banco descartavel. Ver mesmo handoff, secao
+  "INCIDENTE -- execucao indevida do cron no banco local de
+  desenvolvimento".
+
+
+- ~~**BLOQUEANTE, achado do /02-testes**: `public/api/nota.php`
+  chama `Util\Conexao::obter()` (linha ~19) ANTES de construir
+  `NotaController` -- se a conexao inicial falhar nesse ponto
+  especifico, um fatal error CRU (stack trace + caminho absoluto
+  do servidor) e vazado ao cliente HTTP, sem passar por nenhum
+  try/catch~~ -- IMPLEMENTADA em 2026-09-18 (rodada curta de
+  `/01-implementacao`): os 7 entrypoints que chamam
+  `Conexao::obter()` antes de qualquer controller (`nota.php`,
+  `impressao.php`, `atendimento.php`, `impressao-teste.php`,
+  `documento.php`, `cliente.php`, `totem/index.php`) passaram a
+  envolver essa chamada em try/catch(PDOException) isolado,
+  respondendo HTTP 503 sanitizado antes de qualquer
+  auth/controller/OCR. Testado com servidor HTTP real + curl (503
+  confirmado, sem stack trace/SQL/host/usuario, mesmo com
+  display_errors=1). Ver
+  docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md,
+  secao "Rodada curta de /01-implementacao".
+- ~~**BLOQUEANTE, achado do /02-testes**: a migration
+  `sql/migrations/013_convergencia_idempotente_migrations_historicas.sql`
+  cria o indice `idx_rate_limit_ocr_janela`, mas a query REAL de
+  limpeza (`RateLimitOcrDao::apagarJanelasExpiradas()`) NAO usa
+  esse indice -- `EXPLAIN` confirma full table scan~~ -- IMPLEMENTADA
+  em 2026-09-18 (rodada curta de `/01-implementacao`): indice
+  substituido por `idx_rate_limit_ocr_limpeza (atualizado_em,
+  janela)`. EXPLAIN real confirmou eliminacao do full table scan
+  (type=ALL,rows=6000 -> type=range,rows=4799 em banco de teste com
+  6000 linhas sinteticas). Ver mesmo handoff, mesma secao.
+- ~~Achado de severidade media, nao bloqueante: a mesma migration
+  013 reconhece o indice `idx_rate_limit_ocr_janela` SO POR NOME
+  (nao por coluna, diferente do tratamento dado a
+  `uk_atendimento_ordem`/`idx_status_ocr`)~~ -- IMPLEMENTADA em
+  2026-09-18 (mesma rodada). VERSAO INTERMEDIARIA (mesma data,
+  SUBSTITUIDA logo em seguida, ver abaixo): stored procedure
+  reutilizavel `_migracao_013_abortar_se_colisao` aplicada de forma
+  simetrica aos 3 indices convergidos (PASSOS 1, 4 e 5) -- indice
+  com nome esperado mas colunas erradas abortava com SIGNAL SQLSTATE
+  sanitizado, nao mascarava mais. Essa versao intermediaria foi
+  RESCRITA em 2026-09-18/19 (rodada curta de `/01-implementacao`
+  apos `/02-testes` independente confirmar que a stored procedure
+  exigia privilegios `CREATE ROUTINE`/`ALTER ROUTINE` nao
+  confirmados no Hostgator -- ver achado bloqueante correspondente
+  mais acima nesta mesma secao). VERSAO FINAL, hoje no repositorio:
+  a mesma protecao simetrica nos 3 indices continua valendo, mas sem
+  nenhuma stored procedure, `SIGNAL`, `CREATE ROUTINE` ou `ALTER
+  ROUTINE` -- colisoes de nome incompativel sao interrompidas pelo
+  proprio mecanismo NATIVO do MySQL/MariaDB (`ALTER TABLE ... ADD
+  INDEX/ADD UNIQUE KEY <nome_esperado>` falha com `ERROR 1061
+  Duplicate key name` se o nome ja existir com colunas erradas); a
+  checagem de tipo/nulabilidade do PASSO 0 (`status_ocr`/
+  `processado_em`) aborta com `ERROR 1103 (Incorrect table name)`,
+  porque o identificador de tabela deliberadamente inexistente usado
+  nessa checagem excede propositalmente o limite de 64 caracteres do
+  MySQL/MariaDB. O comportamento permanece fail-closed em ambas as
+  versoes -- so o MECANISMO de aborto mudou (SIGNAL customizado via
+  stored procedure -> erro nativo do proprio banco). Ver mesmo
+  handoff, secoes "Achado 2 -- Migration 013 sem stored procedures"
+  e "Rodada curta de correcao textual final (2026-09-19)".
+
+- ~~`util/Conexao.php` loga a mensagem CRUA de `PDOException::getMessage()`
+  via `error_log()` simples quando a CONEXAO inicial falha (diferente
+  de falha de query, ja sanitizada em todo o resto do projeto) --
+  vaza o usuario do banco (ex. `root`) e o SQLSTATE real. Afeta
+  qualquer ponto de entrada, incluindo o novo
+  `cron/limpar-rate-limit-ocr.php`~~ -- IMPLEMENTADA em 2026-09-18
+  (rodada curta de `/01-implementacao` da demanda
+  `robustez-rate-limit-migrations`, junto com o achado bloqueante 1
+  acima, mesma causa raiz): log substituido por string fixa
+  sanitizada (`Conexao::obter: falha ao conectar ao banco de dados`),
+  sem `getMessage()`/trace/file/line. Ver mesmo handoff, secao
+  "Rodada curta de /01-implementacao".
+
 
 - ~~`cancelar`/`bloquear-excesso-notas` não checam status terminal~~
   — IMPLEMENTADA em 2026-09-16 (demanda
@@ -318,17 +455,6 @@ de código/commit/handoff, não por descrição textual.
   (2026-09-17), severidade observação — o próprio comentário do código
   já documenta que a proteção real contra duplicidade é o CAS por
   `tentativa_id`, não esse lock. Registrado para avaliação futura.
-- `tb_rate_limit_ocr` cresce indefinidamente sem job de limpeza — sem
-  cron configurado. Severidade: observação.
-- Rate limit "fail-open" silencioso se `RateLimitOcrDao`/`RateLimitVioStatusDao`
-  não forem injetados — sem log de alerta quando isso ocorre. Severidade:
-  atenção.
-- `sql/migrations/001_uk_atendimento_nota_ordem.sql` e
-  `002_status_ocr_atendimento_nota.sql` usam checagem manual prévia, não
-  o padrão idempotente real (`PREPARE`/`EXECUTE` condicional) já usado
-  na 003 — abortam se rodadas de uma vez só contra um banco onde a
-  constraint/coluna já existe. Severidade: atenção (risco operacional
-  de deploy).
 - Correspondência prática de `jsQR.binaryData` com o raw value esperado
   pela VIO Decode não confirmada — só teste físico com QR real resolve.
 - Origem da chave de acesso da NF-e na tela `rec_digitaliza` sem o
@@ -3255,3 +3381,305 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   `docs/handoffs/2026-09-17-validacao-jpeg-segura.md`, secao
   "Resultado da revisao — /03-revisao curta de confirmacao". Cartao
   Trello: `card_id 6aac49f6059d69343f93e626`.
+- 2026-09-18 — `/00-planejamento` da demanda `robustez-rate-limit-migrations`
+  concluido. Investigacao (explorer + 2x backend-especialista +
+  security-especialista + devops-especialista, independentes)
+  confirmou o estado real das 3 pendencias: (1) `tb_rate_limit_ocr`
+  cresce 1 linha por totem por janela ativa (60s), sem indice
+  adicional alem da PK composta, sem job de limpeza; (2) o fail-open
+  de `RateLimitOcrDao` e um risco LATENTE (unico chamador em producao,
+  `public/api/nota.php`, sempre injeta o DAO hoje), confirmado por 2
+  revisores que `NotaFiscalRn::identificarCliente()` e 100% local
+  (sem chamada externa), logo o risco e de disponibilidade/CPU, nao
+  de confidencialidade; (3) migrations 001/002 usam checagem manual
+  previa (nao `PREPARE`/`EXECUTE` condicional da 003), com risco
+  confirmado de disponibilidade/operacional (001) e schema
+  inconsistente silencioso (002), nunca de perda de dado. Estrategias
+  convergentes definidas para fail-closed (injecao obrigatoria +
+  HTTP 503, alinhado ao precedente ja usado em `DocumentoController`)
+  e para limpeza (cron dedicado em lotes, seguindo o padrao real ja
+  usado por `cron/reenviar-fila.php` — que nao tem lock/log
+  estruturado, confirmado pelo `devops-especialista`, exigindo
+  desenho novo). **DIVERGENCIA REAL entre revisores sobre a correcao
+  das migrations 001/002** (editar diretamente vs. nova migration
+  corretiva) registrada como decisao bloqueante pendente de
+  confirmacao do usuario antes de `/01-implementacao`. Nenhum codigo
+  alterado, nenhuma migration executada, nenhum registro excluido,
+  nenhuma chamada externa, nenhum acesso a producao/Hostgator nesta
+  etapa. Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`.
+  Cartao Trello: `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-18 — `/01-implementacao` da demanda `robustez-rate-limit-migrations`
+  concluida com veredito funcional aprovado (apos rodada curta de
+  correcao de 2 achados). Usuario confirmou: preservar 001/002/003
+  sem alteracao, nova migration corretiva 013, retencao de 24h, lotes
+  de 500, limpeza so via cron/CLI, RateLimitOcrDao obrigatorio e
+  fail-closed. Implementado: `NotaController` com DAO obrigatorio no
+  construtor + `verificarRateLimit()` com try/catch real (qualquer
+  `\Throwable` inesperado, incluindo `\Error`, responde HTTP 503
+  sanitizado; `\PDOException` continua respondendo 500 via caminho ja
+  existente); novo `RateLimitOcrDao::apagarJanelasExpiradas()`; novo
+  `cron/limpar-rate-limit-ocr.php` (CLI-only, lotes de 500, teto de
+  50 lotes/execucao, nunca apaga janela atual/anterior); nova
+  migration `sql/migrations/013_convergencia_idempotente_migrations_historicas.sql`
+  (001/002/003 preservadas byte a byte, converge objetos via padrao
+  PREPARE/EXECUTE da 003, reconhece indice equivalente com nome
+  diferente, cria indice novo idx_rate_limit_ocr_janela, aborta com
+  SIGNAL SQLSTATE se schema incompativel); novo checklist de deploy.
+  qa-testes validou 12+17+12 casos novos + todas as regressoes
+  (rate limit, identificar-cliente, CNH/CRLV, Recebimento/Expedicao,
+  impressao, conclusao/cancelamento, JPEG, Talent) sem quebra apos
+  correcao de 5 scripts de teste afetados pela mudanca de assinatura
+  do construtor (efeito colateral esperado, nenhum chamador de
+  producao afetado). 2 achados reais corrigidos na mesma etapa: HTTP
+  503 antes inalcancavel mesmo por Reflection (corrigido com
+  try/catch real) e regressao de teardown em
+  `teste_identificar_cliente.php` (limpeza de tb_rate_limit_ocr
+  adicionada). 1 achado NOVO registrado sem correcao (fora do escopo
+  dos arquivos autorizados): `util/Conexao.php` vaza usuario do banco
+  em `error_log()` cru quando a conexao inicial falha —
+  pre-existente, nao criado por esta demanda. Migrations testadas
+  APENAS contra bancos descartaveis dedicados, nunca o banco de
+  dev real nem producao. Zero dado real, zero registro excluido, zero
+  chamada externa, zero commit/push. Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`.
+  Cartao Trello: `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-18 — `/02-testes` independente da demanda
+  `robustez-rate-limit-migrations` concluido com veredito PRECISA DE
+  AJUSTE. Tres revisores independentes (qa-testes + backend-especialista
+  + security-especialista, sem participacao na implementacao)
+  confirmaram: bloco rate limit 35/36 (1 bloqueante: cenario "falha
+  de conexao antes da construcao do NotaController" vaza fatal error
+  cru ao cliente HTTP em public/api/nota.php); bloco limpeza 20/20
+  (todos passaram, incluindo execucao real do cron com 26.000 linhas
+  reais); bloco migration 013 16/18 (1 bloqueante: indice novo nao e
+  usado pela query real de limpeza, EXPLAIN confirma full table scan;
+  1 achado medio nao bloqueante de mascaramento silencioso por nome);
+  todas as regressoes 100% sem falha. Achado de log de
+  `util/Conexao.php` no cron (ja registrado) reconfirmado nao
+  bloqueante isoladamente pelo security-especialista, mas o
+  qa-testes encontrou uma manifestacao MAIS GRAVE da mesma causa raiz
+  (exposicao ao cliente HTTP, nao so a log) que E classificada
+  bloqueante. 2 achados bloqueantes registrados na secao 5.1 —
+  demanda retorna para rodada curta de `/01-implementacao`. Zero
+  dado real, zero chamada externa, zero acesso a producao/Hostgator,
+  zero commit/push. Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`,
+  secao "Resultado dos testes". Cartao Trello mantido em "Sprint
+  Bruno - Fazendo [Semanal]": `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-18 -- Rodada curta de `/01-implementacao` da demanda
+  `robustez-rate-limit-migrations`, restrita aos 2 achados
+  bloqueantes + 1 achado medio do `/02-testes` independente
+  anterior. Corrigidos: (1) vazamento de fatal error cru ao cliente
+  HTTP no bootstrap de conexao -- 7 entrypoints (`nota.php`,
+  `impressao.php`, `atendimento.php`, `impressao-teste.php`,
+  `documento.php`, `cliente.php`, `totem/index.php`) passaram a
+  envolver `Conexao::obter()` em try/catch isolado, HTTP 503
+  sanitizado; log de `util/Conexao.php` deixou de usar
+  `PDOException::getMessage()` bruto; (2) indice da migration 013
+  (PASSO 5) corrigido de `idx_rate_limit_ocr_janela (janela)` para
+  `idx_rate_limit_ocr_limpeza (atualizado_em, janela)`, EXPLAIN real
+  confirmou fim do full table scan; (3) validacao estrutural de
+  indice por colunas (nao so nome) aplicada de forma simetrica aos 3
+  indices convergidos pela migration 013 (PASSOS 1, 4 e 5), nova
+  stored procedure `_migracao_013_abortar_se_colisao` com SIGNAL
+  SQLSTATE sanitizado em caso de colisao de nome incompativel.
+  Migrations 001/002/003 confirmadas inalteradas. Regras de negocio,
+  retencao (24h), lote (500), teto de lotes (50) e contratos HTTP
+  ja aprovados (sucesso/429/500) preservados sem alteracao. Todas
+  as regressoes relevantes reexecutadas sem falha. Zero dado real,
+  zero operacao real, zero commit/push nesta rodada. Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`,
+  secao "Rodada curta de /01-implementacao -- correcao dos achados
+  bloqueantes". Demanda aguarda nova rodada de `/02-testes`
+  independente antes de avancar para `/03-revisao`. Cartao Trello
+  mantido em "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-18 -- Nova rodada independente de `/02-testes` da demanda
+  `robustez-rate-limit-migrations`, validando a rodada curta de
+  `/01-implementacao` anterior. 3 revisores independentes (qa-testes
+  + backend-especialista + security-especialista, novas instancias,
+  sem participacao na correcao). Resultado: os 2 achados bloqueantes
+  anteriores (vazamento HTTP cru no bootstrap; full table scan na
+  limpeza) e o achado medio (mascaramento por nome) foram
+  RECONFIRMADOS corrigidos por evidencia real e independente (503
+  sanitizado via curl real nos 7 entrypoints, prova negativa de
+  deteccao de vazamento, cron real com 20.502 linhas sinteticas,
+  EXPLAIN real sem full table scan em 3 cenarios incluindo volume de
+  producao, migration 013 idempotente e abortando corretamente em
+  colisao nos 3 indices). Porem 2 achados bloqueantes NOVOS, nao
+  cobertos pela correcao anterior, impedem avanco para
+  `/03-revisao`: (1) `Dotenv::load()` roda fora do try/catch nos 7
+  entrypoints, pode reproduzir vazamento pre-auth se `.env` estiver
+  ausente/malformado; (2) migration 013 exige privilegios `CREATE
+  ROUTINE`+`ALTER ROUTINE`, testado empiricamente que falha sem
+  eles, nao confirmados disponiveis no Hostgator real. Veredito
+  consolidado: **PRECISA DE AJUSTE**. Zero dado real, zero operacao
+  real, zero commit/push nesta rodada de testes. Achado de ambiente
+  registrado (nao de codigo): `.env` local de dev com senha de teste
+  residual de rodada de QA anterior, nao restaurada -- pendente de
+  o usuario restaurar manualmente. Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`,
+  secao "Nova rodada de /02-testes independente, pos-correcao".
+  Cartao Trello mantido em "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-18 -- Rodada curta de `/01-implementacao` da demanda
+  `robustez-rate-limit-migrations`, restrita aos 2 achados
+  bloqueantes novos da 2a rodada de `/02-testes` independente.
+  Corrigidos: (1) `Dotenv::load()` desprotegido -- novo
+  `util/Bootstrap.php` cobre `.env` ausente/malformado, variavel
+  obrigatoria ausente/vazia e falha de conexao numa unica fronteira,
+  sempre HTTP 503 sanitizado, aplicado aos 7 entrypoints e ao cron;
+  (2) migration 013 reescrita sem stored procedures/SIGNAL, colisao
+  de indice agora falha nativamente via erro do proprio
+  MySQL/MariaDB, privilegios minimos testados e confirmados
+  identicos aos ja exigidos por 001/002/003 (sem CREATE
+  ROUTINE/ALTER ROUTINE). Regras de negocio, retencao, lotes, teto,
+  contratos HTTP e migrations 001/002/003 preservados sem alteracao.
+  Regressoes relevantes reexecutadas sem falha. **INCIDENTE**:
+  durante a validacao, o cron foi executado indevidamente contra o
+  banco de dev local real (nao descartavel), removendo 1 linha
+  expirada e real de `tb_rate_limit_ocr` -- banco so continha dado
+  de teste, nenhum dado pessoal, nenhum impacto em
+  producao/Hostgator; usuario informado e ACEITOU o incidente
+  explicitamente; linha nao foi recriada; alegacao de "zero operacao
+  real" NAO se aplica a esta rodada especifica; nenhuma nova
+  execucao do cron contra banco real autorizada nesta demanda.
+  Protocolo reforcado para proximas etapas: testes destrutivos
+  somente em banco descartavel dedicado, confirmar nome do banco
+  antes de qualquer DELETE/migration/cron, nunca usar credenciais do
+  `.env` real em teste destrutivo. Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`,
+  secoes "Rodada curta de /01-implementacao -- correcao dos 2
+  achados bloqueantes novos" e "INCIDENTE". Demanda liberada para
+  nova rodada de `/02-testes` independente. Cartao Trello mantido em
+  "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-18 -- Nova rodada independente de `/02-testes` (3a rodada)
+  da demanda `robustez-rate-limit-migrations`, validando a rodada
+  curta de `/01-implementacao` que corrigiu os 2 achados bloqueantes
+  novos (Dotenv fora da fronteira segura; migration 013 exigindo
+  privilegios de rotina). 3 revisores independentes (qa-testes +
+  backend-especialista + security-especialista, novas instancias).
+  Regra critica de isolamento de banco cumprida integralmente pelos
+  3: nenhuma operacao destrutiva contra banco de dev local/producao,
+  todos usaram instancias/bancos MariaDB completamente isolados e
+  descartaveis com marcador QA no nome, confirmado via `SELECT
+  DATABASE()` antes de qualquer DDL/DML, destruidos ao final; `.env`
+  real confirmado identico por hash antes/depois em todas as 3
+  sessoes. Resultado: qa-testes APROVADO (bootstrap/7
+  entrypoints/rate limit/cron real com 26.002 linhas
+  sinteticas/regressoes); backend-especialista APROVADO (13/13
+  cenarios da migration, ausencia total de routines confirmada,
+  privilegios minimos identicos a 001/002/003, EXPLAIN em 4 cenarios
+  sem full table scan com corte real de producao); security-
+  especialista APROVADO com 1 achado ATENCAO nao bloqueante
+  (`docs/deploy-checklist.md` linha ~121 desatualizada, ainda
+  menciona SIGNAL que nao existe mais na migration reescrita).
+  **VEREDITO CONSOLIDADO: APROVADO.** Todos os criterios de aprovacao
+  definidos pelo usuario atendidos. Zero nova operacao real/residuo
+  nesta rodada (o incidente da rodada anterior nao foi reaberto,
+  corretamente documentado). Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`,
+  secao "Nova rodada de /02-testes independente, 3a rodada". Demanda
+  liberada para `/03-revisao`; recomendado corrigir a observacao nao
+  bloqueante do deploy-checklist antes/durante essa etapa. Cartao
+  Trello mantido em "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-19 -- Correcao documental curta (Fase 1) +
+  `/03-revisao` independente (Fase 2) da demanda
+  `robustez-rate-limit-migrations`. Fase 1: corrigida a referencia
+  desatualizada a `SIGNAL SQLSTATE` em `docs/deploy-checklist.md`
+  (achado ATENCAO nao bloqueante da 3a rodada de `/02-testes`),
+  descrevendo agora os erros nativos reais de abort da migration.
+  Fase 2: 3 revisores independentes (qa-testes + backend-especialista
+  + security-especialista, novas instancias, sem participacao na
+  implementacao nem na 3a rodada de `/02-testes`). Resultado:
+  qa-testes APROVADO (2 achados ATENCAO nao bloqueantes: comentario
+  desatualizado em teste manual; 16 bancos MariaDB residuais de QA
+  na instancia local, fora do git); security-especialista APROVADO
+  (1 achado ATENCAO nao bloqueante: linha ~171 desta tabela
+  descrevendo versao intermediaria da migration com SIGNAL, hoje
+  incorreta); backend-especialista **PRECISA DE AJUSTE** -- achado
+  NOVO real: `docs/deploy-checklist.md` e o cabecalho da migration
+  013 afirmam que o PASSO 0 aborta com `ERROR 1146 (Table doesn't
+  exist)`, mas o erro real reproduzido empiricamente e `ERROR 1103
+  (Incorrect table name)`, porque o nome de tabela inexistente usado
+  excede 64 caracteres (limite de identificador do MySQL/MariaDB) --
+  mecanismo de abort continua seguro/deterministico, e imprecisao
+  textual apenas, mas do tipo que esta etapa deveria confirmar
+  corrigido. **VEREDITO CONSOLIDADO: PRECISA DE AJUSTE.** Nenhum
+  achado de seguranca/regressao/perda de dado; os 2 achados
+  bloqueantes de rodadas anteriores permanecem corrigidos e
+  reconfirmados. Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`,
+  secao "/03-revisao independente (2026-09-19)". Demanda NAO avanca
+  para `/04-commit-e-push` -- aguarda rodada curta adicional de
+  correcao documental (ERROR 1146 -> ERROR 1103) e decisao do
+  usuario sobre os 3 itens nao bloqueantes. Cartao Trello mantido em
+  "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-19 -- Rodada curta de correcao textual (Fase 1) + `/03-revisao`
+  curta independente (Fase 2) da demanda
+  `robustez-rate-limit-migrations`. Fase 1: corrigidas as 3
+  inconsistencias textuais apontadas pela `/03-revisao` anterior --
+  (1) `docs/deploy-checklist.md` e cabecalho da migration 013
+  corrigidos de `ERROR 1146` para `ERROR 1103` (causa: identificador
+  proposital >64 caracteres, limite do MySQL/MariaDB), conteudo
+  executavel da migration confirmado byte a byte identico; (2)
+  comentario de `tests/manual/_caso_controller_identificar_cliente.php`
+  (cenario `dao_ausente`) atualizado para refletir o comportamento
+  ATUAL (503 sanitizado), sem alterar nenhuma instrucao executavel;
+  (3) linha ~171 desta tabela corrigida para diferenciar a versao
+  intermediaria da migration 013 (SIGNAL) da versao final (sem
+  SIGNAL). Bancos residuais de QA (16, prefixo `qa013_*`/`qa_iso2`)
+  explicitamente NAO tocados, registrados como pendencia operacional
+  separada. Fase 2: revisor independente (security-especialista,
+  nova instancia) confirmou os 9 dos 10 pontos verificados como
+  corretos, mas encontrou 1 achado NOVO fora do escopo explicito
+  desta rodada: linhas ~318-326 desta mesma tabela (achado de
+  severidade media sobre mascaramento de indice por nome) ainda
+  descrevem a correcao daquele achado como baseada em stored
+  procedure/SIGNAL, mesma causa raiz do item 3 ja corrigido na linha
+  171. **VEREDITO: PRECISA DE AJUSTE**, estritamente por este ponto
+  pontual. Nenhuma alteracao funcional indevida, nenhum excesso de
+  escopo, nenhuma regressao, apenas 1 consulta somente-leitura contra
+  banco (sem escrita) pelo revisor. Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`,
+  secoes "Rodada curta de correcao textual final" e "/03-revisao
+  curta e independente da correcao textual". Demanda aguarda decisao
+  do usuario sobre nova rodada muito curta para a linha ~318-326.
+  Cartao Trello mantido em "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-19 -- Rodada final minima de correcao + confirmacao
+  independente da demanda `robustez-rate-limit-migrations`. Corrigida
+  a unica referencia remanescente (linhas ~318-347 desta tabela,
+  achado de severidade media sobre mascaramento de indice por nome):
+  texto agora diferencia claramente VERSAO INTERMEDIARIA (SIGNAL/
+  stored procedure, marcada como SUBSTITUIDA) de VERSAO FINAL (sem
+  SIGNAL/stored procedure/CREATE ROUTINE/ALTER ROUTINE, colisao via
+  `ERROR 1061`, PASSO 0 via `ERROR 1103`). Busca global por 9 termos
+  relacionados (SIGNAL, SQLSTATE, ERROR 1146, CREATE ROUTINE, ALTER
+  ROUTINE, stored procedure, PROCEDURE, PASSO 0, migration 013)
+  confirmou zero descricao ativa incorreta restante -- todas as
+  demais ocorrencias sao registro historico datado (convencao ja
+  usada em todo o arquivo) ou referencia de outra demanda sem
+  relacao. Revisor independente (qa-testes, nova instancia) fez
+  busca global propria e confirmou a mesma classificacao, alem de
+  confirmar consistencia entre os 4 documentos
+  (ia_development_state.md, handoff, deploy-checklist.md, cabecalho
+  da migration 013), ausencia de toque na migration nesta rodada
+  (mtime identico), e preservacao dos 2 achados bloqueantes
+  originais. **VEREDITO FINAL: APROVADO.** Zero excesso de escopo
+  (so esta tabela + handoff tocados), zero segredo/dado pessoal,
+  zero nova operacao real (bancos residuais de QA nao tocados nem
+  consultados). Ver
+  `docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md`,
+  secoes "Rodada final minima de correcao (2026-09-19)" e
+  "Confirmacao independente final (2026-09-19)". **Demanda liberada
+  para `/04-commit-e-push`.** Pendencia operacional separada
+  registrada: inventario/limpeza dos 16 bancos MariaDB residuais de
+  QA (`qa013_*`, `qa_iso2`), mediante autorizacao explicita futura
+  do usuario. Cartao Trello mantido em "Sprint Bruno - Fazendo
+  [Semanal]" ate a execucao de `/04-commit-e-push`:
+  `card_id 6aaca8f164c46e169c806f67`.
