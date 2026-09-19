@@ -18,6 +18,7 @@ use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\ClienteDao;
+use App\Dao\RateLimitOcrDao;
 use App\Rn\NotaFiscalRn;
 use App\Controller\NotaController;
 
@@ -31,7 +32,10 @@ $idAtendimento = (int) ($argv[2] ?? 0);
 $ordem = (int) ($argv[3] ?? 0);
 
 $notaFiscalRn = new NotaFiscalRn(new AtendimentoNotaDao($pdo), new ClienteDao($pdo));
-$controller = new NotaController($notaFiscalRn, new AtendimentoDao($pdo));
+// RateLimitOcrDao obrigatorio desde a demanda robustez-rate-limit-migrations
+// (2026-09-18) -- processar() nao usa rate limit, mas o construtor do
+// Controller agora exige a dependencia real de qualquer forma.
+$controller = new NotaController($notaFiscalRn, new AtendimentoDao($pdo), new RateLimitOcrDao($pdo));
 
 // JPEG minimo porem estruturalmente valido (1x1 branco) — mesmo usado por
 // outros testes de upload do projeto (ex: teste_fluxo_recebimento_documentos.php)

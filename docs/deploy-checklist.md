@@ -87,6 +87,140 @@ de truncamento acidental sem EOI. Comportamento real em produção
 (Hostgator, provavelmente Linux/libjpeg do sistema) não confirmado —
 pode diferir do observado localmente, para melhor ou para pior.
 
+### 1.Z Robustez de rate limit e migrations históricas — demanda robustez-rate-limit-migrations (2026-09-18)
+
+Cobre 3 mudanças aplicadas nesta demanda: (1) `RateLimitOcrDao` obrigatório
+e fail-closed em `NotaController`; (2) novo cron de limpeza de
+`tb_rate_limit_ocr`; (3) nova migration corretiva/idempotente `013`. Ver
+`docs/handoffs/2026-09-18-robustez-rate-limit-migrations.md` para o
+diagnóstico completo e as decisões do usuário.
+
+**Antes de aplicar a migration 013:**
+
+- [ ] **Backup obrigatório do banco** (mysqldump completo, ou snapshot do
+      painel Hostgator) **antes** de aplicar
+      `sql/migrations/013_convergencia_idempotente_migrations_historicas.sql`
+      — mesmo sendo uma migration idempotente e não-destrutiva (sem
+      `DROP`/`TRUNCATE`), qualquer alteração de schema em produção deve ter
+      backup prévio.
+- [ ] **Inspeção prévia do schema real** antes de aplicar — confirme o
+      estado atual via `SHOW INDEX FROM tb_atendimento_nota;`,
+      `SHOW COLUMNS FROM tb_atendimento_nota;` e
+      `SHOW INDEX FROM tb_rate_limit_ocr;` (ou consulta equivalente a
+      `INFORMATION_SCHEMA.COLUMNS`/`INFORMATION_SCHEMA.STATISTICS`). Isso dá
+      visibilidade do que a migration 013 vai efetivamente alterar (se
+      houver algo a fazer) antes de rodar.
+- [ ] **Aplicação manual da migration 013** — mesmo processo já usado para
+      as demais migrations do projeto (phpMyAdmin/cPanel/terminal, sem
+      executor automático). **NÃO** reaplique `001_uk_atendimento_nota_ordem.sql`
+      nem `002_status_ocr_atendimento_nota.sql` em um banco já inicializado
+      — essa proibição já existia nos próprios arquivos e continua
+      integralmente válida; a migration 013 NÃO torna 001/002 seguras para
+      reexecução, ela só converge o estado final de forma idempotente a
+      partir de qualquer ponto de partida real.
+- [ ] Se a migration 013 abortar por colisao de nome de indice com
+      estrutura incompatível (erro nativo do MySQL/MariaDB, ex.
+      `ERROR 1061 (42000): Duplicate key name '...'`) ou por
+      divergência de tipo/nulabilidade em `status_ocr`/`processado_em`
+      (erro nativo `ERROR 1103 (42000): Incorrect table name '...'`,
+      referenciando uma tabela com nome autoexplicativo do tipo
+      `migracao_013_abortar__status_ocr_tipo_ou_nulabilidade_divergente...`
+      — confirmado empiricamente em `/03-revisao` de 2026-09-19 que o
+      erro real é `ERROR 1103`, não `ERROR 1146` como documentado
+      numa versão anterior deste checklist: o identificador
+      propositalmente inválido usado nessa checagem excede o limite
+      de 64 caracteres para nomes de tabela do MySQL/MariaDB, então o
+      parser rejeita o identificador como sintaticamente inválido
+      antes mesmo de tentar localizar a tabela — nunca chega a
+      produzir `ER_NO_SUCH_TABLE`. O mecanismo de abort em si
+      continua fail-closed, seguro e determinístico, independente de
+      qual dos dois erros nativos aparece),
+      **NÃO** prossiga — a migration foi reescrita em 2026-09-18
+      (rodada curta de `/01-implementacao` após `/02-testes`
+      independente confirmar que a versão anterior, baseada em
+      stored procedures com `SIGNAL SQLSTATE '45000'`, exigia os
+      privilégios `CREATE ROUTINE`/`ALTER ROUTINE`, não confirmados
+      como disponíveis no Hostgator) para abortar por meio de erros
+      nativos do próprio banco, sem depender de stored
+      procedure/`SIGNAL`/trigger/event — os privilégios necessários
+      hoje são os MESMOS já exigidos por
+      `001_uk_atendimento_nota_ordem.sql`/`002_status_ocr_atendimento_nota.sql`/`003_tb_cliente_razao_normalizada.sql`
+      (`SELECT` implícito via `INFORMATION_SCHEMA`, `CREATE`, `ALTER`,
+      `INDEX`, `DROP` no schema do totem — nenhum privilégio de
+      rotina). Qualquer um desses erros nativos indica uma
+      divergência real de schema entre o que foi documentado em
+      001/002 e o que existe de fato no banco. Investigue
+      manualmente antes de qualquer novo `ALTER` (fora do escopo
+      desta migration decidir automaticamente).
+
+**Depois de aplicar a migration 013:**
+
+- [ ] **Validação posterior do schema** — repita as consultas
+      `SHOW INDEX`/`SHOW COLUMNS` do passo anterior e confirme a presença de:
+      `uk_atendimento_ordem` (`tb_atendimento_nota`, colunas
+      `id_atendimento, ordem`), `status_ocr`/`processado_em`
+      (`tb_atendimento_nota`), `idx_status_ocr` (`tb_atendimento_nota`), e
+      o índice **novo** `idx_rate_limit_ocr_limpeza` (`tb_rate_limit_ocr`,
+      colunas `atualizado_em, janela` — nome e colunas corrigidos numa
+      rodada curta de `/01-implementacao` em 2026-09-18 após `/02-testes`
+      independente confirmar, via `EXPLAIN` real, que o índice
+      originalmente proposto (`idx_rate_limit_ocr_janela`, só por
+      `janela`) não era usado pela query real de limpeza).
+
+**Configuração do novo cron de limpeza (`cron/limpar-rate-limit-ocr.php`):**
+
+- [ ] Cadastrar no cron do cPanel, comando exato (ajustar o caminho
+      absoluto real do plano de hospedagem — **nunca** hardcoded no código
+      versionado, só na configuração local do painel):
+      `php /caminho/absoluto/da/instalacao/cron/limpar-rate-limit-ocr.php`
+- [ ] Execução **somente via PHP CLI** — o próprio script rejeita
+      (`exit(1)`) se `PHP_SAPI !== 'cli'`, mas o cron do cPanel já deve
+      estar configurado para chamar `php` diretamente, nunca uma URL HTTP
+      (não existe rota pública para este script em `public/api/`).
+- [ ] **Frequência recomendada: a cada hora** (`0 * * * *` no cron do
+      cPanel). Justificativa: a retenção é 24h — uma frequência de 1h por
+      execução garante, no pior caso (uma execução falhando/sendo pulada
+      ocasionalmente), que a tabela nunca acumule muito além de ~25h de
+      dados, sem sobrecarregar o cPanel com execuções muito mais frequentes
+      do que o necessário (diferente de `cron/reenviar-fila.php`, que roda a
+      cada minuto por natureza de fila de reenvio ativo — este job de
+      limpeza não tem essa urgência).
+- [ ] **Nenhuma credencial no comando do cron nem na documentação** — o
+      script já lê `.env` via `Dotenv::createImmutable`, mesmo padrão de
+      `cron/reenviar-fila.php`.
+- [ ] **Verificar o código de saída do cron** (`0` = sucesso, mesmo com 0
+      linhas apagadas; `1` = falha de banco, `PDOException`). Se o cPanel
+      desta conta suportar notificação de e-mail em falha de cron job
+      (verificar na seção de Cron Jobs do cPanel), configurar para este
+      job — não presumir que está disponível sem confirmar.
+- [ ] **Confirmar que os logs deste cron são sanitizados** — só contam
+      linha agregada total apagada, número de lotes e o corte (timestamp)
+      usado; **nunca** `id_totem` individual, conteúdo de linha, SQL ou
+      stack trace (mesmo padrão de `logFalhaBancoPdo` já usado no projeto).
+- [ ] **Procedimento para desabilitar o cron**: remover a entrada
+      correspondente no crontab do cPanel (seção "Cron Jobs" do painel) —
+      o job é aditivo e independente, desabilitar não afeta nenhum dado
+      existente (a tabela `tb_rate_limit_ocr` volta só a crescer de novo,
+      sem risco de corrupção).
+
+**Rollback:**
+
+- [ ] **Código**: reverter o commit desta demanda (`NotaController`,
+      `RateLimitOcrDao`, `cron/limpar-rate-limit-ocr.php`) — sem migration
+      de schema envolvida nessa parte.
+- [ ] **Índices/colunas da migration 013**: comandos documentados no
+      próprio cabeçalho de
+      `sql/migrations/013_convergencia_idempotente_migrations_historicas.sql`
+      (seção "Rollback manual") — confirme antes, via `SHOW INDEX`/
+      `SHOW COLUMNS`, que o objeto foi de fato criado por esta migration (e
+      não já existia antes, vindo de 001/002/`sql/schema.sql`) antes de
+      executar qualquer `DROP INDEX`/`DROP COLUMN`.
+
+**Pendência registrada, não resolvida nesta demanda**: aplicação e
+validação reais desta migration/cron no Hostgator ficam **adiadas para a
+etapa final do projeto** (mesmo padrão já usado em outras demandas) — nada
+disso foi executado em produção nesta etapa de implementação.
+
 ### 1.X Serviço local de impressão (mini PC Windows)
 
 Checklist operacional resumido para o `servico-impressao-local/`

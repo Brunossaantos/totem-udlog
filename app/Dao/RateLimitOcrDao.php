@@ -39,4 +39,45 @@ class RateLimitOcrDao
 
         return (int) $stmtLeitura->fetchColumn();
     }
+
+    /**
+     * Apaga um lote (no maximo $limiteLote linhas) de janelas expiradas de
+     * tb_rate_limit_ocr — usado exclusivamente pelo cron
+     * cron/limpar-rate-limit-ocr.php (demanda robustez-rate-limit-migrations,
+     * 2026-09-18), NUNCA chamado dentro do caminho de uma requisicao HTTP.
+     *
+     * Corte por 2 criterios combinados (E logico), nunca so por tempo:
+     * - atualizado_em mais antigo que o corte de retencao (24h, calculado
+     *   pelo chamador e passado como unix timestamp em $corteUnixTime);
+     * - janela diferente da janela ATUAL e da janela IMEDIATAMENTE ANTERIOR
+     *   (ambas passadas explicitamente pelo chamador) — nunca apaga a janela
+     *   em uso, mesmo que o corte de tempo por algum motivo a alcance (ex.
+     *   clock skew), reforcando por construcao que o rate limit nunca perde
+     *   a linha que ele proprio acabou de escrever/ler.
+     *
+     * LIMIT 500 por chamada — o chamador (cron) faz o loop de lotes
+     * chamando este metodo repetidamente ate ele retornar 0, nunca uma unica
+     * chamada sem limite (evita lock/timeout longo numa unica instrucao).
+     */
+    public function apagarJanelasExpiradas(
+        int $corteUnixTime,
+        int $janelaAtual,
+        int $janelaAnterior,
+        int $limiteLote
+    ): int {
+        $stmt = $this->pdo->prepare('
+            DELETE FROM tb_rate_limit_ocr
+            WHERE atualizado_em < FROM_UNIXTIME(:corte)
+              AND janela != :janela_atual
+              AND janela != :janela_anterior
+            LIMIT ' . max(1, $limiteLote) . '
+        ');
+        $stmt->execute([
+            'corte' => $corteUnixTime,
+            'janela_atual' => $janelaAtual,
+            'janela_anterior' => $janelaAnterior,
+        ]);
+
+        return $stmt->rowCount();
+    }
 }

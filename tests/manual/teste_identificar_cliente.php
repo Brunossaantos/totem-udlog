@@ -451,6 +451,17 @@ try {
     $pdo->prepare('DELETE FROM tb_atendimento_nota WHERE id_atendimento IN (SELECT id_atendimento FROM tb_atendimento WHERE placa = :placa)')
         ->execute(['placa' => PLACA_TESTE]);
     $pdo->prepare('DELETE FROM tb_atendimento WHERE placa = :placa')->execute(['placa' => PLACA_TESTE]);
+    // Achado 3 do qa-testes (robustez-rate-limit-migrations, 2026-09-18):
+    // desde que este script passou a exercitar NotaController::identificarCliente()
+    // de verdade via subprocesso (Caso 16, cenario 'ok_feliz'), com
+    // RateLimitOcrDao real, uma linha real fica gravada em
+    // tb_rate_limit_ocr(id_totem=...) para os totens de teste. Sem esta
+    // limpeza, o DELETE FROM tb_totem abaixo falha com PDOException (FK
+    // 1451), mesmo com todas as asserções de negócio já tendo passado.
+    // Mesmo padrão de limpeza já usado em
+    // tests/manual/teste_rate_limit_identificar_cliente_pdo.php.
+    $pdo->prepare('DELETE FROM tb_rate_limit_ocr WHERE id_totem IN (SELECT id_totem FROM tb_totem WHERE codigo IN (:c1, :c2))')
+        ->execute(['c1' => CODIGO_TOTEM_TESTE, 'c2' => CODIGO_TOTEM_ALHEIO]);
     $pdo->prepare('DELETE FROM tb_totem WHERE codigo IN (:c1, :c2)')->execute(['c1' => CODIGO_TOTEM_TESTE, 'c2' => CODIGO_TOTEM_ALHEIO]);
 }
 

@@ -2,8 +2,7 @@
 
 require_once __DIR__ . '/../../vendor/autoload.php';
 
-use Dotenv\Dotenv;
-use Util\Conexao;
+use Util\Bootstrap;
 use Util\Auth;
 use Util\Resposta;
 use App\Dao\AtendimentoDao;
@@ -13,10 +12,15 @@ use App\Dao\RateLimitOcrDao;
 use App\Rn\NotaFiscalRn;
 use App\Controller\NotaController;
 
-$dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
-$dotenv->load();
-
-$pdo = Conexao::obter();
+// Bootstrap isolado: Util\Bootstrap::conectar() cobre .env ausente/malformado,
+// variavel obrigatoria de banco ausente/invalida e falha de conexao -- capturado
+// SOMENTE aqui, antes de Auth::validarTotem()/controller/OCR, para nunca vazar
+// fatal error cru (stack trace + caminho do servidor) ao cliente HTTP.
+try {
+    $pdo = Bootstrap::conectar(__DIR__ . '/../../');
+} catch (\Throwable $e) {
+    Resposta::erro('Servico temporariamente indisponivel. Tente novamente em instantes.', 503);
+}
 $totem = Auth::validarTotem($pdo);
 
 // Identificacao automatica de cliente via OCR (NotaFiscalRn::identificarCliente)

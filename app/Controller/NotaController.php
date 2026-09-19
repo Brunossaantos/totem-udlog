@@ -26,7 +26,7 @@ class NotaController
     public function __construct(
         private NotaFiscalRn $notaFiscalRn,
         private AtendimentoDao $atendimentoDao,
-        private ?RateLimitOcrDao $rateLimitOcrDao = null
+        private RateLimitOcrDao $rateLimitOcrDao
     ) {}
 
     /**
@@ -328,19 +328,53 @@ class NotaController
      * Rate limit por totem para identificar-cliente (ver constantes da
      * classe). Janela fixa de 60s, incremento atomico via RateLimitOcrDao
      * (INSERT ... ON DUPLICATE KEY UPDATE — sem Redis/APCu, compativel com
-     * Hostgator). Se rateLimitOcrDao nao foi injetado (ex: uso futuro fora
-     * do endpoint HTTP), a checagem e pulada — nunca quebra o fluxo por
-     * ausencia de dependencia opcional.
+     * Hostgator).
+     *
+     * Fail-closed (demanda robustez-rate-limit-migrations, 2026-09-18):
+     * RateLimitOcrDao e dependencia OBRIGATORIA do construtor desde esta
+     * demanda — o unico chamador em producao (public/api/nota.php) sempre
+     * injeta. Como o parametro do construtor e tipado NAO-nullable, a
+     * propriedade `$this->rateLimitOcrDao` nunca pode ser lida como `null`
+     * em nenhum caminho real (uma tentativa de forcar isso via Reflection
+     * resulta em `\Error: Typed property ... must not be accessed before
+     * initialization` ao LER a propriedade, antes mesmo de qualquer `=== null`
+     * — achado confirmado pelo qa-testes em 2026-09-18).
+     *
+     * Correcao (achado 1 do qa-testes, mesma data): a antiga checagem
+     * `=== null` era codigo morto/inalcancavel — nunca produzia o 503
+     * documentado, so um erro fatal cru em qualquer cenario real de falha.
+     * Para o requisito original ("responder 503 se a dependencia nao puder
+     * ser usada") ser cumprido de fato, TODA a logica que depende de
+     * `$this->rateLimitOcrDao` roda dentro de um try/catch. `\PDOException`
+     * e deliberadamente RELANCADA (nao capturada aqui) para continuar
+     * subindo ate o catch(\PDOException) ja existente no chamador
+     * (`identificarCliente()`), que ja responde 500 sanitizado — nao
+     * queremos que esse cenario, ja correto, passe a responder 503. Qualquer
+     * outro `\Throwable` (incluindo `\Error`/`\TypeError` — ex.: propriedade
+     * tipada nao inicializada, falha de acesso inesperada) resulta em 503
+     * sanitizado, sem vazar `$e->getMessage()`/stack trace.
      */
     private function verificarRateLimit(int $idTotem): void
     {
-        if ($this->rateLimitOcrDao === null) {
+        try {
+            $agora = time();
+            $janela = intdiv($agora, self::RATE_LIMIT_JANELA_SEGUNDOS);
+            $contador = $this->rateLimitOcrDao->incrementarEContar($idTotem, $janela);
+        } catch (\PDOException $e) {
+            // Relancada de proposito: o chamador (identificarCliente()) ja
+            // tem seu proprio catch(\PDOException) em volta desta chamada,
+            // respondendo 500 sanitizado — comportamento ja correto e
+            // testado, nao deve virar 503.
+            throw $e;
+        } catch (\Throwable $e) {
+            // Fail-safe real: qualquer falha inesperada na dependencia de
+            // rate limit (incluindo \Error/\TypeError) vira 503 sanitizado,
+            // nunca um erro fatal cru. Log interno minimo, sem interpolar
+            // a mensagem da excecao (pode conter detalhe tecnico interno).
+            error_log('identificarCliente (rate limit): falha inesperada na dependencia de rate limit');
+            Resposta::erro('Servico de protecao indisponivel no momento. Tente novamente em instantes.', 503);
             return;
         }
-
-        $agora = time();
-        $janela = intdiv($agora, self::RATE_LIMIT_JANELA_SEGUNDOS);
-        $contador = $this->rateLimitOcrDao->incrementarEContar($idTotem, $janela);
 
         if ($contador > self::RATE_LIMIT_MAX_CHAMADAS) {
             $segundosRestantes = self::RATE_LIMIT_JANELA_SEGUNDOS - ($agora % self::RATE_LIMIT_JANELA_SEGUNDOS);

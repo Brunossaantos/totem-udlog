@@ -17,6 +17,7 @@ use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\ClienteDao;
+use App\Dao\RateLimitOcrDao;
 use App\Rn\NotaFiscalRn;
 use App\Controller\NotaController;
 
@@ -32,7 +33,10 @@ $numero = (string) ($argv[4] ?? '');
 $origem = (string) ($argv[5] ?? 'MANUAL');
 
 $notaFiscalRn = new NotaFiscalRn(new AtendimentoNotaDao($pdo), new ClienteDao($pdo));
-$controller = new NotaController($notaFiscalRn, new AtendimentoDao($pdo));
+// RateLimitOcrDao obrigatorio desde a demanda robustez-rate-limit-migrations
+// (2026-09-18) -- definirNumero() nao usa rate limit, mas o construtor do
+// Controller agora exige a dependencia real de qualquer forma.
+$controller = new NotaController($notaFiscalRn, new AtendimentoDao($pdo), new RateLimitOcrDao($pdo));
 
 register_shutdown_function(function () {
     echo "\nHTTP_CODE:" . http_response_code() . "\n";

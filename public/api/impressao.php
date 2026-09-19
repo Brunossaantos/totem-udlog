@@ -2,8 +2,7 @@
 
 require_once __DIR__ . '/../../vendor/autoload.php';
 
-use Dotenv\Dotenv;
-use Util\Conexao;
+use Util\Bootstrap;
 use Util\Auth;
 use Util\Resposta;
 use App\Dao\AtendimentoDao;
@@ -15,10 +14,15 @@ use App\Controller\ImpressaoAtendimentoController;
 // publica: Util\Auth::validarTotem(). SO LE resultado ja persistido do
 // check-in — NUNCA dispara/redispara chamada ao Talent.
 
-$dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
-$dotenv->load();
-
-$pdo = Conexao::obter();
+// Bootstrap isolado: mesma protecao aplicada em public/api/nota.php --
+// Util\Bootstrap::conectar() cobre .env ausente/malformado, variavel
+// obrigatoria de banco ausente/invalida e falha de conexao (ver
+// util/Bootstrap.php e util/Conexao.php).
+try {
+    $pdo = Bootstrap::conectar(__DIR__ . '/../../');
+} catch (\Throwable $e) {
+    Resposta::erro('Servico temporariamente indisponivel. Tente novamente em instantes.', 503);
+}
 $totem = Auth::validarTotem($pdo);
 
 $controller = new ImpressaoAtendimentoController(new AtendimentoDao($pdo));

@@ -2,15 +2,24 @@
 
 require_once __DIR__ . '/../../vendor/autoload.php';
 
-use Dotenv\Dotenv;
-use Util\Conexao;
+use Util\Bootstrap;
 use App\Dao\TotemDao;
 
-$dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
-$dotenv->load();
+// Bootstrap isolado: Util\Bootstrap::conectar() cobre .env ausente/malformado,
+// variavel obrigatoria de banco ausente/invalida e falha de conexao (ver
+// util/Bootstrap.php e util/Conexao.php) -- capturado aqui para nunca vazar
+// fatal error cru (stack trace + caminho do servidor) ao navegador do totem.
+// Esta rota serve HTML, nao JSON -- resposta segue o mesmo estilo ja usado
+// abaixo para "totem nao configurado" (http_response_code + die).
+try {
+    $pdo = Bootstrap::conectar(__DIR__ . '/../../');
+} catch (\Throwable $e) {
+    http_response_code(503);
+    die('Servico temporariamente indisponivel. Tente novamente em instantes.');
+}
 
 $codigoTotem = $_GET['totem'] ?? '';
-$totem = (new TotemDao(Conexao::obter()))->buscarPorCodigo($codigoTotem);
+$totem = (new TotemDao($pdo))->buscarPorCodigo($codigoTotem);
 
 if (!$totem) {
     http_response_code(404);

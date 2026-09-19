@@ -38,6 +38,7 @@ use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\ClienteDao;
+use App\Dao\RateLimitOcrDao;
 use App\Rn\NotaFiscalRn;
 use App\Controller\NotaController;
 
@@ -60,7 +61,10 @@ function afirmar(string $descricao, bool $condicao): void
 $atendimentoDao = new AtendimentoDao($pdo);
 $notaDao = new AtendimentoNotaDao($pdo);
 $notaFiscalRn = new NotaFiscalRn($notaDao, new ClienteDao($pdo));
-$controller = new NotaController($notaFiscalRn, $atendimentoDao);
+// RateLimitOcrDao obrigatorio desde a demanda robustez-rate-limit-migrations
+// (2026-09-18) -- este teste nao exercita rate limit, mas o construtor do
+// Controller agora exige a dependencia real de qualquer forma.
+$controller = new NotaController($notaFiscalRn, $atendimentoDao, new RateLimitOcrDao($pdo));
 
 $idTotem = talentCriarTotemComEmpresa($pdo, 'TESTE_NUM_TAM_' . bin2hex(random_bytes(3)));
 $idAtendimento = $atendimentoDao->criar($idTotem, 'recebimento', 'CNN2222');

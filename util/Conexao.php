@@ -26,7 +26,11 @@ class Conexao
                 // evita divergencia de timezone entre PHP e MariaDB (mesmo padrao do UDFlow)
                 self::$instancia->exec("SET time_zone = '-03:00'");
             } catch (PDOException $e) {
-                error_log('Falha na conexao: ' . $e->getMessage());
+                // Log fixo e sanitizado -- nunca usar $e->getMessage() aqui: o driver PDO
+                // pode incluir host/usuario/porta/SQLSTATE do MySQL na mensagem bruta da
+                // excecao de conexao (diferente de falha de query, que ja e sanitizada em
+                // todo o resto do projeto). Sem getMessage(), sem trace, sem file/line.
+                error_log('Conexao::obter: falha ao conectar ao banco de dados');
                 throw new PDOException('Nao foi possivel conectar ao banco de dados');
             }
         }
