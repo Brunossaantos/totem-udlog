@@ -339,6 +339,86 @@ de código/commit/handoff, não por descrição textual.
   `tools/trello-cli.php` confirmados byte-identicos a `HEAD` via
   `git hash-object`. Ver
   docs/handoffs/2026-09-20-vio-crlv-exercicio-faixa-storage.md.
+- ~~**Achado NAO bloqueante do `/03-revisao` final independente de
+  `vio-crlv-exercicio-faixa-storage` (2026-09-20)**: `preencherManualCrlv()`
+  (entrada MANUAL pelo operador do totem) nao passava pela mesma
+  fronteira de tipo/formato/magnitude/faixa armazenavel de `exercicio`
+  ja aplicada ao fluxo automatico via VIO Decode -- usava so
+  `is_numeric($exercicioBruto) ? (int) $exercicioBruto : 0`, permitindo
+  em tese um valor fracionario truncado silenciosamente ou fora da
+  faixa armazenavel de `crlv_ano` chegar ao DAO por essa via.~~
+  **RESOLVIDO em 2026-09-20** (demanda
+  `vio-crlv-manual-exercicio-validacao`): fronteira de
+  tipo/formato/magnitude/faixa (`validarTipoNumerico()` ->
+  `validarExercicioInteiroExato()` -> `validarExercicioDentroDaFaixaArmazenavel()`)
+  extraida/consolidada num UNICO metodo novo,
+  `DocumentoRn::validarExercicioCompleto()`, reutilizado por AMBOS os
+  fluxos (VIO via `extrairCampoNumerico()` + as 2 chamadas ja existentes;
+  MANUAL via chamada DIRETA em `preencherManualCrlv()`, ja que nao ha
+  `$dadosBrutos` de onde extrair) -- nenhuma logica de validacao
+  duplicada. **Achado adicional confirmado no preflight, decisivo para o
+  design**: `DocumentoController::preencherManual()` fazia
+  `$exercicio = (string) ($entrada['exercicio'] ?? '')` ANTES de chamar
+  `preencherManualCrlv()` -- um array/objeto vindo do JSON ja sofreria
+  cast `(string)` NO PROPRIO CONTROLLER (array vira `"Array"`, so
+  warning, aprovado como dado valido; objeto sem `__toString()` lanca
+  `Error` fatal), antes mesmo de chegar a fronteira central. Corrigido
+  parando o cast prematuro de `exercicio` especificamente no Controller
+  (`preencherManualCrlv()` mudou a assinatura de `string $exercicioBruto`
+  para `mixed $exercicioBruto`) -- o Controller so decide "ausente"
+  (null/string vazia/so espacos, mesmo criterio ja usado para os demais
+  campos deste endpoint, resultando em `Resposta::erro('Dados
+  incompletos')`, HTTP 400); qualquer outro valor (incluindo
+  array/objeto/bool/fracionario/overflow/fora da faixa) segue adiante
+  para `DocumentoRn::validarExercicioCompleto()`, que rejeita de forma
+  controlada (`DocumentoVioTipoInvalidoException`, capturada
+  INTEIRAMENTE dentro de `DocumentoRn` -- nunca escapa ate o Controller,
+  mesmo invariante do fluxo VIO) retornando `pode_avancar=false`,
+  `motivo='Exercicio do CRLV nao informado/invalido'`, HTTP 200, origem
+  e status_revisao PRESERVADOS (nunca vira `MANUAL` com dado ruim), zero
+  persistencia (nem de `exercicio` nem de qualquer outro campo). Testado
+  pelo caminho HTTP/MANUAL REAL (`php -S` + `curl` contra
+  `public/api/documento.php?acao=preencher-manual`, banco QA descartavel
+  dedicado, destruido ao final, `SELECT DATABASE()` confirmado antes de
+  qualquer escrita): 137/137 assercoes, incluindo aceitos (`2026`,
+  `"2026"`, `32767`, `"0032767"`) e rejeitados (`32768`, `PHP_INT_MAX`,
+  `"99999999999999999999"`, `2026.9`/`"2026.9"`, `2026.0` sintatico
+  literal no JSON de fio/`"2026.0"`, notacao cientifica, negativo,
+  `true`/`false`, array, objeto, vazio/so espacos/`null`/ausente) --
+  todos os rejeitados confirmados sem HTTP 500, sem persistencia
+  parcial, com dado anterior preservado, mensagem sanitizada (sem stack
+  trace), origem nunca virando `MANUAL`. Achado de bug de teste corrigido
+  durante a execucao: `json_encode(2026.0)` em PHP serializa como
+  literal `2026` (sem ponto decimal), colapsando com `int` no fio --
+  corrigido montando o corpo JSON manualmente para preservar o literal
+  sintatico `2026.0` exigido pelo teste. Teste de `sql_mode` (banco QA
+  dedicado, servidor `php -S` reiniciado entre os 2 modos):
+  `exercicio=PHP_INT_MAX` rejeitado de forma IDENTICA tanto com
+  `sql_mode` global `STRICT_ALL_TABLES` quanto `''` (vazio/nao estrito) --
+  confirmado controle negativo em paralelo (MySQL puro: erro `1264 Out
+  of range` em modo estrito, saturacao silenciosa para `32767` em modo
+  nao estrito), provando que a protecao da aplicacao nunca depende do
+  `sql_mode` da sessao. Prova negativa: validacao central
+  temporariamente removida de `preencherManualCrlv()`, suite HTTP caiu
+  de 137/137 para 106/137 (31 falhas exatas nos casos de faixa/magnitude
+  fora do escopo da regra de sinal `> 0` ja existente), revertido a 100%
+  com hash MD5 identico antes/depois. 11 suites de regressao
+  reexecutadas sem nenhuma queda: matriz de tipos VIO 622/622 (era
+  622/622), 80/80, 21/21, 47/47, 9/9, 16/16, 10/10, 11/11, 11/11, 23/23,
+  22/22 -- fluxo automatico via VIO Decode confirmado intocado.
+  `TrelloClient.php`/`tools/trello-cli.php` confirmados byte-identicos a
+  `HEAD` via `git hash-object`. Zero credencial/chamada real ao
+  VIO/Serpro/Talent/dado pessoal real usado, zero commit/push nesta
+  etapa. Escopo: `app/Rn/DocumentoRn.php` e
+  `app/Controller/DocumentoController.php` (indispensavel, conforme
+  decisao de design documentada); nenhum teste novo commitado no
+  repositorio (o teste HTTP/MANUAL real foi executado via script QA
+  isolado no scratchpad da sessao, descartado ao final -- avaliado como
+  suficiente para a evidencia exigida sem introduzir infraestrutura
+  permanente de `php -S`/banco descartavel na suite `tests/manual/`
+  existente, que hoje testa `DocumentoRn`/`DocumentoController`
+  diretamente via PHP, nunca via HTTP real). Ver
+  `docs/handoffs/2026-09-20-vio-crlv-manual-exercicio-validacao.md`.
 - ~~**BLOQUEANTE, achado do `/03-revisao` independente de
   `vio-hardening-sem-credenciais` (2026-09-20)**: `DocumentoRn.php`
   (`validarCrlv()`, ~linha 313) -- `exercicio=2026.9` (float) e
@@ -4336,3 +4416,78 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   liberada para `/04-commit-e-push`.** Cartao Trello mantido em
   "Sprint Bruno - Fazendo [Semanal]" ate a confirmacao do push:
   `card_id 6ab0152e2a4dd7c9dc24d685`.
+- 2026-09-20 -- `/01-implementacao` da nova demanda
+  `vio-crlv-manual-exercicio-validacao` (complementar, resolve o achado
+  NAO bloqueante registrado no `/03-revisao` de
+  `vio-crlv-exercicio-faixa-storage`: `preencherManualCrlv()` nao
+  passava pela fronteira de tipo/formato/magnitude/faixa de `exercicio`
+  ja aplicada ao fluxo VIO). Preflight confirmou achado adicional
+  decisivo: `DocumentoController::preencherManual()` fazia cast
+  `(string)` prematuro de `exercicio` ANTES de chamar `preencherManualCrlv()`
+  -- um array/objeto no JSON ja sofreria esse cast dentro do proprio
+  Controller (array vira `"Array"`, aprovado; objeto sem `__toString()`
+  lanca `Error` fatal), antes mesmo de chegar a qualquer fronteira de
+  tipo. Correcao: fronteira UNICA nova `DocumentoRn::validarExercicioCompleto()`
+  (tipo -> formato inteiro exato -> magnitude PHP_INT -> faixa
+  armazenavel de `crlv_ano`) reutilizada por AMBOS os fluxos (VIO e
+  MANUAL, sem duplicar logica); `preencherManualCrlv()` mudou a
+  assinatura de `string $exercicioBruto` para `mixed $exercicioBruto`;
+  `DocumentoController::preencherManual()` parou de fazer cast
+  prematuro de `exercicio` (repassa o valor bruto do JSON), mantendo o
+  mesmo criterio de "ausente" (null/vazio/so espacos) para
+  `Resposta::erro('Dados incompletos')`, HTTP 400 -- qualquer outro
+  valor invalido (tipo incompativel, fracionario, overflow, fora da
+  faixa) e rejeitado de forma controlada por `DocumentoRn`
+  (`pode_avancar=false`, HTTP 200, origem/status_revisao preservados,
+  zero persistencia, `DocumentoVioTipoInvalidoException` nunca escapa
+  da classe), nunca HTTP 500. Testado pelo caminho HTTP/MANUAL REAL
+  (`php -S` + `curl` contra `public/api/documento.php`, banco QA
+  descartavel dedicado destruido ao final): 137/137 assercoes
+  (aceitos: `2026`, `"2026"`, `32767`, `"0032767"`; rejeitados:
+  `32768`, `PHP_INT_MAX`, string gigante, `2026.9`/`"2026.9"`, `2026.0`
+  sintatico literal/`"2026.0"`, notacao cientifica, negativo,
+  booleanos, array, objeto, vazio/`null`/ausente). Teste de `sql_mode`
+  (estrito vs nao estrito, banco QA dedicado): rejeicao da aplicacao
+  identica em ambos os modos, controle negativo confirmando
+  comportamento divergente do MySQL puro (erro estrito vs saturacao
+  silenciosa nao estrita) sem afetar a aplicacao. Prova negativa:
+  validacao removida temporariamente, suite caiu para 106/137 (31
+  falhas exatas), revertido a 100% com hash MD5 identico. 11 suites de
+  regressao reexecutadas sem queda (matriz de tipos VIO 622/622, 80/80,
+  21/21, 47/47, 9/9, 16/16, 10/10, 11/11, 11/11, 23/23, 22/22) --
+  fluxo automatico via VIO Decode confirmado intocado. Escopo:
+  `app/Rn/DocumentoRn.php`, `app/Controller/DocumentoController.php`
+  (indispensavel, decisao de design documentada), este log, o handoff.
+  Nenhum arquivo de teste novo commitado (evidencia HTTP real coletada
+  via script QA isolado no scratchpad da sessao, descartado ao final).
+  `TrelloClient.php`/`tools/trello-cli.php` confirmados byte-identicos
+  a `HEAD` via `git hash-object`. Migrations/schema/`.env`/
+  `VioDecodeClient.php` intocados. Zero credencial/chamada real ao
+  VIO/Serpro/Talent/dado pessoal real usado, zero commit/push nesta
+  etapa. Ver
+  `docs/handoffs/2026-09-20-vio-crlv-manual-exercicio-validacao.md`.
+  **Avaliacao: pronto para `/02-testes`.**
+- 2026-09-20 -- `/02-testes` (2 revisores) + `/03-revisao` final (1
+  revisor) independentes da demanda `vio-crlv-manual-exercicio-validacao`.
+  Ambas as etapas: APROVADO. `/02-testes` (qa-testes +
+  security-especialista): 38+ requisicoes HTTP reais confirmando
+  aceitos/rejeitados corretamente pelo fluxo manual real, `sql_mode`
+  sem diferenca funcional, prova negativa com hash identico,
+  bateria de ataques adversariais (array aninhado, objeto JSON,
+  notacao cientifica/INF, Unicode) todos rejeitados corretamente.
+  1 anomalia isolada nao bloqueante relatada por 1 revisor.
+  `/03-revisao` final (backend-especialista, independente das 2
+  fases anteriores): todos os 12 controles obrigatorios confirmados
+  com execucao real propria; **investigacao conclusiva da anomalia
+  isolada: 25/25 execucoes repetidas do caso `exercicio=32768`
+  rejeitaram corretamente, zero reproducao** -- confirmado artefato
+  transitorio de harness de teste, nao da aplicacao. Escopo restrito
+  exatamente aos 4 arquivos esperados; Trello confirmado
+  byte-identico a HEAD. Zero credencial/chamada real/dado real
+  usado. Ver
+  `docs/handoffs/2026-09-20-vio-crlv-manual-exercicio-validacao.md`,
+  secoes "/02-testes independente" e "/03-revisao final
+  independente". **Demanda `vio-crlv-manual-exercicio-validacao`
+  liberada para `/04-commit-e-push`.** Cartao Trello mantido em
+  "Sprint Bruno - Fazendo [Semanal]" ate a confirmacao do push:
+  `card_id 6ab02761c4533394692c13b3`.
