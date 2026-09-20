@@ -278,7 +278,7 @@ de código/commit/handoff, não por descrição textual.
   23/23, mais os controles obrigatorios de
   `teste_validacao_jpeg_seguro.php`). `TrelloClient.php`/
   `tools/trello-cli.php` confirmados byte-identicos a `HEAD` via
-  `git hash-object`. **OBSERVACAO NAO BLOQUEANTE, fora do escopo
+  `git hash-object`. ~~**OBSERVACAO NAO BLOQUEANTE, fora do escopo
   desta correcao** (nao corrigida, registrada para decisao futura):
   a coluna `crlv_ano` e `SMALLINT` (`sql/schema.sql:85`) -- um valor
   que CABE em `PHP_INT` e e aprovado corretamente por esta fronteira
@@ -296,7 +296,49 @@ de código/commit/handoff, não por descrição textual.
   para "ano" que justifique inventar um valor de corte arbitrario.
   Ver docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md,
   secao "Correcao do achado BLOQUEANTE de magnitude/overflow de
-  exercicio (2026-09-20)".
+  exercicio (2026-09-20)".~~ **RESOLVIDO em 2026-09-20** (demanda
+  `vio-crlv-exercicio-faixa-storage`, complementar): novo metodo
+  privado `validarExercicioDentroDaFaixaArmazenavel()` em
+  `DocumentoRn.php`, chamado logo apos `validarExercicioInteiroExato()`
+  e ANTES de qualquer cast `(int)` usado para persistencia -- valida o
+  TETO tecnico da coluna via nova constante
+  `EXERCICIO_CRLV_MAXIMO_ARMAZENAVEL = 32767` (origem documentada na
+  propria constante: `sql/schema.sql:85`, `crlv_ano SMALLINT` SEM
+  `UNSIGNED` -> SMALLINT SIGNED, faixa `-32768..32767`, reconfirmado no
+  preflight desta demanda em banco descartavel:
+  `INFORMATION_SCHEMA.COLUMNS.COLUMN_TYPE = 'smallint(6)'`). So o teto
+  MAXIMO e validado explicitamente -- o piso tecnico (`-32768`) e mais
+  permissivo que a regra de negocio ja existente e aprovada
+  `$exercicio > 0`, tornando redundante duplicar o piso. Rejeicao
+  ocorre 100% em PHP (mesma excecao interna
+  `DocumentoVioTipoInvalidoException`/fluxo fail-closed ja usado, sem
+  estrategia paralela), nunca depende do `sql_mode` do MySQL. Evidencia
+  real de execucao (fluxo real via `DocumentoRn::validarCrlv()`, mock de
+  `VioDecodeClient::decodificar()`, banco de dev): matriz de testes
+  ampliada de 590 para 622 asserções (`tests/manual/
+  teste_vio_decode_matriz_tipos_campos.php`), 622/622 passando --
+  `32767` (int e string) continua sendo ACEITO e persistido exatamente
+  como `32767` (sem saturacao); `32768` (int e string) e `PHP_INT_MAX`
+  (int e `(string) PHP_INT_MAX`) agora sao REJEITADOS
+  (`pode_avancar=false`, `crlv_ano` nunca persistido, origem permanece
+  `NAO_VALIDADO`); regressao confirmada para `2026`/valores negativos/
+  `"99999999999999999999"` (continuam se comportando como antes desta
+  correcao). Prova negativa executada: chamada de
+  `validarExercicioDentroDaFaixaArmazenavel()` removida temporariamente
+  de `validarCrlv()`, confirmado empiricamente (script isolado,
+  descartado ao final) que sem a validacao `PHP_INT_MAX` volta a ser
+  aceito (`pode_avancar=true`) e o MySQL satura silenciosamente
+  `crlv_ano` para `'32767'` -- exatamente o comportamento que esta
+  correcao elimina; suite de testes tambem detectou a regressao (20/622
+  asserções falharam com a validacao removida, nos 4 casos de faixa
+  invalida com placa sincronizada); revertido a 100% via backup, hash
+  md5 identico antes/depois (`13c027f0e7c50fee00530ca09fe95e2c`), suite
+  completa reexecutada limpa (622/622). 10 suites de regressao
+  reexecutadas sem nenhuma regressao (80/80, 21/21, 47/47, 9/9, 16/16,
+  10/10, 11/11, 11/11, 23/23, 22/22). `TrelloClient.php`/
+  `tools/trello-cli.php` confirmados byte-identicos a `HEAD` via
+  `git hash-object`. Ver
+  docs/handoffs/2026-09-20-vio-crlv-exercicio-faixa-storage.md.
 - ~~**BLOQUEANTE, achado do `/03-revisao` independente de
   `vio-hardening-sem-credenciais` (2026-09-20)**: `DocumentoRn.php`
   (`validarCrlv()`, ~linha 313) -- `exercicio=2026.9` (float) e
@@ -4231,3 +4273,66 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   liberada para `/04-commit-e-push`.** Cartao Trello mantido em
   "Sprint Bruno - Fazendo [Semanal]" ate a confirmacao do push:
   `card_id 6aae9bbdda2fce08c1b7269d`.
+- 2026-09-20 -- `/01-implementacao` da nova demanda
+  `vio-crlv-exercicio-faixa-storage` (complementar, resolve o item de
+  backlog "saturacao da coluna `crlv_ano` SMALLINT" registrado acima).
+  Preflight confirmou empiricamente (banco descartavel, destruido ao
+  final): `sql/schema.sql:85` declara `crlv_ano SMALLINT NULL` SEM
+  `UNSIGNED` -> SMALLINT SIGNED, faixa real `-32768..32767`
+  (`INFORMATION_SCHEMA.COLUMNS.COLUMN_TYPE = 'smallint(6)'`), nenhuma
+  migration altera o tipo. Adicionada nova constante
+  `EXERCICIO_CRLV_MAXIMO_ARMAZENAVEL = 32767` e novo metodo privado
+  `validarExercicioDentroDaFaixaArmazenavel()` em `DocumentoRn.php`,
+  chamado logo apos `validarExercicioInteiroExato()` (ordem cumulativa:
+  tipo -> formato inteiro exato -> magnitude PHP_INT -> faixa
+  armazenavel -> demais regras de negocio) -- reaproveita a mesma
+  `DocumentoVioTipoInvalidoException`/fluxo fail-closed ja usado, sem
+  estrategia paralela; rejeicao ocorre 100% em PHP, antes de qualquer
+  chamada ao DAO. So o teto MAXIMO foi validado (piso tecnico da
+  coluna, `-32768`, e mais permissivo que a regra de negocio ja
+  existente `$exercicio > 0`, tornando redundante duplicar o piso).
+  Matriz de testes ampliada de 590 para 622 asserções
+  (`tests/manual/teste_vio_decode_matriz_tipos_campos.php`), 622/622
+  passando: `32767` (int/string) continua ACEITO e persistido
+  exatamente (sem saturacao); `32768` (int/string) e `PHP_INT_MAX`
+  (int/`(string) PHP_INT_MAX`) agora REJEITADOS
+  (`pode_avancar=false`, zero persistencia, origem preservada);
+  regressao confirmada para `2026`, negativos e
+  `"99999999999999999999"`. Prova negativa executada: validacao
+  removida temporariamente, confirmado empiricamente via script
+  isolado que `PHP_INT_MAX` volta a ser aceito e o MySQL satura
+  `crlv_ano` para `'32767'` silenciosamente; suite tambem detectou a
+  regressao (20/622 falhas nos 4 casos de faixa invalida); revertido a
+  100% via backup, hash md5 identico antes/depois
+  (`13c027f0e7c50fee00530ca09fe95e2c`), suite completa reexecutada
+  limpa (622/622). 10 suites de regressao reexecutadas sem nenhuma
+  regressao (80/80, 21/21, 47/47, 9/9, 16/16, 10/10, 11/11, 11/11,
+  23/23, 22/22). `TrelloClient.php`/`tools/trello-cli.php` confirmados
+  byte-identicos a `HEAD` via `git hash-object`. Zero
+  credencial/chamada real ao VIO/Serpro/Talent/dado pessoal real
+  usado, zero commit/push nesta etapa. Ver
+  `docs/handoffs/2026-09-20-vio-crlv-exercicio-faixa-storage.md`.
+- 2026-09-20 -- `/02-testes` (2 revisores) + `/03-revisao` final (1
+  revisor) independentes da demanda `vio-crlv-exercicio-faixa-storage`.
+  Ambas as etapas: APROVADO. `/02-testes` (qa-testes +
+  security-especialista): 141 casos de fronteira confirmados pelo
+  fluxo real; teste critico de `sql_mode` executado (banco
+  descartavel dedicado, 2 sessoes com modo diferente) confirmando
+  que a aplicacao rejeita `32768`/`PHP_INT_MAX` de forma identica em
+  ambos os modos, nunca dependendo do MySQL; prova negativa em copia
+  isolada com hash identico; 622/622 + 10 suites de regressao
+  reconfirmadas. `/03-revisao` final (backend-especialista,
+  independente das 2 fases anteriores): todos os 14 controles
+  obrigatorios confirmados com execucao real propria; escopo restrito
+  exatamente aos 4 arquivos esperados; Trello confirmado
+  byte-identico a HEAD. Achado novo registrado, nao bloqueante, fora
+  do escopo desta demanda: `preencherManualCrlv()` (fluxo manual) nao
+  passa pela nova fronteira de faixa/magnitude -- gap pre-existente,
+  nao regressao, decisao futura do usuario. Zero credencial/chamada
+  real/dado real usado. Ver
+  `docs/handoffs/2026-09-20-vio-crlv-exercicio-faixa-storage.md`,
+  secoes "/02-testes independente" e "/03-revisao final
+  independente". **Demanda `vio-crlv-exercicio-faixa-storage`
+  liberada para `/04-commit-e-push`.** Cartao Trello mantido em
+  "Sprint Bruno - Fazendo [Semanal]" ate a confirmacao do push:
+  `card_id 6ab0152e2a4dd7c9dc24d685`.
