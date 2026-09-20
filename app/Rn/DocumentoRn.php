@@ -379,10 +379,54 @@ class DocumentoRn
         return $avaliacao;
     }
 
-    public function preencherManualCrlv(array $atendimento, string $placaBruta, string $exercicioBruto, string $ufBruta, string $rntcBruto, string $tipoBruto): array
+    /**
+     * $exercicioBruto e `mixed` DE PROPOSITO -- o cast prematuro para
+     * `string` foi removido de `DocumentoController::preencherManual()`
+     * especificamente para este campo (demanda
+     * vio-crlv-manual-exercicio-validacao, 2026-09-20). Antes dessa
+     * mudanca, um valor de `exercicio` vindo como array/objeto no JSON da
+     * requisicao ja sofria `(string)` dentro do PROPRIO Controller --
+     * array vira a string literal "Array" (so warning, nunca excecao,
+     * seria aprovado como dado valido) e objeto sem `__toString()`
+     * lancaria `Error` fatal ANTES mesmo de chegar aqui. Recebendo o
+     * valor bruto (mixed), a fronteira de tipo/formato/magnitude/faixa
+     * (`validarExercicioCompleto()`) decide de forma controlada e
+     * uniforme, sem cast implicito e sem `Error` fatal, exatamente como
+     * ja acontece para o fluxo automatico via VIO Decode.
+     */
+    public function preencherManualCrlv(array $atendimento, string $placaBruta, mixed $exercicioBruto, string $ufBruta, string $rntcBruto, string $tipoBruto): array
     {
         $placa = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $placaBruta));
-        $exercicio = is_numeric($exercicioBruto) ? (int) $exercicioBruto : 0;
+        $origemAtual = $atendimento['crlv_origem_validacao'] ?? 'NAO_VALIDADO';
+        $statusRevisaoAtual = $atendimento['crlv_status_revisao'] ?? 'OK';
+
+        try {
+            // Mesma fronteira UNICA (tipo -> formato inteiro exato ->
+            // magnitude PHP_INT -> faixa armazenavel de crlv_ano) ja usada
+            // pelo fluxo automatico via VIO Decode -- ver
+            // validarExercicioCompleto(). Nenhuma logica duplicada.
+            $exercicioValidado = $this->validarExercicioCompleto($exercicioBruto, 'crlv_manual', 'exercicio');
+        } catch (DocumentoVioTipoInvalidoException $e) {
+            // So o marcador categorizado (documento/campo/tipo PHP) vai ao
+            // log -- nunca o valor recebido, nunca stack trace. A
+            // excecao NUNCA escapa desta classe (mesmo invariante do fluxo
+            // VIO) -- o Controller so ve o retorno normal de
+            // pode_avancar=false, nunca uma excecao/HTTP 500. Nenhum dado
+            // (exercicio ou qualquer outro campo) e persistido; origem e
+            // status_revisao permanecem exatamente os anteriores.
+            error_log($e->getMessage());
+
+            return [
+                'ok' => false,
+                'pode_avancar' => false,
+                'motivo' => 'Exercicio do CRLV nao informado/invalido',
+                'aviso_trial' => false,
+                'origem' => $origemAtual,
+                'status_revisao' => $statusRevisaoAtual,
+            ];
+        }
+
+        $exercicio = is_numeric($exercicioValidado) ? (int) $exercicioValidado : 0;
         $uf = strtoupper(trim($ufBruta));
         $rntc = trim($rntcBruto);
         $tipo = trim($tipoBruto);
@@ -559,11 +603,38 @@ class DocumentoRn
      */
     private function extrairCampoNumerico(array $dadosBrutos, string $documento, string $campo): int|float|string|null
     {
-        if (!array_key_exists($campo, $dadosBrutos) || $dadosBrutos[$campo] === null) {
+        if (!array_key_exists($campo, $dadosBrutos)) {
             return null;
         }
 
-        $valor = $dadosBrutos[$campo];
+        return $this->validarTipoNumerico($dadosBrutos[$campo], $documento, $campo);
+    }
+
+    /**
+     * Fronteira de TIPO (nao de conteudo) para um valor 'numerico' --
+     * extraida de dentro de extrairCampoNumerico() na demanda
+     * vio-crlv-manual-exercicio-validacao (2026-09-20) para poder ser
+     * reutilizada tambem pelo fluxo de preenchimento MANUAL do operador
+     * (que nao possui um array `$dadosBrutos` vindo da VIO para extrair
+     * de -- recebe o valor bruto do JSON da requisicao diretamente). Mesma
+     * regra, mesmo comportamento, agora com UMA UNICA implementacao
+     * compartilhada pelos dois chamadores (extrairCampoNumerico() para o
+     * fluxo VIO, validarExercicioCompleto() para o fluxo manual) -- nunca
+     * duas copias divergentes da mesma checagem.
+     *
+     * Aceita string, int, float, ou ausencia/null (identico ao
+     * comportamento anterior desta checagem, documentado em
+     * extrairCampoNumerico()). REJEITA estruturalmente array, objeto/
+     * stdClass, bool, recurso -- inclusive quando vindos diretamente do
+     * `json_decode` do corpo de uma requisicao HTTP (ex.: o operador
+     * enviando `"exercicio": [1,2,3]` ou `"exercicio": true` no JSON de
+     * preencher-manual), nao apenas de uma resposta da VIO Decode.
+     */
+    private function validarTipoNumerico(mixed $valor, string $documento, string $campo): int|float|string|null
+    {
+        if ($valor === null) {
+            return null;
+        }
 
         if (!is_int($valor) && !is_float($valor) && !is_string($valor)) {
             throw new DocumentoVioTipoInvalidoException($documento, $campo, get_debug_type($valor));
@@ -766,6 +837,42 @@ class DocumentoRn
         if ($valorParaComparacao > self::EXERCICIO_CRLV_MAXIMO_ARMAZENAVEL) {
             throw new DocumentoVioTipoInvalidoException($documento, $campo, 'numero_fora_da_faixa_armazenavel_crlv_ano');
         }
+
+        return $valor;
+    }
+
+    /**
+     * Fronteira UNICA e completa do campo `exercicio` do CRLV -- tipo
+     * (`validarTipoNumerico()`) -> formato de inteiro exato
+     * (`validarExercicioInteiroExato()`) -> magnitude compativel com
+     * PHP_INT (`caberEmPhpInt()`, chamado por dentro do passo anterior) ->
+     * faixa efetivamente armazenavel de `crlv_ano`
+     * (`validarExercicioDentroDaFaixaArmazenavel()`). Demanda
+     * vio-crlv-manual-exercicio-validacao (2026-09-20): antes desta
+     * correcao, `preencherManualCrlv()` (fluxo de preenchimento MANUAL
+     * pelo operador do totem) usava so `is_numeric() ? (int) : 0`, sem
+     * NENHUMA das 4 fronteiras acima -- um valor fracionario truncava
+     * silenciosamente, um valor fora de PHP_INT ou fora da faixa de
+     * `crlv_ano` nao era barrado antes da persistencia (achado registrado
+     * no /03-revisao de `vio-crlv-exercicio-faixa-storage`).
+     *
+     * UNICO ponto de entrada desta cadeia de validacao -- chamado tanto
+     * por `validarCrlv()` (fluxo automatico via VIO Decode, indiretamente
+     * por meio de `extrairCampoNumerico()` + as duas chamadas seguintes)
+     * quanto por `preencherManualCrlv()` (fluxo manual, chamado
+     * DIRETAMENTE aqui, ja que nao ha um array `$dadosBrutos` de onde
+     * extrair). Nenhuma logica de validacao e duplicada entre os dois
+     * fluxos -- ambos executam exatamente os mesmos 3 metodos privados,
+     * na mesma ordem, com o mesmo comportamento de fail-closed via
+     * `DocumentoVioTipoInvalidoException` (nunca escapa desta classe --
+     * SEMPRE capturada pelo chamador, exatamente como ja acontecia no
+     * fluxo VIO).
+     */
+    private function validarExercicioCompleto(mixed $valorBruto, string $documento, string $campo): int|string|null
+    {
+        $valor = $this->validarTipoNumerico($valorBruto, $documento, $campo);
+        $valor = $this->validarExercicioInteiroExato($documento, $campo, $valor);
+        $valor = $this->validarExercicioDentroDaFaixaArmazenavel($documento, $campo, $valor);
 
         return $valor;
     }

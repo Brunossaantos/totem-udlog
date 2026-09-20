@@ -363,7 +363,18 @@ class DocumentoController
                 $resultado = $this->documentoRn->preencherManualCnh($atendimento, $nome, $cpf, $validade);
             } else {
                 $placa = (string) ($entrada['placa'] ?? '');
-                $exercicio = (string) ($entrada['exercicio'] ?? '');
+                // NAO faz cast prematuro de exercicio para string aqui --
+                // demanda vio-crlv-manual-exercicio-validacao (2026-09-20):
+                // um valor array/objeto no JSON ja sofreria (string) NESTE
+                // ponto, virando a string "Array" (aprovada como dado
+                // valido, so warning) ou lancando Error fatal (objeto sem
+                // __toString()), ANTES mesmo de chegar a fronteira central
+                // de tipo/formato/magnitude/faixa em DocumentoRn. O valor
+                // bruto (mixed) e repassado como veio do JSON; quem decide
+                // o que fazer com cada tipo e
+                // DocumentoRn::validarExercicioCompleto() (mesma fronteira
+                // reutilizada pelo fluxo automatico via VIO Decode).
+                $exercicioBruto = $entrada['exercicio'] ?? null;
                 $uf = (string) ($entrada['uf'] ?? '');
                 $rntc = (string) ($entrada['rntc'] ?? '');
                 $tipoVeiculo = (string) ($entrada['tipo_veiculo'] ?? '');
@@ -386,11 +397,24 @@ class DocumentoController
                     $tipoVeiculo = trim((string) ($atendimento['crlv_tipo_veiculo'] ?? ''));
                 }
 
-                if ($placa === '' || $exercicio === '' || $uf === '' || $rntc === '' || $tipoVeiculo === '') {
+                // "Ausente" para exercicio cobre so null/string vazia (ou
+                // so espacos) -- os MESMOS casos ja tratados como "Dados
+                // incompletos" para os demais campos deste endpoint. Nao
+                // decide nada sobre tipo/formato/magnitude/faixa aqui --
+                // isso e responsabilidade exclusiva da fronteira central em
+                // DocumentoRn (validarExercicioCompleto()), nunca duplicada
+                // neste Controller. Um array/objeto/bool/numero fora da
+                // faixa NAO e "ausente" -- segue adiante e e rejeitado de
+                // forma controlada (pode_avancar=false) pela fronteira
+                // central, nunca aqui.
+                $exercicioAusente = $exercicioBruto === null
+                    || (is_string($exercicioBruto) && trim($exercicioBruto) === '');
+
+                if ($placa === '' || $exercicioAusente || $uf === '' || $rntc === '' || $tipoVeiculo === '') {
                     Resposta::erro('Dados incompletos');
                 }
 
-                $resultado = $this->documentoRn->preencherManualCrlv($atendimento, $placa, $exercicio, $uf, $rntc, $tipoVeiculo);
+                $resultado = $this->documentoRn->preencherManualCrlv($atendimento, $placa, $exercicioBruto, $uf, $rntc, $tipoVeiculo);
             }
 
             $this->atendimentoDao->marcarProcessamentoConcluido($idAtendimento, $tipo);
