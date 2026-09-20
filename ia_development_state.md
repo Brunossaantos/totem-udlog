@@ -223,6 +223,247 @@ de código/commit/handoff, não por descrição textual.
 
 #### 1. PENDENTE — AÇÃO TÉCNICA
 
+- ~~**BLOQUEANTE, achado do `/03-revisao` curta independente de
+  `vio-hardening-sem-credenciais` (2026-09-20)**: o novo metodo
+  `validarExercicioInteiroExato()` em `DocumentoRn.php` (introduzido
+  na correcao do achado anterior) usa regex `/^-?\d+$/` que valida
+  so o FORMATO lexical (sequencia de digitos), nunca se o valor
+  numerico cabe em `PHP_INT`. Uma string de digitos maior que
+  `PHP_INT_MAX` (ex. `"99999999999999999999"`) passa incolume por
+  essa fronteira, chega ao cast `(int)` ja existente e SATURA
+  SILENCIOSAMENTE para `PHP_INT_MAX` (comportamento documentado do
+  PHP) -- valor `> 0`, passa pela regra de faixa, e e APROVADO. A
+  gravacao no MySQL satura de novo (coluna `SMALLINT`) para `32767`.
+  Reproduzido pelo fluxo real em banco descartavel pelo
+  `security-especialista`: `pode_avancar=true`, `origem=VIO_TRIAL`,
+  `crlv_ano='32767'` -- exercicio fantasioso aprovado sem
+  sinalizacao de revisao manual. O metodo (nomeado "InteiroExato")
+  nao cumpre a garantia de magnitude, so cobre fracionario/notacao
+  cientifica/tipo.~~ **CORRIGIDO em 2026-09-20** (rodada final e
+  curta de `/01-implementacao`, restrita a este achado): novo metodo
+  privado `caberEmPhpInt()` em `DocumentoRn.php`, chamado por
+  `validarExercicioInteiroExato()` logo apos a checagem lexical
+  `/^-?\d+$/` -- compara a string de digitos (sinal separado,
+  normalizacao de zero a esquerda SO para a comparacao de magnitude,
+  valor original devolvido intacto) por COMPRIMENTO e, quando empata,
+  LEXICOGRAFICAMENTE contra `(string) PHP_INT_MAX`/`|PHP_INT_MIN|`,
+  SEM jamais converter a string para int/float (evita o proprio
+  overflow que a validacao previne). Decisao registrada:
+  NAO usar `filter_var(..., FILTER_VALIDATE_INT)` — comparacao
+  lexicografica manual e mais auditavel e nao depende do parsing
+  interno da extensao para a garantia central ("nunca converte a
+  string gigante para numero"). Decisao sobre teto de negocio:
+  investigado e confirmado que NAO existe teto superior de negocio
+  documentado para "ano" alem de `$exercicio > 0` -- por isso
+  `PHP_INT_MAX` como `int` nativo (ou `string` igual a
+  `(string) PHP_INT_MAX`) continua sendo ACEITO por esta fronteira
+  (cabe tecnicamente em `PHP_INT`), nenhum teto arbitrario foi
+  inventado sem contrato. Evidencia real de execucao: matriz de
+  testes ampliada de 556 para 590 asserções (`tests/manual/
+  teste_vio_decode_matriz_tipos_campos.php`), 590/590 passando --
+  confirma que `"99999999999999999999"`, `(string) PHP_INT_MAX + 1`
+  (`"9223372036854775808"`), `PHP_INT_MIN - 1`
+  (`"-9223372036854775809"`) e uma sequencia de 200 digitos sao
+  REJEITADOS (`pode_avancar=false`, `crlv_ano` nunca persistido, nem
+  saturado para `32767`/`PHP_INT_MAX`), enquanto `PHP_INT_MAX` nativo
+  e a string equivalente continuam sendo ACEITOS (sem teto de negocio
+  documentado). Prova negativa executada: checagem de magnitude
+  removida temporariamente, 4/590 asserções passaram a FALHAR
+  (exatamente as 4 de "motivo e a mensagem generica de estrutura
+  invalida" dos 4 casos de overflow), confirmando deteccao real;
+  revertido a 100% via backup, hash md5 identico antes/depois
+  (`f9567bb36fad9e87ae84bc44cfc80948`), suite completa reexecutada
+  limpa (590/590). 11 suites de regressao reexecutadas sem nenhuma
+  regressao (80/80, 21/21, 47/47, 9/9, 16/16, 10/10, 11/11, 11/11,
+  23/23, mais os controles obrigatorios de
+  `teste_validacao_jpeg_seguro.php`). `TrelloClient.php`/
+  `tools/trello-cli.php` confirmados byte-identicos a `HEAD` via
+  `git hash-object`. **OBSERVACAO NAO BLOQUEANTE, fora do escopo
+  desta correcao** (nao corrigida, registrada para decisao futura):
+  a coluna `crlv_ano` e `SMALLINT` (`sql/schema.sql:85`) -- um valor
+  que CABE em `PHP_INT` e e aprovado corretamente por esta fronteira
+  (que so valida capacidade de `PHP_INT`, nunca capacidade de coluna
+  de banco) ainda pode ser silenciosamente saturado pelo MySQL na
+  gravacao quando o `sql_mode` do servidor nao inclui
+  `STRICT_TRANS_TABLES` -- confirmado empiricamente neste ambiente de
+  dev (`sql_mode` atual:
+  `NO_ZERO_IN_DATE,NO_ZERO_DATE,NO_ENGINE_SUBSTITUTION`, sem modo
+  estrito): `PHP_INT_MAX` gravado em `crlv_ano` resulta em `'32767'`
+  no banco, sem excecao. Nao corrigido nesta rodada -- alterar
+  schema/DB esta fora do escopo explicito desta demanda (arquivos
+  autorizados: so `DocumentoRn.php`/teste/handoff/
+  `ia_development_state.md`), e nao ha teto de negocio documentado
+  para "ano" que justifique inventar um valor de corte arbitrario.
+  Ver docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md,
+  secao "Correcao do achado BLOQUEANTE de magnitude/overflow de
+  exercicio (2026-09-20)".
+- ~~**BLOQUEANTE, achado do `/03-revisao` independente de
+  `vio-hardening-sem-credenciais` (2026-09-20)**: `DocumentoRn.php`
+  (`validarCrlv()`, ~linha 313) -- `exercicio=2026.9` (float) e
+  `exercicio="2026.9"` (string) sao aprovados normalmente
+  (`pode_avancar=true`, `origem=VIO_TRIAL`, `status_revisao=OK`) e
+  persistidos em `crlv_ano` como `2026` -- a parte fracionaria e
+  descartada pelo cast `(int)` ja existente SEM NENHUMA sinalizacao
+  de perda de precisao. A fronteira de tipo desta demanda protege
+  contra tipos estruturalmente incompativeis (array/objeto/bool),
+  mas nao contra imprecisao de CONTEUDO dentro de um tipo aceito.
+  Reproduzido pelo fluxo real em banco descartavel pelo
+  `backend-especialista`, apos uma rodada anterior ter descartado
+  esse mesmo cenario como "observacao nao bloqueante, pre-existente"
+  -- reclassificado para BLOQUEANTE por instrucao explicita do
+  usuario de nao aceitar descarte sem reproducao real.~~ -- IMPLEMENTADA
+  em 2026-09-20 (rodada curta final de `/01-implementacao`, restrita ao
+  campo `exercicio`): novo metodo privado
+  `validarExercicioInteiroExato()` em `DocumentoRn.php`, chamado logo
+  apos `extrairCampoNumerico()` dentro do `try` de `validarCrlv()` --
+  aceita SO `int` nativo (sempre exato) ou `string` no formato
+  `/^-?\d+$/` (mesmo formato que `(int)` converte sem perda de
+  precisao, sinal negativo aceito de proposito para NAO usurpar a
+  regra de FAIXA `$exercicio > 0` ja existente em `avaliarCrlv()`,
+  intocada); rejeita qualquer `float` (fracionario, notacao cientifica,
+  `NaN`/`Infinito`, overflow de int para float, e tambem `2026.0`/
+  `"2026.0"` matematicamente inteiro) e qualquer `string` com ponto
+  decimal/notacao cientifica/espaco em branco (prefixo ou sufixo)/
+  string vazia -- reaproveita a MESMA excecao interna
+  `DocumentoVioTipoInvalidoException` e o MESMO caminho de fail-closed
+  ja usado para tipo incompativel (invalida a resposta VIO inteira do
+  documento, nunca persiste parcial, nunca marca VIO_TRIAL/
+  VIO_VALIDADO, fallback manual disponivel). Decisao sobre `2026.0`/
+  `"2026.0"`: investigado `docs/manual_vio_decode.md` (linhas 126-130)
+  -- o unico teste real observado de `exercicio` (Trial,
+  `crlv-demo.bin`) retornou o placeholder literal string `"xxxxx"`,
+  nunca um numero -- SEM EVIDENCIA de formato float real, rejeitado por
+  esquema estrito. Testes novos em
+  `tests/manual/teste_vio_decode_matriz_tipos_campos.php` (453 -> 556
+  asserções, 103 novas, 556/556 passando) cobrindo aceitos (int/string
+  validos, zero a esquerda, valor grande sem overflow) e rejeitados
+  (fracionario float/string, notacao cientifica float/string, `2026.0`/
+  `"2026.0"`, overflow int->float, string vazia/espaco/sufixo) com
+  confirmacao de zero persistencia parcial (`crlv_ano` nunca gravado
+  truncado) via recarga do banco; regressao explicita confirmando que
+  valor negativo (int/string) continua sendo rejeitado pela regra de
+  FAIXA JA EXISTENTE (mensagem de conteudo, nao a de estrutura
+  invalida) -- a fronteira nova nao intercepta sinal. Prova negativa
+  executada (reversao temporaria da chamada de
+  `validarExercicioInteiroExato()`, 12/556 asserções falharam
+  detectando a regressao exatamente nos 12 casos de conteudo
+  fracionario/cientifico/overflow/espaco, revertido a 100% com hash
+  MD5 identico antes/depois). 10 suites de regressao pre-existentes
+  reexecutadas sem nenhuma queda: 80/80, 21/21, 47/47, 9/9, 16/16,
+  10/10, 11/11, 11/11, 23/23, 22/22. `DocumentoController.php`, `.env`,
+  dependencias, contrato HTTP/JSON, allowlists, `ehValorPlaceholder()`,
+  banco/schema, `preencherManualCrlv()` (fora do escopo do achado --
+  fluxo manual, nao VIO), `TrelloClient.php`/`tools/trello-cli.php`
+  (confirmados byte-identicos a HEAD via `git hash-object`) --
+  intocados. Ver
+  docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md, secao
+  "Correcao final do achado BLOQUEANTE de exercicio (2026-09-20)".
+- ~~**BLOQUEANTE, achado do `/02-testes` independente de
+  `vio-hardening-sem-credenciais` (2026-09-19)**: `DocumentoRn.php`
+  linha 127 (CNH `nome`) e linhas 210/212/217/218 (CRLV
+  `placa`/`uf`/`rntc`/`tipo`) fazem cast `(string)` sem `is_string()`
+  previo -- se o campo vier como array aninhado (resposta VIO
+  malformada/adulterada), o cast emite so um `E_WARNING` (nao
+  excecao) e produz a string literal `"Array"`, que passa por todas
+  as validacoes e e aprovada e persistida no banco como dado
+  valido~~ -- IMPLEMENTADA em 2026-09-19 (rodada curta de
+  `/01-implementacao`): nova fronteira explicita de tipo/esquema em
+  `DocumentoRn.php` (`ESQUEMA_TIPOS_CNH`/`ESQUEMA_TIPOS_CRLV`,
+  `extrairCampoTexto()`/`extrairCampoNumerico()`) valida
+  `is_string()`/tipo ANTES de qualquer cast, para todos os campos das
+  allowlists (nao so os 5 citados no achado). Tipo incompatibilidade
+  invalida a resposta VIO inteira do documento, nunca marca
+  VIO_TRIAL/VIO_VALIDADO, nunca persiste parcial. Confirmado por 3
+  revisores independentes em nova rodada de `/02-testes`: 453/453 na
+  matriz nova por campo, prova negativa com mutacao/reversao
+  confirmada por hash identico, testes proprios em banco descartavel
+  confirmando atomicidade (5 variacoes) e ausencia de sobrescrita de
+  dado pre-existente. Ver
+  docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md.
+- ~~**MODERADO, achado do `/02-testes` independente de
+  `vio-hardening-sem-credenciais` (2026-09-19)**: `dados` como
+  `stdClass`, ou `cpf`/`data_validade` como array aninhado, lancam
+  `Error`/`TypeError` reais que ESCAPAM de `DocumentoRn`~~ --
+  IMPLEMENTADA em 2026-09-19 (mesma rodada): a mesma fronteira de
+  tipo do achado acima tambem valida `is_array($resultadoVio['dados'])`
+  e `is_array($dados['data'] ?? $dados)` no envelope inteiro antes de
+  qualquer acesso por chave, e usa `is_string()`/tipo explicito para
+  `cpf`/`data_validade` -- nova excecao interna
+  `DocumentoVioTipoInvalidoException`, capturada DENTRO de
+  `validarCnh()`/`validarCrlv()` (nunca escapa para o Controller,
+  nao depende mais do catch generico acidental). Confirmado por
+  teste controlado dedicado (3 revisores) que a excecao nunca
+  ultrapassa a camada de regra de negocio. Ver mesmo handoff.
+- ~~**NOVO, achado do `/00-planejamento` de `vio-hardening-sem-credenciais`
+  (2026-09-19)**: `VioDecodeClient.php:105` -- mensagem de erro de
+  falha de autenticacao OAuth2 (inclui HTTP status/curl errno da
+  chamada backend->VIO, ex. "Falha ao obter token OAuth2 (HTTP 401,
+  curl errno 0)") propaga ate o campo `motivo` do resultado, devolvido
+  ao totem via `Resposta::sucesso()` em `DocumentoController.php:285`
+  -- detalhe tecnico de integracao chega ao HTTP response do cliente
+  (nao so ao log de servidor). Sem credencial/CPF/QR, mas contraria a
+  regra de nunca expor detalhe interno ao cliente. Severidade
+  baixa/atencao.~~ -- IMPLEMENTADA em 2026-09-19 (`/01-implementacao`
+  do grupo 1): `VioDecodeClient::MENSAGEM_ERRO_GENERICA` fixa e
+  sanitizada devolvida para QUALQUER falha tecnica (autenticacao,
+  rede/timeout, HTTP 4xx/5xx, JSON invalido, tamanho excedido) --
+  nunca mais status HTTP/curl errno/mensagem bruta chegam ao campo
+  `motivo`. Detalhe tecnico so em log categorizado
+  (`logFalhaTecnica()`, mesmo padrao de
+  `NotaController::logFalhaBancoPdo()`), nunca a mensagem bruta da
+  excecao/resposta externa. Testado com 80/80 asserções em
+  `tests/manual/teste_vio_decode_robustez.php` (varredura de HTTP
+  400/401/404/415/422/429/500/502/JSON malformado/vazio via mock
+  server HTTP local real), prova negativa de deteccao de vazamento
+  revertida e confirmada. Ver
+  docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md.
+- ~~**NOVO, achado do `/00-planejamento` de `vio-hardening-sem-credenciais`
+  (2026-09-19)**: `VioDecodeClient::chamarDecode()` nao tem limite de
+  tamanho de resposta HTTP antes do `json_decode` (`CURLOPT_
+  RETURNTRANSFER` sem `CURLOPT_MAXFILESIZE_LARGE`/checagem de
+  `Content-Length`) -- resposta anormalmente grande seria carregada
+  integralmente em memoria antes do parse. Severidade baixa (exige VIO/
+  MITM comprometido, mitigado parcialmente pelo timeout de 20s
+  existente).~~ -- IMPLEMENTADA em 2026-09-19 (`/01-implementacao` do
+  grupo 1): teto de 10 MB (`TAMANHO_MAXIMO_RESPOSTA_BYTES`) aplicado
+  ANTES do `json_decode`, via `CURLOPT_WRITEFUNCTION` customizado que
+  aborta a transferencia (CURLE_WRITE_ERROR) assim que o acumulado
+  ultrapassa o teto -- corpo excedente NUNCA e integralmente carregado
+  em memoria. Justificativa do valor documentada no proprio codigo
+  (docstring da constante): nenhum tamanho real de resposta de
+  Producao com `image` foi observado (pendencia de grupo 2), 10 MB e
+  margem generosa (5-10x) sobre o pior caso plausivel de uma foto de
+  documento em Base64. Testado EXATAMENTE no limite (aceita) e 1 byte
+  acima (rejeita) via mock server HTTP local real, cURL de verdade —
+  `tests/manual/teste_vio_decode_robustez.php`.
+- **NOVO, observacao do `/00-planejamento` de `vio-hardening-sem-credenciais`
+  (2026-09-19)**: `catch (\Throwable $e)` genericos em
+  `DocumentoController.php:248,398` hoje nao propagam `getMessage()`
+  ao cliente (confirmado por leitura), mas sao fragil a regressao
+  futura -- recomendado padronizar para nunca propagar detalhe de
+  excecao generica ao cliente, so ao log (mesmo padrao ja usado em
+  `NotaController`). Nao bloqueante, reforco preventivo. **Ainda
+  PENDENTE** apos `/01-implementacao` de 2026-09-19 -- fora do escopo
+  obrigatorio da rodada (so seria implementado se um teste real
+  demonstrasse falha alcancavel; nenhum teste demonstrou isso). Ver
+  mesmo handoff.
+- ~~**A CONFIRMAR (nao e achado ainda), item da matriz de testes do
+  `/00-planejamento` de `vio-hardening-sem-credenciais` (2026-09-19)**:
+  `DocumentoRn::validarCnh/validarCrlv` acessam campos por
+  `$dadosBrutos[chave] ?? ''` -- se `$dadosBrutos` nao for array
+  (resposta malformada), pode gerar `TypeError`. Nao executado teste
+  ainda para confirmar; registrado como cenario 4 da matriz de testes
+  planejada, a confirmar/corrigir (se real) em `/01-implementacao`.~~
+  -- NAO REPRODUZIDO em 2026-09-19 (`/01-implementacao` do grupo 1):
+  teste empirico isolado confirmou que `?? ''` ja protege
+  completamente contra `$dadosBrutos` nao-array (string/null/
+  int/bool) -- nenhum `TypeError`/warning, resultado sempre `''`
+  (evidencia no handoff). `DocumentoRn.php` NAO foi alterado (decisao
+  correta: nao mudar codigo sem falha real reproduzida). Confirmado
+  tambem fim a fim via `DocumentoRn::validarCnh` com 7 formatos
+  malformados diferentes, sem excecao, sempre resultando em
+  `pode_avancar=false` (fail-closed) -- ver
+  `tests/manual/teste_vio_decode_robustez.php`, cenario [4].
 - ~~**BLOQUEANTE, achado NOVO do /02-testes independente (2a rodada,
   2026-09-18)**: em todos os 7 entrypoints corrigidos na rodada
   anterior, `Dotenv::load()` roda ANTES e FORA do try/catch que
@@ -3683,3 +3924,310 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   do usuario. Cartao Trello mantido em "Sprint Bruno - Fazendo
   [Semanal]" ate a execucao de `/04-commit-e-push`:
   `card_id 6aaca8f164c46e169c806f67`.
+- 2026-09-19 -- `/00-planejamento` da demanda
+  `vio-hardening-sem-credenciais` concluido. 4 especialistas
+  independentes (backend, frontend, security, qa-testes), cada um
+  lendo o codigo real, sem confiar em descricao historica. Confirmado
+  com evidencia de codigo (2 revisores convergentes) que 3 pendencias
+  historicas ja estao genuinamente resolvidas: rebaixamento para
+  MANUAL (`AtendimentoRn::salvarDadosMotorista`), descarte do campo
+  `image` (allowlist positiva e fechada em `DocumentoRn`, mais forte
+  que blocklist pontual), simetria de `ehValorPlaceholder()`
+  CNH/CRLV. Confirmadas como ainda reais: credenciais Trial nao
+  obtidas (grupo 2); correspondencia de `jsQR.binaryData` com QR
+  fisico real (grupo 3). 4 achados NOVOS registrados nesta secao
+  (2 de severidade baixa/atencao implementaveis sem credenciais:
+  mensagem tecnica de autenticacao vazando ao cliente em
+  `VioDecodeClient.php:105`; ausencia de limite de tamanho de
+  resposta HTTP antes do parse; 1 observacao de robustez preventiva
+  em catches genericos; 1 item a confirmar via teste, nao achado
+  ainda -- possivel TypeError em acesso a `$dadosBrutos` malformado).
+  Matriz de 14 cenarios de teste desenhada, reaproveitando o padrao
+  de mock ja existente no projeto (`VioDecodeClientFalso`, injecao de
+  `$env` no construtor) -- nenhum cenario depende de credencial real
+  ou QR fisico. Nenhuma decisao bloqueante identificada para o grupo
+  1 (todos reforcos de baixa complexidade, sem impacto em contrato/
+  regra de negocio). Zero credencial obtida, zero chamada real a
+  VIO/Serpro/Talent, zero documento/CPF/placa/QR real usado, zero
+  alteracao de codigo/banco. Ver
+  `docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md`.
+  Proximo passo: usuario decidir se autoriza `/01-implementacao` do
+  grupo 1 nesta demanda.
+- 2026-09-19 -- `/01-implementacao` do Grupo 1 da demanda
+  `vio-hardening-sem-credenciais` concluida. `app/Rn/VioDecodeClient.php`:
+  (1) mensagem de erro sanitizada e fixa
+  (`MENSAGEM_ERRO_GENERICA`) devolvida para QUALQUER falha tecnica
+  (autenticacao/rede/timeout/HTTP 4xx-5xx/JSON invalido/tamanho
+  excedido) -- nunca mais status HTTP, curl errno, mensagem bruta,
+  URL/host chegam ao campo `motivo`; detalhe tecnico so em log
+  categorizado (`logFalhaTecnica()`, mesmo padrao de
+  `NotaController::logFalhaBancoPdo()`); (2) teto de 10 MB
+  (`TAMANHO_MAXIMO_RESPOSTA_BYTES`) aplicado ANTES do `json_decode` via
+  `CURLOPT_WRITEFUNCTION` customizado (aborta a transferencia ao
+  exceder, nunca carrega o excedente em memoria); (3) possivel
+  `TypeError` de `$dadosBrutos` nao-array (achado 4 do planejamento)
+  reproduzido empiricamente como NAO REAL -- `?? ''` ja protege
+  totalmente -- `DocumentoRn.php` NAO foi alterado (decisao correta,
+  sem mudanca preventiva sem evidencia). Novos artefatos de teste:
+  `tests/manual/mock_vio_server.php` (mock HTTP local, `php -S`, nunca
+  Serpro real) e `tests/manual/teste_vio_decode_robustez.php` (matriz
+  de 14 cenarios do planejamento, 80/80 asserções passando, incluindo
+  limite de tamanho EXATO e 1 byte acima via cURL real contra o mock).
+  Prova negativa obrigatoria executada: leak original reintroduzido
+  temporariamente, detectado pelo teste de sanitizacao, revertido a
+  100% e confirmado via `diff`/`git diff`. Regressao: 8 suites
+  reexecutadas (`teste_vio_decode.php` 21/21,
+  `teste_rebaixamento_manual.php` 45/45,
+  `teste_status_processamento.php` 9/9,
+  `teste_concorrencia_processamento_vio.php` 16/16,
+  `teste_avancar_etapa_expedicao.php` 10/10,
+  `teste_fluxo_recebimento_documentos.php` 11/11,
+  `teste_talent_uf_crlv.php` 11/11,
+  `teste_talent_rntc_tipo_crlv.php` 23/23,
+  `teste_validacao_jpeg_seguro.php` 22/22) -- zero falha, zero
+  regressao. Contrato HTTP/JSON, allowlists, rebaixamento MANUAL,
+  fallback manual, placeholders -- todos preservados (nao alterados).
+  Grupos 2/3 NAO tocados (dependem de credencial Trial/teste fisico).
+  Item "observacao de catches genericos" (achado 3 do planejamento)
+  mantido como pendencia nao-bloqueante (nenhum teste real demonstrou
+  falha alcancavel). Zero credencial obtida/usada, zero chamada real a
+  VIO/Serpro/Talent, zero documento/CPF/placa/QR real, zero commit/
+  push (aguardando `/02-testes`/`/03-revisao`/decisao do usuario). Ver
+  `docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md`, secao
+  "Implementacao do Grupo 1 (2026-09-19)".
+- 2026-09-19 -- `/02-testes` independente da demanda
+  `vio-hardening-sem-credenciais` concluido com veredito PRECISA DE
+  AJUSTE. 3 revisores independentes (qa-testes + backend-especialista
+  + security-especialista, novas instancias). qa-testes APROVADO
+  (sanitizacao/prova negativa real com reversao confirmada por
+  md5sum/fallback/regressoes todas batendo exatamente: 80/80, 21/21,
+  45/45, 9/9, 16/16, 10/10, 11/11, 11/11, 23/23, 22/22).
+  backend-especialista PRECISA DE AJUSTE: limite de 10MB validado em
+  profundidade (14 cenarios, corte por bytes reais nao por
+  Content-Length, corte progressivo, pico de memoria ~26 MiB, sem
+  vazamento entre chamadas) -- SEM achado aqui; porem reproduziu de
+  forma independente 1 achado BLOQUEANTE (cast (string) sem
+  is_string() aprova array aninhado como nome="Array" valido, sem
+  excecao, sem sinalizacao de revisao) e 1 achado MODERADO
+  (stdClass/array aninhado em cpf/data_validade escapam de
+  DocumentoRn, so nao viram fatal error por dependerem de catch
+  generico acidental do Controller). security-especialista PRECISA
+  DE AJUSTE: confirmou de forma independente o mesmo achado
+  bloqueante (classificado la como ATENCAO, mas a severidade mais
+  alta do backend prevalece), allowlist/origem confirmadas corretas
+  para os demais vetores testados. **VEREDITO CONSOLIDADO: PRECISA
+  DE AJUSTE**, por 2 achados novos e reais (nao estavam na lista
+  original do planejamento -- a `/01-implementacao` nao testou campo
+  INTERNO individual sendo array aninhado, so `$dadosBrutos` como um
+  todo). Nenhum vazamento de dado sensivel -- risco e de integridade
+  (nome corrompido aprovado), nao confidencialidade. Trabalho ja
+  implementado (sanitizacao de mensagem, limite de 10MB) reconfirmado
+  correto por 3 revisores. Zero credencial/chamada real/dado real
+  usado nesta rodada. Ver
+  `docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md`, secao
+  "/02-testes independente (2026-09-19)". Demanda retorna para
+  rodada curta de `/01-implementacao` restrita aos 2 achados. Cartao
+  Trello mantido em "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aae9bbdda2fce08c1b7269d`.
+- 2026-09-19 -- Rodada curta de `/01-implementacao` da demanda
+  `vio-hardening-sem-credenciais`, restrita aos 2 achados do
+  `/02-testes` independente anterior. **~~1. BLOQUEANTE: cast
+  `(string)` sem `is_string()` previo em `nome`/`placa`/`uf`/`rntc`/
+  `tipo` permitia array aninhado virar a string literal "Array" e ser
+  aprovado/persistido como dado valido~~ -- CORRIGIDO.** **~~2.
+  MODERADO: `dados`/`cpf`/`data_validade` como stdClass/array
+  aninhado lancavam Error/TypeError reais que escapavam de
+  `DocumentoRn`, so nao explodindo ao cliente por acidente do catch
+  generico do Controller~~ -- CORRIGIDO.** `app/Rn/DocumentoRn.php`:
+  adicionada fronteira EXPLICITA de tipo/esquema
+  (`ESQUEMA_TIPOS_CNH`/`ESQUEMA_TIPOS_CRLV`, documentando 'texto' vs
+  'numerico' para cada campo das allowlists), aplicada ANTES de
+  qualquer cast/trim/normalizacao/persistencia: (a) `dados`/
+  `dados['data']` validados como array via `is_array()` ANTES de
+  qualquer acesso por chave (protege contra stdClass, que faria
+  `$x['data']` lancar `Error` fatal); (b) novos metodos privados
+  `extrairCampoTexto()`/`extrairCampoNumerico()` validam cada campo
+  (nome/cpf/data_validade/placa/uf/rntrc/tipo/exercicio) com
+  `is_string()`/`is_int()`/`is_float()` antes de qualquer uso --
+  array/objeto/bool/int/float sendo coagido a string e agora REJEITADO
+  (lanca `DocumentoVioTipoInvalidoException`, arquivo novo, mensagem
+  SEM valor do payload -- so documento/campo/tipo PHP via
+  `get_debug_type()`); (c) tipo incompativel invalida a resposta VIO
+  INTEIRA daquele documento (nunca so o campo) -- retorna a mesma
+  estrutura de falha (`falhaEstruturaInvalidaCnh()`/
+  `falhaEstruturaInvalidaCrlv()`, mensagem generica fixa
+  `"...dados retornados em formato invalido"`) usada para resposta
+  incompleta: nunca persiste valor parcial, nunca marca origem
+  VIO_TRIAL/VIO_VALIDADO, nunca fica preso em PROCESSANDO, conduz ao
+  mesmo fallback manual ja existente. Exceptions SEMPRE capturadas
+  DENTRO de `DocumentoRn` (try/catch em `validarCnh()`/`validarCrlv()`)
+  -- fluxo NAO depende mais do catch generico
+  `\Throwable`/`DocumentoController.php:247` para sobreviver a resposta
+  VIO malformada (catch do Controller preservado, intocado, nao
+  ampliado -- continua so como camada de seguranca adicional). Regra
+  de conteudo (`ehValorPlaceholder()`, string vazia = "nao informado",
+  `normalizarData()`) preservada sem alteracao -- fronteira nova SO
+  valida tipo, nunca conteudo. `exercicio` (unico campo 'numerico')
+  ja era protegido incidentalmente por `is_numeric()` (array/objeto
+  sempre `false`, sem warning) -- agora protegido por barreira
+  explicita simetrica aos demais campos, invalidando a resposta
+  inteira em vez de silenciosamente zerar. Novo arquivo:
+  `app/Rn/DocumentoVioTipoInvalidoException.php`. Novo teste:
+  `tests/manual/teste_vio_decode_matriz_tipos_campos.php` -- matriz
+  por campo (CNH: nome/cpf/data_validade; CRLV: placa/uf/rntrc/tipo/
+  exercicio) cobrindo array vazio/aninhado (com marcador sintetico
+  `MARCADOR_QA02_*`)/stdClass/inteiro/float/booleano, mais regressao
+  de string vazia/null/placeholder/caminho feliz, mais 3 casos de
+  envelope invalido (`dados` como stdClass, `dados['data']` como
+  stdClass/inteiro) -- **453/453 asserções passando**, incluindo
+  confirmacao direta em banco (recarrega o atendimento apos a chamada)
+  de que `motorista_nome`/colunas `crlv_*` NUNCA sao persistidas como
+  `"Array"` ou com o marcador sintetico, e que `cnh_origem_validacao`/
+  `crlv_origem_validacao` permanecem `NAO_VALIDADO` (nunca
+  VIO_TRIAL/VIO_VALIDADO com dado corrompido). `error_log` redirecionado
+  para arquivo isolado da suite com `display_errors=1`/
+  `error_reporting=E_ALL` explicitos -- confirmado que o log so contem
+  entradas categorizadas (`tipo_recebido=array`/`tipo_recebido=stdClass`,
+  nunca o valor) e ZERO warning de "Array to string conversion"/marcador
+  sintetico. **Mutacao temporaria controlada executada conforme
+  exigido**: `is_string()`/casts revertidos ao codigo vulneravel
+  original em `validarCnh()`/`validarCrlv()`, suite reexecutada --
+  79 de 386 asserções passaram a falhar (regressao detectada:
+  `motorista_nome` voltou a aceitar "Array", `cpf`/`data_validade`/
+  `placa`/`uf`/`rntrc`/`tipo` como stdClass voltaram a lancar TypeError/
+  Error nao capturado) -- revertido a 100% via copia de backup,
+  confirmado `md5sum` identico antes/depois
+  (`fb2d3f3515f7d3424411a08f5b40dbf5`), suite completa reexecutada
+  limpa (453/453) apos a reversao. Regressao: `teste_vio_decode_robustez.php`
+  80/80, `teste_vio_decode.php` 21/21, `teste_status_processamento.php`
+  9/9, `teste_concorrencia_processamento_vio.php` 16/16,
+  `teste_avancar_etapa_expedicao.php` 10/10,
+  `teste_fluxo_recebimento_documentos.php` 11/11,
+  `teste_talent_uf_crlv.php` 11/11, `teste_talent_rntc_tipo_crlv.php`
+  23/23, `teste_validacao_jpeg_seguro.php` 22/22 -- todas batendo
+  exatamente. `teste_rebaixamento_manual.php` exigiu 1 ajuste de
+  manutencao (nao uma falha real): a asserção estatica que contava
+  `substr_count()` de `unset($resultadoVio, $dadosBrutos);` esperando
+  exatamente 2 ocorrencias ficou desatualizada, porque a nova
+  fronteira de tipo introduziu mais ramos de retorno antecipado (cada
+  um corretamente descartando os dados brutos antes de retornar) --
+  assercao reescrita para confirmar que AMBOS `validarCnh()`/
+  `validarCrlv()` descartam em TODOS os caminhos (`>= 1` por metodo,
+  verificado por corpo de funcao via `substr()`, nao mais um numero
+  magico fixo) -- suite final: **47/47** (2 assercoes a mais que as
+  45 originais, refletindo a checagem mais precisa). Caminho feliz
+  (CNH/CRLV 100% validos) confirmado sem nenhuma alteracao de
+  comportamento em todas as suites. `DocumentoController.php`, `.env`,
+  `composer.json`/`composer.lock` -- intocados (confirmado via
+  `git diff --stat`). Zero credencial obtida/usada, zero chamada real
+  a VIO/Serpro/Talent, zero documento/CPF/placa/QR real, zero banco
+  `qa013_*`/`qa_iso2` tocado, zero residuo (confirmado 0 linhas de
+  teste remanescentes em `tb_totem`/`tb_atendimento` apos a rodada),
+  zero commit/push (aguardando nova `/02-testes`). Ver
+  `docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md`, secao
+  "Correcao dos 2 achados do /02-testes independente (2026-09-19)".
+  Cartao Trello mantido em "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aae9bbdda2fce08c1b7269d`.
+- 2026-09-19 -- Nova rodada de `/02-testes` independente da demanda
+  `vio-hardening-sem-credenciais`, focada na correcao dos 2 achados
+  de integridade da rodada anterior. 3 revisores independentes
+  (qa-testes + backend-especialista + security-especialista, novas
+  instancias). Todos APROVADOS: reproducao independente dos 7 casos
+  originalmente vulneraveis sem "Array"/TypeError/Error (33/33 +
+  20/20 asseriosoes proprias adicionais); suite nova de matriz por
+  campo reconfirmada 453/453 (recontagem manual da cobertura, nao
+  apenas aceita); prova negativa com mutacao real + reversao
+  confirmada por hash identico em 2 execucoes independentes; testes
+  de atomicidade/persistencia parcial em banco descartavel dedicado
+  (5 variacoes, incluindo confirmacao de que dado pre-existente
+  nunca e sobrescrito por tentativa rejeitada); excecao interna
+  `DocumentoVioTipoInvalidoException` confirmada por teste
+  controlado como nunca escapando de `DocumentoRn`; todas as 11
+  regressoes batendo exatamente com o esperado (453/453, 80/80,
+  21/21, 47/47, 9/9, 16/16, 10/10, 11/11, 11/11, 23/23, 22/22).
+  **VEREDITO CONSOLIDADO: APROVADO.** 2 observacoes nao bloqueantes
+  registradas como backlog futuro (fora do escopo desta demanda):
+  redacao de 1 asserção em `teste_rebaixamento_manual.php` mais
+  forte do que o que de fato verifica (sem perda de cobertura real
+  confirmada); truncamento silencioso de float em `exercicio` do
+  CRLV, comportamento pre-existente herdado do cast ja existente
+  antes desta demanda. Zero credencial/chamada real/dado real usado
+  nesta rodada. Ver
+  `docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md`,
+  secao "Nova rodada de /02-testes independente, foco correcao de
+  integridade". **Demanda liberada para `/03-revisao`.** Cartao
+  Trello mantido em "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aae9bbdda2fce08c1b7269d`.
+- 2026-09-20 -- `/03-revisao` independente da demanda
+  `vio-hardening-sem-credenciais` concluida com veredito PRECISA DE
+  AJUSTE. 3 revisores independentes (backend-especialista +
+  security-especialista + qa-testes, novas instancias).
+  security-especialista APROVADO (limpeza de escopo confirmada,
+  incluindo Trello byte-identico a HEAD; sanitizacao completa;
+  excecao interna confirmada contida por teste proprio; 1 achado de
+  higiene nao bloqueante -- processo de teste orfao encerrado
+  durante a propria revisao). qa-testes APROVADO (reproducao dos 7
+  casos vulneraveis; matriz de 453 recontada manualmente sem
+  inflacao; prova negativa independente propria com hash identico;
+  11 regressoes reconfirmadas; imprecisao de redacao em asserção de
+  teste classificada ATENCAO por nao criar evidencia de seguranca
+  falsa sobre a protecao primaria). backend-especialista PRECISA DE
+  AJUSTE: confirmou (nao descartou) o achado bloqueante do campo
+  `exercicio` -- truncamento silencioso de float/string fracionaria
+  aprovado sem sinalizacao, reproduzido pelo fluxo real em banco
+  descartavel; demais itens de seu escopo (limite de 10MB,
+  mapeamento de campos, atomicidade) todos aprovados com evidencia
+  real. **VEREDITO CONSOLIDADO: PRECISA DE AJUSTE**, por este unico
+  achado bloqueante. Zero credencial/chamada real/dado real usado
+  nesta rodada. Ver
+  `docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md`, secao
+  "/03-revisao independente (2026-09-20)". Demanda retorna para
+  rodada curta de `/01-implementacao` restrita a este achado. Cartao
+  Trello mantido em "Sprint Bruno - Fazendo [Semanal]":
+  `card_id 6aae9bbdda2fce08c1b7269d`.
+- 2026-09-20 -- `/03-revisao` curta independente da correcao final
+  do campo `exercicio` na demanda `vio-hardening-sem-credenciais`.
+  Revisor independente (security-especialista, nao participou da
+  ultima `/01-implementacao`). VEREDITO: PRECISA DE AJUSTE -- achado
+  BLOQUEANTE novo, reproduzido pelo fluxo real em banco descartavel:
+  `validarExercicioInteiroExato()` valida so o formato lexical
+  (regex), nunca a magnitude -- string de digitos > PHP_INT_MAX
+  satura silenciosamente (PHP para PHP_INT_MAX, coluna MySQL
+  SMALLINT para 32767) e e aprovada como exercicio valido com origem
+  VIO_TRIAL. Restante do escopo revisado sem achados: ordem de
+  validacao, fracionarios/notacao cientifica, sinal negativo
+  (rejeitado pela regra de faixa), zeros a esquerda, Unicode
+  minus/espaco/prefixo-sufixo, atomicidade das demais rejeicoes,
+  matriz de 556 recontada de forma independente, todas as 11
+  regressoes reexecutadas e batendo, escopo confirmado limpo
+  (Trello byte-identico a HEAD). Zero credencial/chamada real/dado
+  real usado. Ver
+  `docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md`, secao
+  "/03-revisao curta independente da correcao final de exercicio".
+  Demanda NAO liberada para `/04-commit-e-push` -- retorna para nova
+  rodada curta de `/01-implementacao` restrita a este achado de
+  magnitude/overflow. Cartao Trello mantido em "Sprint Bruno -
+  Fazendo [Semanal]": `card_id 6aae9bbdda2fce08c1b7269d`.
+- 2026-09-20 -- `/02-testes` (2 revisores) + `/03-revisao` final (1
+  revisor) independentes da correcao de magnitude/overflow de
+  `exercicio`, demanda `vio-hardening-sem-credenciais`. Ambas as
+  etapas: APROVADO. `/02-testes` (qa-testes + security-especialista):
+  algoritmo `caberEmPhpInt()` confirmado matematicamente correto (18
+  casos adversariais proprios), proteção 100% em nivel de aplicacao,
+  prova negativa em copia isolada com hash identico, 590/590 +
+  regressoes reconfirmadas. `/03-revisao` final (backend-especialista,
+  independente das 2 fases anteriores): todos os 13 controles
+  obrigatorios confirmados com execucao real propria (banco
+  descartavel dedicado, prova negativa propria com hash identico,
+  escopo de arquivos limpo, Trello byte-identico a HEAD). 2 itens de
+  backlog nao bloqueantes registrados para decisao futura, fora do
+  escopo desta demanda: saturacao da coluna `crlv_ano` SMALLINT
+  (ATENCAO); comportamento de `ehValorPlaceholder()` com digito unico
+  (observacao pre-existente). Zero credencial/chamada real/dado real
+  usado. Ver
+  `docs/handoffs/2026-09-19-vio-hardening-sem-credenciais.md`, secoes
+  "/02-testes independente da correcao de magnitude" e "/03-revisao
+  final independente". **Demanda `vio-hardening-sem-credenciais`
+  liberada para `/04-commit-e-push`.** Cartao Trello mantido em
+  "Sprint Bruno - Fazendo [Semanal]" ate a confirmacao do push:
+  `card_id 6aae9bbdda2fce08c1b7269d`.
