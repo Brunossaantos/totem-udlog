@@ -310,7 +310,14 @@ $valoresExercicioAceitos = [
     // Nao usa "999999"/"111111" etc -- sequencia de digito unico repetido e
     // tratada como placeholder por ehValorPlaceholder(), rejeitaria pela
     // regra de CONTEUDO existente, nao testaria o que se pretende aqui.
-    'int valido grande, sem overflow (faixa existente permanece sem teto superior)' => 918273,
+    // Valor ajustado para 12345 (era 918273 antes da demanda
+    // vio-crlv-exercicio-faixa-storage, 2026-09-20) -- 918273 excede
+    // EXERCICIO_CRLV_MAXIMO_ARMAZENAVEL (32767) e passaria a ser
+    // corretamente REJEITADO pela nova fronteira de faixa armazenavel;
+    // este bloco testa apenas "inteiro exato, sem problema de conteudo",
+    // nao mais "sem teto superior" (o teto agora existe, ver bloco
+    // "FAIXA ARMAZENAVEL" mais abaixo).
+    'int valido grande, dentro da faixa armazenavel' => 12345,
 ];
 foreach ($valoresExercicioAceitos as $rotulo => $valorExercicio) {
     $dados = $dadosCrlvValidoBase;
@@ -413,50 +420,14 @@ $phpIntMaxStr = (string) PHP_INT_MAX;          // "9223372036854775807"
 $phpIntMaxMais1Str = '9223372036854775808';    // PHP_INT_MAX + 1, construido como STRING LITERAL (nunca aritmetica -- aritmetica ja viraria float antes de chegar aqui)
 $phpIntMinMenos1Str = '-9223372036854775809';  // PHP_INT_MIN - 1, idem
 
-// ACEITOS pela fronteira de MAGNITUDE (cabem em PHP_INT) -- o resultado
-// final (pode_avancar) e decidido pela regra de FAIXA ja existente
-// ($exercicio > 0), que NAO tem teto superior de negocio documentado
-// para "ano" (investigado: nenhum contrato/regra de negocio confirma um
-// teto plausivel alem de > 0) -- portanto PHP_INT_MAX "cabe" tecnicamente
-// e e aprovado, por decisao explicita de NAO inventar um teto de negocio
-// sem justificativa.
-$valoresExercicioMagnitudeAceita = [
-    'PHP_INT_MAX (int nativo)' => PHP_INT_MAX,
-    'string igual a (string) PHP_INT_MAX' => $phpIntMaxStr,
-];
-foreach ($valoresExercicioMagnitudeAceita as $rotulo => $valorExercicio) {
-    $dados = $dadosCrlvValidoBase;
-    $dados['exercicio'] = $valorExercicio;
-    $at = novoAtendimento($atendimentoDao, $idTotem, 'exp_crlv', 'MTZ' . substr(md5('exercmag' . $rotulo), 0, 4), $idsAtendimentoCriados);
-    $atendimentoDao->atualizarEtapa($at['id_atendimento'], 'exp_crlv');
-    $pdo->prepare('UPDATE tb_atendimento SET placa = :placa WHERE id_atendimento = :id')->execute(['placa' => $dadosCrlvValidoBase['placa'], 'id' => $at['id_atendimento']]);
-    $at = $atendimentoDao->buscarPorId($at['id_atendimento']);
-    $vio = new VioDecodeClientFalsoMatriz(['ok' => true, 'ambiente' => 'trial', 'dados' => $dados, 'erro' => null]);
-
-    [$resultado, $excecao, $stdout] = executarCapturandoStdout(fn () => $documentoRn->validarCrlv($at, $vio, random_bytes(16)));
-
-    afirmar("[CRLV exercicio MAGNITUDE ACEITA] '{$rotulo}': NAO lanca excecao/TypeError/Error", $excecao === null);
-    if ($excecao === null) {
-        afirmar("[CRLV exercicio MAGNITUDE ACEITA] '{$rotulo}': aceito pela fronteira de magnitude -- pode_avancar=true (sem teto de negocio documentado para 'ano' alem de > 0)", $resultado['pode_avancar'] === true);
-        afirmar("[CRLV exercicio MAGNITUDE ACEITA] '{$rotulo}': origem=VIO_TRIAL", $resultado['origem'] === 'VIO_TRIAL');
-    }
-
-    // OBSERVACAO nao bloqueante, FORA do escopo desta correcao (nao e
-    // achado desta rodada, nem foi pedido corrigir schema/DB): a coluna
-    // crlv_ano e SMALLINT (sql/schema.sql:85). Um valor que CABE em
-    // PHP_INT (aprovado corretamente por esta fronteira de magnitude, que
-    // so valida capacidade de PHP_INT, nunca capacidade de coluna de
-    // banco) pode ainda ser silenciosamente saturado pelo MySQL na
-    // gravacao, se o `sql_mode` do servidor nao incluir
-    // STRICT_TRANS_TABLES (confirmado: dev DB deste ambiente usa
-    // "NO_ZERO_IN_DATE,NO_ZERO_DATE,NO_ENGINE_SUBSTITUTION", sem modo
-    // estrito). Nao corrigido aqui -- alterar schema/DB esta fora do
-    // escopo explicito desta demanda, e nao ha teto de negocio
-    // documentado para "ano" que justifique um valor de corte arbitrario.
-    // Registrado como observacao para decisao futura do usuario.
-    $atendimentoRecarregadoMag = $atendimentoDao->buscarPorId($at['id_atendimento']);
-    echo "INFO  - [CRLV exercicio MAGNITUDE ACEITA] '{$rotulo}': crlv_ano persistido = " . var_export($atendimentoRecarregadoMag['crlv_ano'] ?? null, true) . " (observacao nao bloqueante, fora do escopo -- teto de coluna SMALLINT do banco, nao teto de negocio de 'ano')\n";
-}
+// NOTA: o bloco original desta suite tratava PHP_INT_MAX/`(string)
+// PHP_INT_MAX` como "aceitos pela fronteira de magnitude" (sem teto de
+// negocio documentado alem de `> 0`). A demanda
+// vio-crlv-exercicio-faixa-storage (2026-09-20) introduziu uma fronteira
+// NOVA e MAIS RESTRITA (faixa armazenavel de `crlv_ano`, teto `32767`) --
+// esses 2 casos foram MOVIDOS para o bloco "FAIXA ARMAZENAVEL" mais
+// abaixo, onde agora sao testados como REJEITADOS (mudanca de
+// comportamento intencional desta demanda, documentada no handoff).
 
 // REJEITADOS pela fronteira de MAGNITUDE -- formato lexical de digitos
 // puros OK, mas o valor NAO cabe em PHP_INT_MIN..PHP_INT_MAX -- devem ser
@@ -486,6 +457,96 @@ foreach ($valoresExercicioMagnitudeRejeitada as $rotulo => $valorExercicio) {
         $atendimentoRecarregado = $atendimentoDao->buscarPorId($at['id_atendimento']);
         afirmar("[CRLV exercicio MAGNITUDE REJEITADA] '{$rotulo}': crlv_origem_validacao permanece NAO_VALIDADO (sem persistencia parcial)", ($atendimentoRecarregado['crlv_origem_validacao'] ?? 'NAO_VALIDADO') === 'NAO_VALIDADO');
         afirmar("[CRLV exercicio MAGNITUDE REJEITADA] '{$rotulo}': crlv_ano NUNCA persistido (nem saturado para 32767/PHP_INT_MAX)", $atendimentoRecarregado['crlv_ano'] === null);
+    }
+}
+
+// ============================================================
+// exercicio: FAIXA ARMAZENAVEL de `crlv_ano` -- demanda
+// vio-crlv-exercicio-faixa-storage (2026-09-20), complementar ao bloco de
+// MAGNITUDE/OVERFLOW acima. `caberEmPhpInt()`/`validarExercicioInteiroExato()`
+// so garantem que o valor cabe em PHP_INT -- NAO garantem que cabe na
+// coluna `crlv_ano` (`sql/schema.sql:85`, `SMALLINT NULL` SEM `UNSIGNED`
+// -> SMALLINT SIGNED, faixa real `-32768` a `32767`, confirmado
+// empiricamente no preflight desta demanda: banco descartavel,
+// `INFORMATION_SCHEMA.COLUMNS.COLUMN_TYPE = 'smallint(6)'`, destruido ao
+// final). Um valor como `32768` ou `PHP_INT_MAX` cabia em PHP_INT
+// (aprovado pelo bloco de MAGNITUDE acima) mas satura/e rejeitado de
+// forma dependente do `sql_mode` do MySQL ao ser gravado -- corrigido por
+// `validarExercicioDentroDaFaixaArmazenavel()` em DocumentoRn.php, que
+// valida o teto MAXIMO (`EXERCICIO_CRLV_MAXIMO_ARMAZENAVEL = 32767`) 100%
+// em PHP, ANTES de qualquer chamada ao DAO -- mesmo caminho de excecao
+// (`DocumentoVioTipoInvalidoException`) e fluxo fail-closed ja usado
+// pelas fronteiras de tipo/magnitude acima, sem estrategia paralela.
+// ============================================================
+
+// ACEITO -- exatamente no limite maximo armazenavel (32767, int nativo e
+// string de digitos puros) -- deve continuar sendo aprovado e persistido
+// SEM saturacao/truncamento.
+$valoresExercicioFaixaAceita = [
+    'int 32767 (maximo armazenavel, limite exato)' => 32767,
+    'string "32767" (maximo armazenavel, limite exato)' => '32767',
+];
+foreach ($valoresExercicioFaixaAceita as $rotulo => $valorExercicio) {
+    $dados = $dadosCrlvValidoBase;
+    $dados['exercicio'] = $valorExercicio;
+    $at = novoAtendimento($atendimentoDao, $idTotem, 'exp_crlv', 'MTZ' . substr(md5('exercfaixaok' . $rotulo), 0, 4), $idsAtendimentoCriados);
+    $atendimentoDao->atualizarEtapa($at['id_atendimento'], 'exp_crlv');
+    $pdo->prepare('UPDATE tb_atendimento SET placa = :placa WHERE id_atendimento = :id')->execute(['placa' => $dadosCrlvValidoBase['placa'], 'id' => $at['id_atendimento']]);
+    $at = $atendimentoDao->buscarPorId($at['id_atendimento']);
+    $vio = new VioDecodeClientFalsoMatriz(['ok' => true, 'ambiente' => 'trial', 'dados' => $dados, 'erro' => null]);
+
+    [$resultado, $excecao, $stdout] = executarCapturandoStdout(fn () => $documentoRn->validarCrlv($at, $vio, random_bytes(16)));
+
+    afirmar("[CRLV exercicio FAIXA ACEITA] '{$rotulo}': NAO lanca excecao/TypeError/Error", $excecao === null);
+    afirmar("[CRLV exercicio FAIXA ACEITA] '{$rotulo}': stdout vazio", $stdout === '');
+    if ($excecao === null) {
+        afirmar("[CRLV exercicio FAIXA ACEITA] '{$rotulo}': pode_avancar=true (32767 cabe na coluna SMALLINT)", $resultado['pode_avancar'] === true);
+        afirmar("[CRLV exercicio FAIXA ACEITA] '{$rotulo}': origem=VIO_TRIAL", $resultado['origem'] === 'VIO_TRIAL');
+
+        $atendimentoRecarregado = $atendimentoDao->buscarPorId($at['id_atendimento']);
+        afirmar("[CRLV exercicio FAIXA ACEITA] '{$rotulo}': crlv_ano persistido exatamente como 32767 (sem saturacao/truncamento)", (int) $atendimentoRecarregado['crlv_ano'] === 32767);
+    }
+}
+
+// REJEITADOS -- fora da faixa armazenavel: 32768 (maximo+1, int e string),
+// PHP_INT_MAX (int e string) -- devem invalidar a resposta VIO INTEIRA
+// (nunca so o campo), sem persistir NENHUM valor (nem saturado para
+// 32767) -- rejeicao ocorre 100% em PHP, nunca dependendo do
+// comportamento do MySQL.
+$valoresExercicioFaixaRejeitada = [
+    'int 32768 (maximo armazenavel + 1)' => 32768,
+    'string "32768" (maximo armazenavel + 1)' => '32768',
+    'PHP_INT_MAX (int nativo)' => PHP_INT_MAX,
+    'string igual a (string) PHP_INT_MAX' => $phpIntMaxStr,
+];
+foreach ($valoresExercicioFaixaRejeitada as $rotulo => $valorExercicio) {
+    $dados = $dadosCrlvValidoBase;
+    $dados['exercicio'] = $valorExercicio;
+    // Placa do atendimento SINCRONIZADA com a placa do CRLV (mesmo padrao do
+    // bloco "FAIXA ACEITA" acima) -- de proposito: garante que, SE a
+    // fronteira de faixa armazenavel nao existisse/falhasse, o restante das
+    // regras de avaliarCrlv() (placa/UF/RNTC/tipo) aprovaria normalmente,
+    // expondo de fato a persistencia saturada/invalida em crlv_ano -- e
+    // exatamente o cenario auditado pela prova negativa obrigatoria desta
+    // demanda (ver handoff, secao "Prova negativa").
+    $at = novoAtendimento($atendimentoDao, $idTotem, 'exp_crlv', 'MTZ' . substr(md5('exercfaixarej' . $rotulo), 0, 4), $idsAtendimentoCriados);
+    $atendimentoDao->atualizarEtapa($at['id_atendimento'], 'exp_crlv');
+    $pdo->prepare('UPDATE tb_atendimento SET placa = :placa WHERE id_atendimento = :id')->execute(['placa' => $dadosCrlvValidoBase['placa'], 'id' => $at['id_atendimento']]);
+    $at = $atendimentoDao->buscarPorId($at['id_atendimento']);
+    $vio = new VioDecodeClientFalsoMatriz(['ok' => true, 'ambiente' => 'trial', 'dados' => $dados, 'erro' => null]);
+
+    [$resultado, $excecao, $stdout] = executarCapturandoStdout(fn () => $documentoRn->validarCrlv($at, $vio, random_bytes(16)));
+
+    afirmar("[CRLV exercicio FAIXA REJEITADA] '{$rotulo}': NAO lanca excecao/TypeError/Error", $excecao === null);
+    afirmar("[CRLV exercicio FAIXA REJEITADA] '{$rotulo}': stdout vazio (sem warning vazando)", $stdout === '');
+    if ($excecao === null) {
+        afirmar("[CRLV exercicio FAIXA REJEITADA] '{$rotulo}': pode_avancar=false", $resultado['pode_avancar'] === false);
+        afirmar("[CRLV exercicio FAIXA REJEITADA] '{$rotulo}': motivo e a mensagem generica de estrutura invalida (nao satura, nao aprova)", $resultado['motivo'] === 'Falha ao validar CRLV: dados retornados em formato invalido');
+        afirmar("[CRLV exercicio FAIXA REJEITADA] '{$rotulo}': origem permanece NAO_VALIDADO", $resultado['origem'] === 'NAO_VALIDADO');
+
+        $atendimentoRecarregado = $atendimentoDao->buscarPorId($at['id_atendimento']);
+        afirmar("[CRLV exercicio FAIXA REJEITADA] '{$rotulo}': crlv_origem_validacao permanece NAO_VALIDADO (sem persistencia parcial)", ($atendimentoRecarregado['crlv_origem_validacao'] ?? 'NAO_VALIDADO') === 'NAO_VALIDADO');
+        afirmar("[CRLV exercicio FAIXA REJEITADA] '{$rotulo}': crlv_ano NUNCA persistido (nem saturado para 32767)", $atendimentoRecarregado['crlv_ano'] === null);
     }
 }
 

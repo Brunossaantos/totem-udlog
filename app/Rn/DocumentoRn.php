@@ -108,6 +108,32 @@ class DocumentoRn
         'tipo' => 'texto',
     ];
 
+    /**
+     * Teto tecnico de armazenamento da coluna `crlv_ano` -- demanda
+     * vio-crlv-exercicio-faixa-storage (2026-09-20), complementar ao achado
+     * BLOQUEANTE de `caberEmPhpInt()`/`validarExercicioInteiroExato()` (que
+     * so garante caber em PHP_INT, nao necessariamente na coluna). Origem
+     * EXATA confirmada empiricamente (preflight desta demanda, banco
+     * descartavel destruido ao final): `sql/schema.sql:85` declara
+     * `crlv_ano SMALLINT NULL` -- SEM `UNSIGNED` -> SMALLINT SIGNED, faixa
+     * real `-32768` a `32767` (`COLUMN_TYPE = smallint(6)` confirmado via
+     * `INFORMATION_SCHEMA.COLUMNS`). Nenhuma migration altera este tipo.
+     *
+     * Sem este teto, um `exercicio` tecnicamente valido em PHP (ex.:
+     * `32768`, ou qualquer valor entre `32768` e `PHP_INT_MAX`) passaria
+     * incolume por `validarExercicioInteiroExato()` (que so valida
+     * magnitude de PHP_INT) e saturaria/seria rejeitado de forma
+     * dependente do `sql_mode` do MySQL ao ser gravado -- comportamento
+     * que a aplicacao nao pode delegar ao banco.
+     *
+     * So o TETO MAXIMO e validado explicitamente aqui -- o minimo teorico
+     * da coluna (`-32768`) e muito mais permissivo que a regra de negocio
+     * ja existente e aprovada em avaliarCrlv() (`$exercicio > 0`), entao
+     * duplicar o minimo tecnico seria redundante (decisao explicita desta
+     * demanda, nao uma omissao).
+     */
+    private const EXERCICIO_CRLV_MAXIMO_ARMAZENAVEL = 32767;
+
     private const MENSAGEM_ESTRUTURA_INVALIDA_CNH = 'Falha ao validar CNH: dados retornados em formato invalido';
 
     private const MENSAGEM_ESTRUTURA_INVALIDA_CRLV = 'Falha ao validar CRLV: dados retornados em formato invalido';
@@ -297,6 +323,7 @@ class DocumentoRn
             $placaBruta = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[0]);
             $exercicioBruto = $this->extrairCampoNumerico($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[1]);
             $exercicioBruto = $this->validarExercicioInteiroExato('crlv', self::CAMPOS_PERMITIDOS_CRLV[1], $exercicioBruto);
+            $exercicioBruto = $this->validarExercicioDentroDaFaixaArmazenavel('crlv', self::CAMPOS_PERMITIDOS_CRLV[1], $exercicioBruto);
             $ufBruta = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[2]);
             // Chave de EXTRACAO real na resposta da VIO e `rntrc` (ver
             // comentario da allowlist acima) — o valor extraido e
@@ -693,6 +720,54 @@ class DocumentoRn
         // grandeza (ambas normalizadas sem zero a esquerda e mesmo
         // comprimento nesta ramificacao).
         return strcmp($digitosNormalizados, $limiteMagnitude) <= 0;
+    }
+
+    /**
+     * Fronteira de FAIXA ARMAZENAVEL (nao so de PHP_INT) para o campo
+     * `exercicio` do CRLV -- demanda vio-crlv-exercicio-faixa-storage
+     * (2026-09-20), executada IMEDIATAMENTE apos
+     * `validarExercicioInteiroExato()` e ANTES de qualquer cast `(int)`
+     * usado para persistencia/envio ao DAO (ordem de validacao exigida:
+     * tipo -> formato inteiro exato -> magnitude PHP_INT -> esta faixa de
+     * armazenamento -> demais regras de negocio de avaliarCrlv()).
+     *
+     * Neste ponto o valor recebido (int nativo OU string de digitos puros)
+     * JA e garantido, por `validarExercicioInteiroExato()`/
+     * `caberEmPhpInt()`, caber inteiramente em PHP_INT_MIN..PHP_INT_MAX --
+     * portanto o cast `(int)` feito AQUI (so para fins de COMPARACAO de
+     * faixa, nunca reaproveitado como o valor final) e seguro e nao pode
+     * ele mesmo estourar/saturar.
+     *
+     * So valida o TETO (`EXERCICIO_CRLV_MAXIMO_ARMAZENAVEL` = `32767`,
+     * `crlv_ano SMALLINT SIGNED` -- ver constante). O piso tecnico da
+     * coluna (`-32768`) nao e validado aqui de proposito -- a regra de
+     * negocio ja existente e aprovada `$exercicio > 0`
+     * (`avaliarCrlv()`) e muito mais restritiva, tornando uma checagem
+     * de piso tecnico aqui redundante.
+     *
+     * REJEITA (invalida a resposta VIO inteira -- mesmo
+     * `DocumentoVioTipoInvalidoException`/fluxo fail-closed ja usado para
+     * tipo/formato incompativel, nunca uma segunda estrategia paralela):
+     * qualquer valor de `exercicio` estritamente maior que `32767`,
+     * incluindo `32768` e `PHP_INT_MAX`. Nunca deixa o banco decidir --
+     * a rejeicao ocorre 100% em PHP, antes de qualquer chamada ao DAO.
+     */
+    private function validarExercicioDentroDaFaixaArmazenavel(string $documento, string $campo, int|string|null $valor): int|string|null
+    {
+        if ($valor === null) {
+            return null;
+        }
+
+        // Cast seguro so para comparacao -- $valor ja garantido caber em
+        // PHP_INT pelo chamador (validarExercicioInteiroExato()); o valor
+        // ORIGINAL (int ou string) e devolvido inalterado, nunca o cast.
+        $valorParaComparacao = (int) $valor;
+
+        if ($valorParaComparacao > self::EXERCICIO_CRLV_MAXIMO_ARMAZENAVEL) {
+            throw new DocumentoVioTipoInvalidoException($documento, $campo, 'numero_fora_da_faixa_armazenavel_crlv_ano');
+        }
+
+        return $valor;
     }
 
     /**
