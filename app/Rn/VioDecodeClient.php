@@ -44,6 +44,43 @@ class VioDecodeClient
 {
     private const TIMEOUT_SEGUNDOS = 20;
 
+    /**
+     * Mensagem funcional, fixa e sanitizada devolvida ao totem para
+     * QUALQUER falha tecnica de transporte/autenticacao com a VIO Decode —
+     * NUNCA inclui status HTTP, curl errno, mensagem bruta do cURL/OAuth2,
+     * URL/host, ou qualquer outro detalhe interno (demanda
+     * vio-hardening-sem-credenciais, achado 1 do planejamento
+     * 2026-09-19). O detalhe tecnico completo, quando necessario para
+     * depuracao, so existe em log de servidor via logFalhaTecnica(), de
+     * forma minimalista/categorizada (nunca a mensagem bruta da excecao).
+     */
+    private const MENSAGEM_ERRO_GENERICA = 'Nao foi possivel validar o documento junto ao servico externo. Preencha manualmente.';
+
+    /**
+     * Teto de tamanho da resposta HTTP da VIO Decode, aplicado ANTES do
+     * json_decode (achado 2 do planejamento 2026-09-19). Escolhido como
+     * defesa em profundidade generica (grupo 1, sem credencial Trial para
+     * medir o tamanho real de uma resposta de Producao com o campo
+     * `image` preenchido — pendencia de grupo 2, ver handoff).
+     *
+     * Justificativa do valor (10 MB): os arquivos oficiais de demonstracao
+     * do Serpro usados no teste real de 2026-09-08
+     * (docs/handoffs/2026-09-08-expedicao-vio-cnh-crlv.md) sao minusculos
+     * como REQUISICAO (qrcode-trial.bin = 1041 bytes, crlv-demo.bin = 232
+     * bytes) e a RESPOSTA do Trial nesse teste nao contem foto real (dado
+     * de demonstracao, sem template.image relevante) — nenhum tamanho real
+     * de resposta COM foto (`image` em Base64, CNH/CRLV de Producao) foi
+     * observado ate hoje. Uma foto de documento em Base64 pode facilmente
+     * passar de 1-2 MB (JPEG de alta resolucao + inflacao ~33% do Base64).
+     * 10 MB da margem generosa (5-10x acima do pior caso plausivel de uma
+     * unica foto de documento) sem deixar de ser um teto finito que
+     * protege contra uma resposta anormalmente grande (bug do servidor VIO
+     * ou MITM em rede comprometida) ser integralmente carregada em memoria
+     * antes do parse. Nao e uma confirmacao de tamanho real (grupo 2) — e
+     * uma defesa em profundidade independente do tamanho real.
+     */
+    private const TAMANHO_MAXIMO_RESPOSTA_BYTES = 10 * 1024 * 1024;
+
     private string $ambiente;
     private string $urlDecode;
     private ?string $bearerTrial = null;
@@ -102,7 +139,13 @@ class VioDecodeClient
         try {
             $token = $this->ambiente === 'trial' ? $this->bearerTrial : $this->obterAccessTokenProducao();
         } catch (\Throwable $e) {
-            return $this->erroEstruturado('autenticacao', null, null, 'Falha ao obter token de acesso: ' . $e->getMessage());
+            // Nunca loga $e->getMessage() bruta aqui — a excecao de
+            // obterAccessTokenProducao() pode conter HTTP status/curl errno
+            // da chamada OAuth2 (detalhe tecnico de transporte, nao
+            // credencial), mas mesmo assim so um marcador categorizado fixo
+            // e logado (mesmo padrao de NotaController::logFalhaBancoPdo).
+            $this->logFalhaTecnica('autenticacao');
+            return $this->erroEstruturado('autenticacao', null, null, self::MENSAGEM_ERRO_GENERICA);
         }
 
         $tentativas = 0;
@@ -144,8 +187,19 @@ class VioDecodeClient
      */
     private function chamarDecode(string $url, string $bearer, string $bytesQrBrutos): array
     {
+        // CURLOPT_RETURNTRANSFER NAO e usado — o corpo e acumulado
+        // manualmente via CURLOPT_WRITEFUNCTION, que aborta a transferencia
+        // (retornando um tamanho diferente do recebido, o que o libcurl
+        // trata como CURLE_WRITE_ERROR) assim que o acumulado ultrapassa
+        // TAMANHO_MAXIMO_RESPOSTA_BYTES — o corpo excedente NUNCA chega a
+        // ser integralmente carregado em memoria nem passa pelo
+        // json_decode (achado 2 do planejamento vio-hardening-sem-credenciais,
+        // 2026-09-19).
+        $corpoAcumulado = '';
+        $tamanhoAcumulado = 0;
+        $excedeuLimite = false;
+
         $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $bytesQrBrutos); // string binaria pura, NUNCA array
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -155,60 +209,87 @@ class VioDecodeClient
             'Content-Length: ' . strlen($bytesQrBrutos),
         ]);
         curl_setopt($ch, CURLOPT_TIMEOUT, self::TIMEOUT_SEGUNDOS);
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($chRecurso, string $pedaco) use (&$corpoAcumulado, &$tamanhoAcumulado, &$excedeuLimite): int {
+            $tamanhoAcumulado += strlen($pedaco);
 
-        $resposta = curl_exec($ch);
+            if ($tamanhoAcumulado > self::TAMANHO_MAXIMO_RESPOSTA_BYTES) {
+                $excedeuLimite = true;
+                return 0; // tamanho != strlen($pedaco) => libcurl aborta com CURLE_WRITE_ERROR
+            }
+
+            $corpoAcumulado .= $pedaco;
+
+            return strlen($pedaco);
+        });
+
+        curl_exec($ch);
         $erroCurl = curl_errno($ch);
         $codigoHttp = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        if ($excedeuLimite) {
+            // Nunca loga o conteudo/tamanho exato — so um marcador
+            // categorizado fixo, sem bytes da resposta.
+            $this->logFalhaTecnica('resposta_excedeu_limite_tamanho');
+            return ['tipo' => 'resposta_excessiva', 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
+        }
+
         if ($erroCurl !== 0) {
             $ehTimeout = in_array($erroCurl, [CURLE_OPERATION_TIMEDOUT, CURLE_COULDNT_CONNECT, CURLE_COULDNT_RESOLVE_HOST], true);
-            return ['tipo' => $ehTimeout ? 'rede_timeout' : 'rede', 'mensagem' => 'Erro de rede/timeout ao chamar VIO Decode (curl errno ' . $erroCurl . ')'];
+            $this->logFalhaTecnica($ehTimeout ? 'rede_timeout' : 'rede');
+            return ['tipo' => $ehTimeout ? 'rede_timeout' : 'rede', 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
         }
 
         // json_decode ja espera UTF-8 por padrao; a resposta da VIO Decode e
         // JSON declarado, sem indicio de outro charset — sem transformacao
         // adicional necessaria aqui.
-        $corpo = json_decode((string) $resposta, true);
+        $corpo = json_decode($corpoAcumulado, true);
 
         if ($codigoHttp === 200) {
             if (!is_array($corpo)) {
-                return ['tipo' => 'servidor', 'http_status' => $codigoHttp, 'mensagem' => 'Resposta 200 sem JSON valido'];
+                $this->logFalhaTecnica('resposta_200_sem_json_valido');
+                return ['tipo' => 'servidor', 'http_status' => $codigoHttp, 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
             }
             return ['tipo' => 'sucesso', 'dados' => $corpo];
         }
 
         if ($codigoHttp === 400) {
-            return ['tipo' => 'validacao', 'http_status' => $codigoHttp, 'mensagem' => 'Requisicao invalida (400)'];
+            return ['tipo' => 'validacao', 'http_status' => $codigoHttp, 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
         }
 
         if ($codigoHttp === 415) {
-            // Nao deveria mais ocorrer apos esta correcao (era o bug do
-            // envelope JSON). Se voltar a acontecer por regressao futura, e
-            // um erro TECNICO de formato de transporte — nunca deve ser
-            // tratado como 422 (documento invalido), para nao confundir
-            // "corpo mal formado pelo nosso codigo" com "QR ilegivel/invalido".
-            return ['tipo' => 'formato_corpo_invalido', 'http_status' => $codigoHttp, 'mensagem' => 'VIO Decode rejeitou o formato do corpo da requisicao (415) — verificar Content-Type/corpo binario em VioDecodeClient::chamarDecode'];
+            // Nao deveria mais ocorrer apos a correcao de 2026-09-08 (era o
+            // bug do envelope JSON). Se voltar a acontecer por regressao
+            // futura, e um erro TECNICO de formato de transporte — nunca
+            // deve ser tratado como 422 (documento invalido), para nao
+            // confundir "corpo mal formado pelo nosso codigo" com "QR
+            // ilegivel/invalido". Detalhe tecnico so em log categorizado,
+            // nunca no campo devolvido ao totem.
+            $this->logFalhaTecnica('formato_corpo_invalido_415');
+            return ['tipo' => 'formato_corpo_invalido', 'http_status' => $codigoHttp, 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
         }
 
         if ($codigoHttp === 422) {
             $codigoVio = is_array($corpo) ? ($corpo['codigo'] ?? $corpo['code'] ?? null) : null;
-            return ['tipo' => 'qr_invalido', 'http_status' => $codigoHttp, 'codigo_vio' => $codigoVio, 'mensagem' => 'QR nao pode ser processado (422)'];
+            return ['tipo' => 'qr_invalido', 'http_status' => $codigoHttp, 'codigo_vio' => $codigoVio, 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
         }
 
         if ($codigoHttp === 401) {
-            return ['tipo' => 'autenticacao', 'http_status' => $codigoHttp, 'mensagem' => 'Nao autorizado (401)'];
+            $this->logFalhaTecnica('autenticacao_401');
+            return ['tipo' => 'autenticacao', 'http_status' => $codigoHttp, 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
         }
 
         if ($codigoHttp === 429) {
-            return ['tipo' => 'rate_limit', 'http_status' => $codigoHttp, 'mensagem' => 'Limite de requisicoes excedido (429)'];
+            return ['tipo' => 'rate_limit', 'http_status' => $codigoHttp, 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
         }
 
         if ($codigoHttp >= 500) {
-            return ['tipo' => 'servidor', 'http_status' => $codigoHttp, 'mensagem' => "Erro no servidor VIO Decode ({$codigoHttp})"];
+            $this->logFalhaTecnica('servidor_5xx');
+            return ['tipo' => 'servidor', 'http_status' => $codigoHttp, 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
         }
 
-        return ['tipo' => 'desconhecido', 'http_status' => $codigoHttp, 'mensagem' => "Resposta inesperada HTTP {$codigoHttp}"];
+        $this->logFalhaTecnica('resposta_http_desconhecida');
+        return ['tipo' => 'desconhecido', 'http_status' => $codigoHttp, 'mensagem' => self::MENSAGEM_ERRO_GENERICA];
     }
 
     private function erroEstruturado(string $tipo, ?string $codigoVio, ?int $httpStatus, string $mensagem): array
@@ -224,6 +305,19 @@ class VioDecodeClient
                 'mensagem' => $mensagem,
             ],
         ];
+    }
+
+    /**
+     * Log minimalista/categorizado de falha tecnica — mesmo padrao de
+     * NotaController::logFalhaBancoPdo() (nunca a mensagem bruta de uma
+     * excecao/resposta externa, so um marcador de categoria fixo,
+     * validado contra uma allowlist implicita de chamadas literais neste
+     * arquivo). NUNCA recebe credencial, token, QR bruto, Base64/imagem,
+     * CPF/CNH/placa/nome, ou conteudo bruto da resposta externa.
+     */
+    private function logFalhaTecnica(string $categoria): void
+    {
+        error_log('VioDecodeClient: falha tecnica categoria=' . $categoria);
     }
 
     /**

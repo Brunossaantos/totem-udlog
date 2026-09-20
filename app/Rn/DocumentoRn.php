@@ -63,6 +63,56 @@ class DocumentoRn
     private const CAMPOS_PERMITIDOS_CRLV = ['placa', 'exercicio', 'uf', 'rntrc', 'tipo'];
 
     /**
+     * Esquema EXPLICITO de tipos aceitos para cada campo das allowlists
+     * acima -- fronteira de validacao de TIPO, aplicada SEMPRE antes de
+     * qualquer cast/trim/normalizacao/persistencia (nunca depois). Achado
+     * do /02-testes independente de 2026-09-19 (backend-especialista +
+     * security-especialista, convergentes): sem esta fronteira, um campo
+     * vindo como array aninhado sofria cast `(string)` implicito e virava
+     * a string literal "Array" (so warning, nunca excecao), aprovada como
+     * dado valido; e `dados`/`cpf`/`data_validade` como stdClass/array
+     * aninhado lancavam Error/TypeError reais que so nao explodiam ao
+     * cliente por acidente do catch generico do Controller.
+     *
+     * Regras (aplicadas por extrairCampoTexto()/extrairCampoNumerico()):
+     * - 'texto': aceita string OU ausencia/null (campo opcional na
+     *   pratica -- ausencia e tratada como "nao informado" pelas regras de
+     *   CONTEUDO ja existentes em avaliarCnh()/avaliarCrlv(), nao aqui).
+     *   REJEITA array, objeto/stdClass, bool, int, float, recurso.
+     * - 'numerico': aceita string, int OU float (todos os formatos que a
+     *   VIO poderia usar para um numero), OU ausencia/null. REJEITA array,
+     *   objeto/stdClass, bool, recurso.
+     * String vazia ('') e placeholder (ex.: "xxxxx") NAO sao tratados
+     * aqui -- continuam sendo responsabilidade das regras de CONTEUDO ja
+     * existentes (ehValorPlaceholder(), checks de string vazia em
+     * avaliarCnh()/avaliarCrlv()). Esta fronteira SO valida tipo, nunca
+     * conteudo.
+     *
+     * Campo com tipo incompativel invalida a resposta VIO INTEIRA daquele
+     * documento (nunca so o campo) -- ver falhaEstruturaInvalidaCnh()/
+     * falhaEstruturaInvalidaCrlv(): nenhum valor parcial e persistido,
+     * origem nunca e marcada como VIO_TRIAL/VIO_VALIDADO, conduz ao mesmo
+     * caminho de fallback manual ja usado para resposta VIO incompleta.
+     */
+    private const ESQUEMA_TIPOS_CNH = [
+        'nome' => 'texto',
+        'cpf' => 'texto',
+        'data_validade' => 'texto',
+    ];
+
+    private const ESQUEMA_TIPOS_CRLV = [
+        'placa' => 'texto',
+        'exercicio' => 'numerico',
+        'uf' => 'texto',
+        'rntrc' => 'texto',
+        'tipo' => 'texto',
+    ];
+
+    private const MENSAGEM_ESTRUTURA_INVALIDA_CNH = 'Falha ao validar CNH: dados retornados em formato invalido';
+
+    private const MENSAGEM_ESTRUTURA_INVALIDA_CRLV = 'Falha ao validar CRLV: dados retornados em formato invalido';
+
+    /**
      * Lista fechada das 27 siglas de UF brasileiras (26 estados + DF) —
      * usada tanto para validar o valor extraido da VIO Decode quanto o
      * preenchimento manual (dropdown fechado no front-end, nunca texto
@@ -123,10 +173,34 @@ class DocumentoRn
         // `template`, ou qualquer outro campo nao autorizado) saem de
         // escopo (unset explicito) logo em seguida, nunca persistidos, logados
         // ou retornados ao chamador.
-        $dadosBrutos = $resultadoVio['dados']['data'] ?? $resultadoVio['dados'];
-        $nome = trim((string) ($dadosBrutos[self::CAMPOS_PERMITIDOS_CNH[0]] ?? ''));
-        $cpf = CpfValidador::normalizarEValidar($dadosBrutos[self::CAMPOS_PERMITIDOS_CNH[1]] ?? null);
-        $dataValidade = $this->normalizarData($dadosBrutos[self::CAMPOS_PERMITIDOS_CNH[2]] ?? null);
+        // Fronteira de tipo/esquema (ver ESQUEMA_TIPOS_CNH): `dados` e
+        // `dados.data` precisam ser sequer um array antes de qualquer
+        // acesso por chave -- caso contrario (ex.: stdClass), o acesso
+        // `$x['data']`/`$x['nome']` lancaria um Error fatal real (achado
+        // MODERADO do /02-testes de 2026-09-19). Resposta inteira e
+        // rejeitada (fallback manual), nunca so o campo.
+        $dadosBrutos = $resultadoVio['dados'];
+        if (!is_array($dadosBrutos)) {
+            unset($resultadoVio, $dadosBrutos);
+            return $this->falhaEstruturaInvalidaCnh($atendimento, $ambiente);
+        }
+        $dadosBrutos = $dadosBrutos['data'] ?? $dadosBrutos;
+        if (!is_array($dadosBrutos)) {
+            unset($resultadoVio, $dadosBrutos);
+            return $this->falhaEstruturaInvalidaCnh($atendimento, $ambiente);
+        }
+
+        try {
+            $nome = trim($this->extrairCampoTexto($dadosBrutos, 'cnh', self::CAMPOS_PERMITIDOS_CNH[0]) ?? '');
+            $cpf = CpfValidador::normalizarEValidar($this->extrairCampoTexto($dadosBrutos, 'cnh', self::CAMPOS_PERMITIDOS_CNH[1]));
+            $dataValidade = $this->normalizarData($this->extrairCampoTexto($dadosBrutos, 'cnh', self::CAMPOS_PERMITIDOS_CNH[2]));
+        } catch (DocumentoVioTipoInvalidoException $e) {
+            // So o marcador categorizado (documento/campo/tipo PHP) vai ao
+            // log -- nunca o valor recebido, nunca stack trace de payload.
+            error_log($e->getMessage());
+            unset($resultadoVio, $dadosBrutos);
+            return $this->falhaEstruturaInvalidaCnh($atendimento, $ambiente);
+        }
         unset($resultadoVio, $dadosBrutos);
 
         $origem = $ambiente === 'trial' ? 'VIO_TRIAL' : 'VIO_VALIDADO';
@@ -206,16 +280,41 @@ class DocumentoRn
         // campos da allowlist (CAMPOS_PERMITIDOS_CRLV) sao extraidos para
         // variaveis que sobrevivem alem deste bloco — $resultadoVio/
         // $dadosBrutos saem de escopo (unset explicito) logo em seguida.
-        $dadosBrutos = $resultadoVio['dados']['data'] ?? $resultadoVio['dados'];
-        $placaVio = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($dadosBrutos[self::CAMPOS_PERMITIDOS_CRLV[0]] ?? '')));
-        $exercicio = is_numeric($dadosBrutos[self::CAMPOS_PERMITIDOS_CRLV[1]] ?? null) ? (int) $dadosBrutos[self::CAMPOS_PERMITIDOS_CRLV[1]] : 0;
-        $ufVio = strtoupper(trim((string) ($dadosBrutos[self::CAMPOS_PERMITIDOS_CRLV[2]] ?? '')));
-        // Chave de EXTRACAO real na resposta da VIO e `rntrc` (ver comentario
-        // da allowlist acima) — o valor extraido e tratado/armazenado daqui
-        // em diante sempre como `rntc` (nome exigido por veiculo.rntc do
-        // Talent).
-        $rntcVio = trim((string) ($dadosBrutos[self::CAMPOS_PERMITIDOS_CRLV[3]] ?? ''));
-        $tipoVio = trim((string) ($dadosBrutos[self::CAMPOS_PERMITIDOS_CRLV[4]] ?? ''));
+        // Fronteira de tipo/esquema (ver ESQUEMA_TIPOS_CRLV) -- mesmo
+        // raciocinio de validarCnh() acima.
+        $dadosBrutos = $resultadoVio['dados'];
+        if (!is_array($dadosBrutos)) {
+            unset($resultadoVio, $dadosBrutos);
+            return $this->falhaEstruturaInvalidaCrlv($atendimento, $ambiente);
+        }
+        $dadosBrutos = $dadosBrutos['data'] ?? $dadosBrutos;
+        if (!is_array($dadosBrutos)) {
+            unset($resultadoVio, $dadosBrutos);
+            return $this->falhaEstruturaInvalidaCrlv($atendimento, $ambiente);
+        }
+
+        try {
+            $placaBruta = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[0]);
+            $exercicioBruto = $this->extrairCampoNumerico($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[1]);
+            $exercicioBruto = $this->validarExercicioInteiroExato('crlv', self::CAMPOS_PERMITIDOS_CRLV[1], $exercicioBruto);
+            $ufBruta = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[2]);
+            // Chave de EXTRACAO real na resposta da VIO e `rntrc` (ver
+            // comentario da allowlist acima) — o valor extraido e
+            // tratado/armazenado daqui em diante sempre como `rntc` (nome
+            // exigido por veiculo.rntc do Talent).
+            $rntcBruto = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[3]);
+            $tipoBruto = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[4]);
+        } catch (DocumentoVioTipoInvalidoException $e) {
+            error_log($e->getMessage());
+            unset($resultadoVio, $dadosBrutos);
+            return $this->falhaEstruturaInvalidaCrlv($atendimento, $ambiente);
+        }
+
+        $placaVio = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $placaBruta ?? ''));
+        $exercicio = is_numeric($exercicioBruto) ? (int) $exercicioBruto : 0;
+        $ufVio = strtoupper(trim($ufBruta ?? ''));
+        $rntcVio = trim($rntcBruto ?? '');
+        $tipoVio = trim($tipoBruto ?? '');
         unset($resultadoVio, $dadosBrutos);
 
         $origem = $ambiente === 'trial' ? 'VIO_TRIAL' : 'VIO_VALIDADO';
@@ -392,6 +491,247 @@ class DocumentoRn
      * separado — "nao informado" — pelos chamadores, com mensagem mais
      * especifica).
      */
+    /**
+     * Extrai um campo do tipo 'texto' do ESQUEMA_TIPOS_CNH/ESQUEMA_TIPOS_CRLV
+     * de $dadosBrutos (ja garantido array pelo chamador) validando TIPO
+     * ANTES de qualquer trim/cast/uso. So aceita string ou ausencia/null --
+     * NUNCA deixa array/objeto/bool/int/float ser silenciosamente coagido a
+     * string (o que produziria "Array"/aviso, nunca excecao, e passaria
+     * pelas validacoes de conteudo como dado real). Lanca
+     * DocumentoVioTipoInvalidoException em caso de tipo incompativel --
+     * SEMPRE capturada por validarCnh()/validarCrlv(), nunca deve escapar
+     * de DocumentoRn.
+     */
+    private function extrairCampoTexto(array $dadosBrutos, string $documento, string $campo): ?string
+    {
+        if (!array_key_exists($campo, $dadosBrutos) || $dadosBrutos[$campo] === null) {
+            return null;
+        }
+
+        $valor = $dadosBrutos[$campo];
+
+        if (!is_string($valor)) {
+            throw new DocumentoVioTipoInvalidoException($documento, $campo, get_debug_type($valor));
+        }
+
+        return $valor;
+    }
+
+    /**
+     * Extrai um campo do tipo 'numerico' do ESQUEMA_TIPOS_CRLV (hoje so
+     * `exercicio`) validando TIPO antes de qualquer cast. Aceita string,
+     * int, float, ou ausencia/null -- a validacao de CONTEUDO (se e de
+     * fato numerico, ex.: "abc" nao e) continua sendo feita pelo chamador
+     * via is_numeric(), como antes desta correcao. So REJEITA
+     * estruturalmente array/objeto/bool/recurso, que antes desta correcao
+     * ja resultavam em is_numeric()===false (portanto exercicio=0, sem
+     * TypeError) so por comportamento incidental de is_numeric() -- agora
+     * a rejeicao e por barreira explicita de tipo, invalidando a resposta
+     * inteira (consistente com os demais campos), em vez de silenciosamente
+     * zerar o campo.
+     */
+    private function extrairCampoNumerico(array $dadosBrutos, string $documento, string $campo): int|float|string|null
+    {
+        if (!array_key_exists($campo, $dadosBrutos) || $dadosBrutos[$campo] === null) {
+            return null;
+        }
+
+        $valor = $dadosBrutos[$campo];
+
+        if (!is_int($valor) && !is_float($valor) && !is_string($valor)) {
+            throw new DocumentoVioTipoInvalidoException($documento, $campo, get_debug_type($valor));
+        }
+
+        return $valor;
+    }
+
+    /**
+     * Fronteira de CONTEUDO (nao so tipo) para o campo `exercicio` do CRLV --
+     * achado BLOQUEANTE do /03-revisao independente de 2026-09-20
+     * (backend-especialista, reproduzido pelo fluxo real em banco
+     * descartavel): `extrairCampoNumerico()` so valida TIPO (aceita
+     * string/int/float), mas o cast `(int)` aplicado em seguida por
+     * validarCrlv() truncava silenciosamente qualquer valor fracionario
+     * (`2026.9` -> `2026`) sem NENHUMA sinalizacao de perda de precisao --
+     * a resposta era aprovada e persistida normalmente.
+     *
+     * So aceita, sem cast/arredondamento/truncamento:
+     * - `int` nativo -- sempre exato por definicao, sinal ou magnitude
+     *   NAO importam aqui (a regra de FAIXA -- `$exercicio > 0` -- continua
+     *   sendo decidida exclusivamente por avaliarCrlv(), nunca por esta
+     *   fronteira; json_decode so produz int para um numero JSON sem
+     *   ponto/notacao cientifica -- um numero fracionario/cientifico ou
+     *   que estoure PHP_INT_MAX sempre chega aqui como `float`, nunca
+     *   como `int` corrompido).
+     * - `string` no MESMO formato que `(int)` converte SEM perda de
+     *   precisao: sinal negativo opcional seguido exclusivamente de
+     *   digitos (`/^-?\d+$/`) -- sem ponto decimal, sem notacao
+     *   cientifica, sem espaco em branco (prefixo/sufixo), sem string
+     *   vazia. Zero a esquerda preservado (regressao ja confirmada em
+     *   rodada anterior). Sinal negativo aceito aqui de proposito -- NAO e
+     *   responsabilidade desta fronteira decidir faixa, so exatidao;
+     *   `"-2026"` continua sendo rejeitado do mesmo jeito que antes, mas
+     *   pela regra de FAIXA existente em avaliarCrlv(), nao por esta.
+     * - `null` -- ausencia continua sendo responsabilidade da regra de
+     *   CONTEUDO ja existente em avaliarCrlv() (`$exercicio <= 0` ->
+     *   "nao informado/invalido"), nao desta fronteira.
+     *
+     * REJEITA (invalida a resposta VIO inteira, mesmo caminho de
+     * DocumentoVioTipoInvalidoException ja usado para tipo incompativel):
+     * `float` -- SEMPRE, mesmo quando matematicamente inteiro (`2026.0`).
+     * Investigado docs/manual_vio_decode.md (linhas 126-130) e o unico
+     * teste real observado de `exercicio` (Trial, `crlv-demo.bin`)
+     * retornou o placeholder literal string `"xxxxx"`, nunca um numero —
+     * SEM EVIDENCIA real de que a VIO envie `exercicio` como float
+     * (inteiro ou fracionario). Sem essa evidencia, o esquema estrito
+     * rejeita qualquer float aqui (cobre fracionario, notacao cientifica
+     * que o PHP decodifica como float, `NAN`/`INF` -- que tambem sao
+     * `float` em PHP -- e o proprio `2026.0`, e overflow de inteiro que o
+     * PHP converte automaticamente para float), preferindo lado estrito a
+     * inventar um formato aceito sem prova. Tambem rejeita `string` com
+     * qualquer caractere alem de digito puro/sinal negativo opcional
+     * (decimal, notacao cientifica, espaco em branco/prefixo/sufixo,
+     * string vazia).
+     */
+    private function validarExercicioInteiroExato(string $documento, string $campo, int|float|string|null $valor): int|string|null
+    {
+        if ($valor === null) {
+            return null;
+        }
+
+        if (is_int($valor)) {
+            // int nativo: ja e garantido pelo proprio PHP estar dentro de
+            // PHP_INT_MIN..PHP_INT_MAX (json_decode/PHP nunca produzem um
+            // int fora dessa faixa -- overflow vira float automaticamente,
+            // tratado no ramo abaixo). Nenhuma validacao de magnitude
+            // adicional e necessaria aqui.
+            return $valor;
+        }
+
+        if (is_float($valor) || !preg_match('/^-?\d+$/', $valor)) {
+            throw new DocumentoVioTipoInvalidoException($documento, $campo, 'numero_nao_inteiro_exato');
+        }
+
+        // Formato lexical OK (digitos puros, sinal opcional) -- mas isso NAO
+        // garante que o valor cabe em PHP_INT. Uma string de digitos maior
+        // que PHP_INT_MAX passaria incolume por esta regex e satura
+        // silenciosamente no cast (int) mais adiante (achado BLOQUEANTE do
+        // /03-revisao de 2026-09-20). Valida MAGNITUDE aqui, em nivel de
+        // string, ANTES de qualquer cast/conversao numerica -- nunca
+        // convertendo a string para int/float neste processo (evitaria
+        // justamente o overflow/perda de precisao que estamos prevenindo).
+        if (!$this->caberEmPhpInt($valor)) {
+            throw new DocumentoVioTipoInvalidoException($documento, $campo, 'numero_fora_da_capacidade_php_int');
+        }
+
+        return $valor;
+    }
+
+    /**
+     * Confirma que uma string de digitos puros (formato ja validado por
+     * `/^-?\d+$/` no chamador -- sinal negativo opcional seguido so de
+     * digitos) representa um valor dentro da faixa PHP_INT_MIN..PHP_INT_MAX,
+     * SEM jamais converter a string para int/float (evita o proprio
+     * overflow/saturacao/perda de precisao que esta validacao existe para
+     * prevenir). Comparacao feita por COMPRIMENTO da parte numerica e,
+     * quando o comprimento empata com o limite, LEXICOGRAFICAMENTE contra
+     * a representacao em string de PHP_INT_MAX (valores positivos) ou do
+     * modulo de PHP_INT_MIN (valores negativos -- a magnitude negativa
+     * maxima permitida e 1 unidade maior que a positiva, ex.:
+     * PHP_INT_MIN = -9223372036854775808, PHP_INT_MAX = 9223372036854775807).
+     *
+     * Zeros a esquerda sao removidos APENAS para esta comparacao de
+     * magnitude (`ltrim($digitos, '0')`) -- o valor original (com zeros a
+     * esquerda, se houver) e devolvido inalterado pelo chamador; o
+     * comportamento ja aprovado para zeros a esquerda (ex.: "007") nao
+     * muda em nada por esta funcao.
+     *
+     * Decisao: NAO usar `filter_var($valor, FILTER_VALIDATE_INT)` aqui --
+     * embora ele tambem rejeite corretamente overflow (retorna `false` para
+     * valores fora da faixa de PHP_INT), a comparacao lexicografica manual
+     * evita qualquer dependencia do parsing interno do filtro (cujo
+     * comportamento documentado nao cobre explicitamente todos os casos de
+     * borda de zeros a esquerda/sinal de forma auditavel neste codigo) e
+     * torna a garantia de "nunca converte a string gigante para numero"
+     * explicita e verificavel por leitura direta desta funcao, em vez de
+     * confiar em uma extensao externa. `filter_var('007', ...)` retorna
+     * `7` (inteiro), o que serviria para uma checagem BOOLEANA de faixa,
+     * mas essa funcao evita converter a string em nenhum momento -- nem
+     * para validar, nem para devolver.
+     */
+    private function caberEmPhpInt(string $valorDigitos): bool
+    {
+        $negativo = $valorDigitos[0] === '-';
+        $digitos = $negativo ? substr($valorDigitos, 1) : $valorDigitos;
+
+        // Normalizacao de zeros a esquerda SOMENTE para fins de comparacao
+        // de magnitude (nao altera o valor original devolvido ao chamador).
+        $digitosNormalizados = ltrim($digitos, '0');
+        if ($digitosNormalizados === '') {
+            $digitosNormalizados = '0';
+        }
+
+        // Magnitude maxima permitida: PHP_INT_MAX para positivos;
+        // |PHP_INT_MIN| (1 unidade maior) para negativos.
+        $limiteMagnitude = $negativo
+            ? ltrim((string) PHP_INT_MIN, '-')
+            : (string) PHP_INT_MAX;
+
+        $comprimentoValor = strlen($digitosNormalizados);
+        $comprimentoLimite = strlen($limiteMagnitude);
+
+        if ($comprimentoValor < $comprimentoLimite) {
+            return true;
+        }
+
+        if ($comprimentoValor > $comprimentoLimite) {
+            return false;
+        }
+
+        // Mesmo comprimento -- decide por comparacao lexicografica pura de
+        // string (nunca numerica), caractere a caractere na mesma ordem de
+        // grandeza (ambas normalizadas sem zero a esquerda e mesmo
+        // comprimento nesta ramificacao).
+        return strcmp($digitosNormalizados, $limiteMagnitude) <= 0;
+    }
+
+    /**
+     * Resultado de falha estruturada para CNH quando a resposta da VIO nao
+     * bate com ESQUEMA_TIPOS_CNH (campo com tipo incompativel) ou quando
+     * `dados`/`dados.data` nao e sequer um array. Mesmo formato de retorno
+     * do ramo `!$resultadoVio['ok']` de validarCnh() -- nenhum valor
+     * parcial e persistido, origem/status_revisao preservam o estado ATUAL
+     * do atendimento (nunca marcados como VIO_TRIAL/VIO_VALIDADO/OK),
+     * mensagem generica funcional (nunca expõe nome de campo/tipo PHP ao
+     * cliente -- isso so vai para error_log).
+     */
+    private function falhaEstruturaInvalidaCnh(array $atendimento, string $ambiente): array
+    {
+        return [
+            'ok' => false,
+            'pode_avancar' => false,
+            'motivo' => self::MENSAGEM_ESTRUTURA_INVALIDA_CNH,
+            'aviso_trial' => $ambiente === 'trial',
+            'origem' => $atendimento['cnh_origem_validacao'] ?? 'NAO_VALIDADO',
+            'status_revisao' => $atendimento['cnh_status_revisao'] ?? 'OK',
+        ];
+    }
+
+    /**
+     * Equivalente a falhaEstruturaInvalidaCnh(), para CRLV.
+     */
+    private function falhaEstruturaInvalidaCrlv(array $atendimento, string $ambiente): array
+    {
+        return [
+            'ok' => false,
+            'pode_avancar' => false,
+            'motivo' => self::MENSAGEM_ESTRUTURA_INVALIDA_CRLV,
+            'aviso_trial' => $ambiente === 'trial',
+            'origem' => $atendimento['crlv_origem_validacao'] ?? 'NAO_VALIDADO',
+            'status_revisao' => $atendimento['crlv_status_revisao'] ?? 'OK',
+        ];
+    }
+
     private function ehValorPlaceholder(string $valor): bool
     {
         $valor = strtolower(trim($valor));

@@ -349,8 +349,29 @@ afirmar('Resposta de validarCnh NUNCA contem o conteudo bruto da imagem em nenhu
 
 $fonteDocumentoRn = file_get_contents(__DIR__ . '/../../app/Rn/DocumentoRn.php');
 afirmar('DocumentoRn::validarCnh descarta explicitamente $resultadoVio/$dadosBrutos (unset) apos extrair a allowlist', (bool) preg_match('/unset\(\$resultadoVio,\s*\$dadosBrutos\);/', $fonteDocumentoRn));
-$totalUnsets = substr_count($fonteDocumentoRn, 'unset($resultadoVio, $dadosBrutos);');
-afirmar('O unset() aparece em AMBOS validarCnh e validarCrlv (2 ocorrencias)', $totalUnsets === 2);
+
+// Nota (rodada vio-hardening-sem-credenciais, correcao pos-/02-testes de
+// 2026-09-19): a fronteira de tipo/esquema adicionada em DocumentoRn.php
+// introduziu MAIS pontos de descarte explicito (um por ramo de rejeicao
+// estrutural -- `dados` nao-array, `dados.data` nao-array, e o catch de
+// DocumentoVioTipoInvalidoException -- alem do ponto original de sucesso
+// de extracao), tanto em validarCnh() quanto em validarCrlv(). A contagem
+// exata portanto NAO e mais fixa em 2 -- o que importa e que CADA METODO
+// descarta em TODOS os caminhos que passam pela extracao de campos, nunca
+// so no caminho feliz.
+$inicioValidarCnh = strpos($fonteDocumentoRn, 'function validarCnh(');
+$inicioPreencherManualCnh = strpos($fonteDocumentoRn, 'function preencherManualCnh(');
+$corpoValidarCnh = substr($fonteDocumentoRn, $inicioValidarCnh, $inicioPreencherManualCnh - $inicioValidarCnh);
+
+$inicioValidarCrlv = strpos($fonteDocumentoRn, 'function validarCrlv(');
+$inicioPreencherManualCrlv = strpos($fonteDocumentoRn, 'function preencherManualCrlv(');
+$corpoValidarCrlv = substr($fonteDocumentoRn, $inicioValidarCrlv, $inicioPreencherManualCrlv - $inicioValidarCrlv);
+
+$unsetsEmValidarCnh = substr_count($corpoValidarCnh, 'unset($resultadoVio, $dadosBrutos);');
+$unsetsEmValidarCrlv = substr_count($corpoValidarCrlv, 'unset($resultadoVio, $dadosBrutos);');
+afirmar('validarCnh() descarta $resultadoVio/$dadosBrutos em TODOS os caminhos de retorno pos-decode (>= 1, um por ramo de rejeicao estrutural + caminho feliz)', $unsetsEmValidarCnh >= 1);
+afirmar('validarCrlv() descarta $resultadoVio/$dadosBrutos em TODOS os caminhos de retorno pos-decode (>= 1, um por ramo de rejeicao estrutural + caminho feliz)', $unsetsEmValidarCrlv >= 1);
+afirmar('O unset() aparece em AMBOS validarCnh e validarCrlv (nunca so em um dos dois)', $unsetsEmValidarCnh >= 1 && $unsetsEmValidarCrlv >= 1);
 
 // ============================================================
 // Limpeza final
