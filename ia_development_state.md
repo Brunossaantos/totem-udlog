@@ -5011,3 +5011,455 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   secao "Resultado de /03-revisao independente". **Demanda
   `sanitizacao-excecoes-lock-documentos` liberada para
   `/04-commit-e-push`.**
+- 2026-09-24 -- `/00-planejamento` da nova demanda
+  `tela-inicial-lgpd-totem`, executado em worktree/branch isolados
+  (`tela-inicial-lgpd-totem`, a partir do commit `ac7fc1b`) para nao
+  misturar com a demanda anterior `sanitizacao-excecoes-lock-documentos`,
+  que tinha alteracoes nao finalizadas no worktree principal
+  (confirmado por `git status --short` vazio no novo worktree logo
+  apos a criacao, e worktree principal reconfirmado intocado ao
+  final). Objetivo: planejar a integracao de `docs/indexTotem.html`
+  (protótipo, copiado manualmente para o worktree isolado, hash MD5
+  confirmado identico a origem) como nova tela inicial de LGPD do
+  totem -- gate obrigatorio antes do fluxo padrao (Recebimento/
+  Expedicao), com aceite via checkbox+botao genuinamente validado no
+  backend. Investigacao com 5 sub-agentes independentes (`explorer`,
+  `frontend-especialista`, `ui-ux-especialista`, `backend-especialista`,
+  `security-especialista`), todos restritos ao worktree isolado.
+  Achados principais: texto juridico de LGPD existe SO dentro do
+  prototipo nao rastreado, sem confirmacao de aprovacao; protótipo
+  valida aceite EXCLUSIVAMENTE no client (achado critico de
+  seguranca, nao usavel como esta); primeiro dado pessoal-adjacente
+  coletado hoje e a placa, em `AtendimentoController::iniciar()`, sem
+  nenhum gate antes disso hoje; nenhuma estrutura de banco reaproveitavel
+  para aceite; contraste insuficiente de 2 tokens de texto do
+  protótipo; header de logo fixo do protótipo contradiz decisao ja
+  travada ("sem header decorativo fixo"); paleta de cores desta tarefa
+  diverge do placeholder navy ja usado em todo `app.css`. Estrategia
+  consolidada: nova tela `'lgpd'` como estado inicial da SPA existente
+  (nao pagina separada), nunca persistida em localStorage (garante
+  reset em refresh/novo atendimento); novo registro backend
+  `tb_lgpd_aceite` (token opaco de uso unico via CAS
+  `UPDATE...WHERE`+`rowCount()`, associado ao totem autenticado,
+  expiracao curta) desenhado tecnicamente (SEM criar tabela/migration
+  nesta etapa); `atendimento.php?acao=iniciar` passaria a exigir esse
+  token antes de criar o atendimento. 8 decisoes registradas como
+  BLOQUEANTES para o usuario antes de `/01-implementacao`: escopo da
+  paleta de cores (so a tela LGPD vs. projeto inteiro); logo/header
+  fixo (reabrir decisao ja travada ou nao); confirmacao formal do
+  texto juridico; tempo de expiracao do token (sugestao tecnica: 10
+  min); politica de retencao do registro de aceite (sem fonte legal
+  no projeto); versionamento do texto do termo; comportamento exato de
+  "recusar"/atendimento alternativo; se a leitura integral deve ser
+  forcada. Zero codigo implementado, zero migration criada, zero dado
+  real, zero chamada externa, zero impressao, zero acesso a producao/
+  Hostgator, zero alteracao no Trello, zero commit/push nesta etapa.
+  Ver `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md`.
+  **Aguardando decisao do usuario sobre as 8 pendencias bloqueantes
+  antes de `/01-implementacao`.**
+- 2026-09-24 -- `/01-implementacao` da demanda `tela-inicial-lgpd-totem`,
+  executada integralmente no worktree isolado
+  `C:\xampp\htdocs\totem-udlog-worktree-lgpd` (branch
+  `tela-inicial-lgpd-totem`). O usuario aprovou explicitamente, no
+  proprio pedido de implementacao, as 8 decisoes que estavam
+  bloqueantes no planejamento (ver handoff, secao "Decisoes aprovadas
+  pelo usuario nesta rodada") -- nenhuma decisao tomada por conta
+  propria por nenhum sub-agente. Destaque: paleta oficial UDLOG
+  aplicada a TODO o sistema do totem (27 estados), nao so a tela LGPD
+  -- diverge da recomendacao tecnica do planejamento, mas e instrucao
+  explicita e posterior do usuario, que prevalece.
+  **Backend** (`backend-especialista`): fonte canonica unica do termo
+  (`app/Content/TermoLgpd.php`, texto/versao `2026-09-24-v1`/hash
+  SHA-256, versao inicial de desenvolvimento, ativacao em producao
+  depende de aprovacao formal do DPO -- Flavio Carvalho,
+  flavio.carvalho@udlog.com.br); migration `014_tb_lgpd_aceite.sql`
+  nova (tabela `tb_lgpd_aceite` -- token_hash unico via SHA-256, NUNCA
+  o token bruto gravado/logado -- + coluna nullable `id_aceite_lgpd`
+  em `tb_atendimento`); novo endpoint `public/api/lgpd.php?acao=aceitar`
+  (token `random_bytes(32)`, validade 10 min, uso unico via CAS);
+  `AtendimentoController::iniciar()` agora exige `token_aceite`,
+  consumido dentro da PRIMEIRA TRANSACAO EXPLICITA REAL do projeto
+  (`PDO::beginTransaction`/`commit`/`rollBack`, decisao documentada e
+  testada com rollback real forcado) junto com a criacao do
+  atendimento -- falha em qualquer parte reverte tudo, token nunca
+  fica orfao. Qualquer falha de aceite responde sempre a mesma
+  mensagem generica ("Aceite de privacidade invalido ou expirado",
+  HTTP 409), nunca diferenciada.
+  **Frontend** (`frontend-especialista`): `state.tela` inicial passa a
+  `'lgpd'` (era `'home'`), integrado como mais um `case` da SPA
+  existente (sem pagina separada, sem flash); checkbox desmarcado por
+  padrao, botao "Li e estou ciente — Continuar" realmente desabilitado
+  (atributo + `aria-disabled` + revalidacao independente do handler,
+  blindado contra disparo via devtools); avanco so apos clique
+  explicito + sucesso do backend; token de aceite nunca persistido em
+  storage (so memoria JS, resetado em refresh/cancelamento/novo
+  atendimento); aceite expirado detectado em `iniciar()` volta para a
+  tela LGPD; recusa ("Nao desejo continuar") nao coleta dado, orienta
+  portaria/atendente; texto integral em modal dedicado
+  (header/footer fixos, corpo rolavel, foco gerenciado, fechar nunca
+  altera o checkbox), leitura nao forcada; alvos de toque >=64px;
+  paleta oficial centralizada em `:root` e aplicada a TODO `app.css`
+  (tabela de mapeamento cores antigas -> tokens novos registrada no
+  handoff, com 2 excecoes semanticas mantidas -- vermelho de erro,
+  verde de sucesso -- e 1 desvio deliberado documentado -- `#5b6b7a`
+  mapeado para `--text-primary`, nao `--text-secondary`, por
+  reprovacao de contraste AA em fonte pequena); zero logo (nenhum
+  asset local existe no projeto, nao inventado); zero CDN/hotlink.
+  **Testes** (`qa-testes`): `teste_lgpd_aceite_backend_seguranca.php`
+  (39/39) e `teste_lgpd_migration_014.php` (28/28) novos e
+  versionados, cobrindo os 14 cenarios de seguranca (incluindo
+  concorrencia real via `proc_open()` com XOR confirmado, e rollback
+  real forcado via usuario MySQL sem privilegio) e os 7 cenarios de
+  migration (banco descartavel dedicado por cenario). Interface
+  validada por leitura cuidadosa (12 cenarios). Contraste calculado:
+  `--text-primary`/branco ~11,36:1 (AAA), `--brand-primary` como
+  texto/botao ~4,84:1 (AA); `--text-secondary`/`--text-muted`
+  reprovariam AA mas confirmado que nenhum dos dois e efetivamente
+  usado em nenhum seletor real (so declarados/documentados). Achados
+  nao bloqueantes: ausencia de `:focus`/`:focus-visible` customizado
+  em `app.css` (pre-existente ao projeto, nao desta demanda); 2
+  arquivos auxiliares pre-existentes ausentes para
+  `teste_rate_limit_identificar_cliente_pdo.php` (nao relacionado).
+  **Achado BLOQUEANTE para `/02-testes`**: `AtendimentoDao::criar()`
+  agora referencia a coluna nova incondicionalmente -- qualquer banco
+  sem a migration 014 aplicada falha para QUALQUER teste que crie
+  atendimento (raio de regressao maior que o estimado no
+  planejamento, nao so quem chama `iniciar()` via HTTP). Tentativa de
+  aplicar a migration ao banco de desenvolvimento compartilhado para
+  poder reexecutar a bateria de regressao foi corretamente BLOQUEADA
+  pelo sistema de permissoes antes de qualquer escrita (zero linha
+  alterada em `udlog_totem`, contagens capturadas como referencia:
+  `tb_totem`=11, `tb_atendimento`=121, `tb_atendimento_nota`=95,
+  `tb_cliente`=38) -- respeitando a restricao de nunca aplicar
+  migration contra banco de desenvolvimento real. A bateria completa
+  de regressao (Recebimento/Expedicao/CNH/CRLV/OCR/VIO/Talent/
+  impressao/JPEG/rate limit/numero da nota/retomada) NAO pode ser
+  validada de ponta a ponta neste ambiente sem antes clonar
+  schema+dados de `udlog_totem` para um banco DESCARTAVEL com
+  marcador QA exclusivo, aplicar 014 la, e so entao reexecutar --
+  nao decidido nem executado nesta rodada, registrado como pendencia
+  bloqueante explicita para `/02-testes`. Zero credencial real, zero
+  chamada externa, zero impressao, zero acesso a producao/Hostgator,
+  zero acao no Trello, zero commit/push em toda a etapa. Ver
+  `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md`, secao
+  "Resultado da implementacao". **Demanda NAO liberada para
+  `/02-testes` de forma plena -- aguardando resolucao do achado
+  bloqueante de regressao (clone descartavel + reexecucao completa)
+  antes de prosseguir para `/03-revisao`.**
+- 2026-09-24 — **Retomada de `/02-testes` de `tela-inicial-lgpd-totem`
+  (auditoria rigorosa) — achado bloqueante da entrada anterior
+  RESOLVIDO**. Dois registros nesta entrada: (1) incidente ja aceito
+  pelo usuario, ocorrido na rodada anterior -- `teste_concorrencia_real_iniciar_processamento.php`
+  fez uma chamada HTTP real acidental ao ambiente Trial do Serpro
+  (documento sintetico, nenhum dado real, nenhum registro real
+  alterado, interrompida assim que identificada, `.env` restaurado com
+  hash MD5 identico confirmado, banco descartavel daquela rodada
+  removido, `udlog_totem` confirmado inalterado). Nao se declara "zero
+  chamada externa em toda a demanda" -- houve essa unica tentativa
+  real, ja aceita; nenhuma nova chamada externa ocorreu a partir dai.
+  (2) Retomada da bateria de regressao: todas as suites relevantes de
+  `tests/manual/` auditadas individualmente (leitura completa do
+  codigo-fonte) ANTES de qualquer execucao, classificadas em `SEGURO --
+  MOCK/LOCAL` (29 suites, todas confirmadas sem `VIO_AMBIENTE=trial`
+  herdado sem neutralizacao, sem chamada real a Talent/impressao,
+  banco sempre descartavel/sintetico), `NAO EXECUTAR -- POSSIVEL
+  CHAMADA EXTERNA` (`teste_concorrencia_real_iniciar_processamento.php`
+  -- origem do incidente, nao executado nesta retomada;
+  `teste_vio_decode_wire_format.php` -- desenhado para rede real ao
+  Trial, auto-pula sem credenciais mas excluido por design;
+  `teste_consulta_ordem_coleta.php` -- toca banco externo real de
+  gestao de coletas, nao executado) e `NAO EXECUTAR -- DEPENDENCIA NAO
+  COMPROVADA` (`teste_rate_limit_identificar_cliente_pdo.php`;
+  `teste_preparacao_producao_checkin.php`, script de preparacao de
+  producao que deixa residuo deliberado no banco de dev, fora de
+  escopo de regressao repetivel). Novo banco QA descartavel dedicado
+  `qa_regressao_lgpd_1790275415_fcf82c52` (schema.sql + migrations
+  008-014), `.env` editado SO na linha `DB_NAME` (tecnica ja validada,
+  hash MD5 antes/depois identico
+  `7ff3510c1bba28007aeff8287d2b8ba7`, restaurado ao final) para
+  permitir que os subprocessos PHP das suites (que nao herdam `$_ENV`
+  sobrescrito no processo pai neste ambiente com
+  `variables_order=GPCS`) apontassem para o banco descartavel. 29
+  suites executadas, 28 com 100% de aprovacao (totais: 10/10, 8/8,
+  5/5, 16/16, 30/30, 11/11, 47/47, 21/21, 80/80, 622/622, 11/11, 23/23,
+  9/9, 19/19, 23/23, 10/10, 34/34, 45/45, 18/18, 9/9, 12/12, 32/32,
+  15/15, 3/3, 14/14, 35/35, 22/22, 39/39, 28/28); a excecao
+  (`teste_integridade_conclusao_atendimento.php`, 16/43) tem as 27
+  falhas 100% rastreadas a 6 scripts auxiliares de teste pre-existentes
+  ausentes do repositorio (`_caso_cancelar.php`,
+  `_caso_bloquear_excesso.php`,
+  `_caso_concluir_digitalizacao_cas_direto.php`,
+  `_caso_iniciar_processamento_vio_indisponivel.php`,
+  `_caso_iniciar_processamento_falha_durante_validacao.php`,
+  `_caso_nota_pdo_falha.php`) -- mesma classe de gap ja conhecida para
+  `teste_rate_limit_identificar_cliente_pdo.php`, mas com escopo MAIOR
+  do que documentado antes; confirmado que NENHUMA dessas falhas e
+  regressao desta demanda (todas ocorrem antes de qualquer logica
+  tocada por ela). Confirmacao visual reconfirmada (nao remedida do
+  zero): contraste de `#a32d2d`/`#1d7a5f` inalterado, ausencia de
+  `:focus`/`:focus-visible` pre-existente confirmada,
+  `impressao.js`/`diagnostico-impressao.js` sem cor hardcoded
+  confirmados. Encerramento: banco QA removido, `.env` restaurado
+  (hash identico confirmado), `udlog_totem` reconfirmado inalterado
+  (`tb_totem`=11, `tb_atendimento`=121, `tb_atendimento_nota`=95,
+  `tb_cliente`=38, identico a rodada anterior), zero nova chamada
+  externa, zero impressao real, zero acesso a producao/Hostgator, zero
+  Trello, zero commit/push nesta retomada. Ver
+  `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md`, secoes
+  "Incidente registrado -- chamada real acidental ao Trial do Serpro" e
+  "Retomada de `/02-testes`". **Liberado para `/02-testes` formal
+  (roteiro de verificacao manual) e depois `/03-revisao`** -- pendencias
+  nao bloqueantes remanescentes: validacao fisica em monitor vertical
+  real; aprovacao formal do DPO sobre o texto do termo antes de
+  producao; decisao de produto sobre prazo de retencao de
+  `tb_lgpd_aceite`; higiene dos arquivos auxiliares de teste
+  pre-existentes ausentes (nao relacionados a esta demanda).
+- 2026-09-24 -- `/02-testes` independente da demanda
+  `tela-inicial-lgpd-totem`. 3 revisores independentes (`qa-testes`,
+  `security-especialista`, `frontend-especialista`), nenhum
+  participante da implementacao, instruidos a nao confiar nos
+  resultados relatados e produzir evidencia propria. Registro
+  obrigatorio (nao omitido): a rodada anterior teve UMA chamada real
+  acidental ao Trial do Serpro, ja aceita formalmente pelo usuario --
+  nao se declara "zero chamada externa durante toda a demanda", so
+  que nenhuma NOVA chamada externa ocorreu nesta rodada de
+  `/02-testes` (confirmado pelos 3 revisores independentemente).
+  `qa-testes`: APROVADO -- migration 014 (28/28) e seguranca do
+  aceite (39/39) reconfirmadas empiricamente; prova negativa propria
+  em 5 cenarios (15/15); caso `teste_integridade_conclusao_atendimento.php`
+  (16/43 na rodada anterior) investigado a fundo -- confirmado que os
+  6 auxiliares ja estavam ausentes desde o HEAD de origem (pre-existente,
+  nao desta demanda), controles criticos que sobrepoem
+  `AtendimentoDao`/`AtendimentoRn` (alterados por esta demanda)
+  reproduzidos por teste temporario proprio (20/20, incluindo
+  concorrencia real), removido ao final. `security-especialista`:
+  APROVADO -- 22 pontos de seguranca do aceite validados com
+  evidencia REAL (banco QA + `php -S` local, incluindo `SIGNAL`
+  forcado para testar rollback/log, `proc_open` real para
+  concorrencia); prova negativa propria em 5 cenarios com mutacao real
+  + reversao com hash identico. Achado de atencao nao bloqueante:
+  ausencia de handler global de excecao em `public/api/*.php` (so
+  exposto por mutacao artificial do proprio revisor, nao alcancavel
+  no codigo real hoje) -- registrado para avaliacao futura do projeto
+  como um todo. `frontend-especialista`: **PRECISA DE AJUSTE** --
+  evidencia real em navegador (Puppeteer) confirmou todo o fluxo/
+  paleta/texto corretos, EXCETO 1 achado BLOQUEANTE real: botao "Ver
+  termo completo" (`.lgpd-btn-ver-termo`) medido em 340x56px, abaixo
+  do minimo de 64px exigido pelo proprio projeto -- confirmado
+  independentemente pelo orquestrador em
+  `public/totem/assets/app.css:277`. Todos os demais controles da
+  tela (checkbox, continuar, recusar, botoes do modal) corretamente
+  em 64px -- e a unica excecao, que passou despercebida nas rodadas
+  anteriores por terem validado "por leitura", nao por medicao real.
+  **Achado de processo registrado (responsabilidade do orquestrador,
+  nao de nenhum sub-agente)**: 2 dos 3 revisores rodaram mutacoes
+  temporarias de arquivo em disco concorrentemente no mesmo worktree
+  sem coordenacao -- um deles quase reportou um falso positivo
+  (suposto bypass cross-totem) por capturar o arquivo do outro no
+  meio de uma mutacao alheia, mas investigou a fundo e descartou
+  corretamente antes de reportar; orquestrador reconfirmou
+  independentemente que os hashes finais de ambos os arquivos batem
+  com o estado estavel esperado, sem mutacao residual. Licao
+  registrada: revisoes futuras que exijam mutacao de arquivo em disco
+  nao devem rodar em paralelo irrestrito no mesmo worktree. **Veredito
+  consolidado: PRECISA DE AJUSTE**, exclusivamente pelo achado do
+  botao de 56px -- nenhum outro achado tecnico/funcional contrario a
+  implementacao em nenhum dos 3 escopos. Zero residuo (5 bancos QA
+  removidos), zero nova chamada externa, zero commit/push, zero
+  acesso a producao/Hostgator/Talent/VIO/Serpro real, zero impressao,
+  zero acao no Trello, worktree principal da demanda anterior
+  confirmado intocado. Ver
+  `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md`, secao
+  "Resultado de /02-testes independente". **Demanda retorna para
+  rodada curta de `/01-implementacao`, restrita a
+  `public/totem/assets/app.css:277` (`min-height: 56px` ->
+  `64px`).**
+- 2026-09-24 -- Continuacao da rodada curta de `/01-implementacao` de
+  `tela-inicial-lgpd-totem` (frontend-especialista), restrita a
+  confirmar a correcao ja aplicada por tentativa anterior interrompida
+  por rate limit e concluir a revisao visual completa no navegador.
+  Isolamento reconfirmado: trabalho exclusivo em
+  `C:\xampp\htdocs\totem-udlog-worktree-lgpd` (branch
+  `tela-inicial-lgpd-totem`), worktree principal nao tocado. Hashes dos
+  3 arquivos de backend congelados reconfirmados IDENTICOS no inicio e
+  no fim da sessao: `app/Dao/AceiteLgpdDao.php`
+  (`e1bb91b8bc06fe92fe18339b788854a0`),
+  `app/Controller/AtendimentoController.php`
+  (`d06b822b026a0db4a24466fd218c032b`),
+  `sql/migrations/014_tb_lgpd_aceite.sql`
+  (`5fa27edd40d4258121d7d56582f1b119`) -- zero alteracao de backend/
+  banco/migration nesta rodada.
+
+  **Correcao confirmada por leitura direta**: `public/totem/assets/app.css`
+  linha 277, `.lgpd-btn-ver-termo { ... min-height: 64px; ... }` --
+  ja estava aplicada antes desta sessao comecar (nao reaplicada,
+  so confirmada). Todos os 8 `min-height: 64px` do arquivo
+  reconfirmados presentes (linhas 213, 238, 277, 290, 308, 316, 349, 373).
+
+  **Metodo de revisao visual**: harness HTML estatico criado SO em
+  pasta de scratchpad fora do repositorio (nunca dentro de `public/`),
+  servindo `/totem/assets/*` reais do worktree via `php -S` + router
+  dedicado, com `#lgpd-termo-dados` gerado por
+  `App\Content\TermoLgpd` (classe sem dependencia de banco) e
+  `data-totem-token`/`data-totem-nome` ficticios -- zero acesso a
+  banco/DB nesta rodada (inclusive o `AceiteLgpdDao`/`TotemDao` reais
+  nunca foram instanciados). Medicoes via Puppeteer
+  (`getBoundingClientRect()` real, nao presuncao/leitura de CSS).
+
+  **Medicoes reais de TODOS os controles da tela LGPD** (identicas nas
+  2 resolucoes testadas, 1080x1920 e 768x1024):
+  `.lgpd-btn-ver-termo` (Ver termo completo) 340x**64px** (confirmacao
+  central desta rodada); `.lgpd-checkbox-label` (area clicavel
+  inteira) 340x64px; `#lgpdBtnContinuar` 340x64px; `#lgpdBtnNaoContinuar`
+  340x64px; `.modal-lgpd-fechar` (X do cabecalho do modal) 64x64px;
+  `.modal-lgpd-btn-fechar` (rodape do modal) 420x64px. Nenhum controle
+  abaixo de 64px.
+
+  **Estados/comportamentos verificados com evidencia real (Puppeteer)**:
+  tela LGPD e a primeira renderizada, sem flash de `home` (`ir('lgpd')`
+  direto em `iniciarApp()`); ausencia de logo/imagem (zero `<img>` na
+  pagina, reconfirmado); ausencia de qualquer requisicao externa (todas
+  as requests de rede capturadas ficaram 100% em `127.0.0.1`); checkbox
+  nasce desmarcado; botao Continuar nasce com `disabled=true` e
+  `aria-disabled="true"`; marcar o checkbox habilita o botao (both
+  `disabled`/`aria-disabled` corretos); desmarcar volta a desabilitar;
+  abrir o modal do termo completo funciona (`display:flex`,
+  `visibility:visible`, `opacity:1`, cobrindo a viewport inteira --
+  o falso `offsetParent===null` inicial da primeira tentativa de
+  script foi identificado como quirk conhecido do Chrome para
+  `position:fixed`, nao um defeito real, reconfirmado por bounding
+  rect); corpo do modal genuinamente rolavel
+  (`scrollHeight=3590 > clientHeight`, testado em ambas resolucoes,
+  scroll real de 0 ate o fim executado com sucesso); cabecalho do modal
+  permanece fixo (mesma posicao `top` antes/depois de rolar o corpo);
+  fechar o modal preserva o estado do checkbox (`checked` inalterado);
+  foco move corretamente para `#lgpdBtnContinuar` (outline padrao do
+  navegador, sem customizacao -- mesmo achado pre-existente ja
+  registrado nas rodadas anteriores, nao desta correcao); erro de
+  backend simulado via interceptacao de `fetch` (sem nenhuma rede
+  real) mant\u00e9m a tela LGPD e mostra o toast de erro (texto real,
+  nao so cor); botao "Nao desejo continuar" abre o modal generico
+  (`#modalFundo`) com a mensagem correta, ZERO chamada de rede
+  disparada; refresh reinicia para `lgpd` com checkbox desmarcado,
+  `localStorage`/`sessionStorage`/cookies vazios (0 chaves, 0 cookies)
+  tanto antes quanto depois do fluxo de aceite; nenhum overflow
+  horizontal em nenhuma das 2 resolucoes; botao Continuar sempre dentro
+  da viewport (nunca cortado/inalcancavel).
+
+  **Spot-check adicional (nao pedido explicitamente, mas util para
+  confirmar consistencia de paleta)**: navegacao client-side pura
+  (chamadas diretas a `ir(tela)`, sem nenhuma chamada de API real) para
+  `home`, `exp_placa`, `rec_placa_qtd`, `exp_confirma`, `exp_impressao`,
+  `rec_bloqueado` -- paleta visualmente consistente com a tela LGPD em
+  todas (mesmo azul de marca, mesmo texto principal, sem gradiente/cor
+  fora do padrao, sem overflow horizontal em nenhuma). Nota tecnica:
+  renderizar `exp_impressao` client-side disparou uma tentativa de
+  `fetch` para `atendimento.php?acao=finalizar` (comportamento proprio
+  da tela, nao desta correcao) -- como o router de teste so serve
+  arquivos estaticos, a resposta foi um 404 sintetico do proprio
+  harness, sem nenhum contato com `public/api/` real nem com banco.
+
+  **Contraste**: reconfirmado por leitura de `--text-primary`
+  (`#3A3A3A`), `--brand-primary`/`--action-primary` (`#0179AD`),
+  `--action-primary-text` (`#FFFFFF`) via `getComputedStyle` real no
+  navegador -- valores identicos aos ja calculados e aprovados nas
+  rodadas anteriores (11,37:1 / 4,84:1), sem necessidade de novo
+  calculo (elementos nao mudaram desde a ultima medicao formal).
+
+  **Nenhum novo defeito visual encontrado** alem do ja corrigido
+  (56px -> 64px). Nenhum ajuste adicional de CSS/JS foi necessario
+  nesta rodada.
+
+  **Confirmacoes finais de restricao**: zero alteracao em backend/
+  migration/banco (hashes idênticos ao inicio); zero chamada a
+  Serpro/VIO/Talent/qualquer API externa (0 requests fora de
+  `127.0.0.1` capturadas); zero impressao real (telas de impressao
+  observadas so visualmente, nenhuma acao de impressao real
+  disparada); zero acesso a Hostgator/producao; zero acao no Trello;
+  zero commit/push; todos os artefatos de teste (harness HTML, router
+  PHP, scripts Puppeteer, screenshots) criados exclusivamente na pasta
+  de scratchpad da sessao (fora do worktree) e removidos ao final --
+  `git status --short` do worktree confirmado IDENTICO antes/depois
+  desta rodada (nenhum arquivo novo, nenhuma alteracao alem do que ja
+  existia).
+
+  **Frontend pronto para uma `/03-revisao` curta e independente**, com
+  os demais pontos da demanda (paleta, texto, backend, migration,
+  seguranca do aceite) permanecendo congelados nas rodadas anteriores
+  ja aprovadas. Pendencias nao bloqueantes remanescentes (inalteradas):
+  validacao fisica em monitor vertical real; aprovacao formal do DPO
+  sobre o texto do termo antes de producao; decisao de produto sobre
+  prazo de retencao de `tb_lgpd_aceite`; higiene dos arquivos
+  auxiliares de teste pre-existentes ausentes (nao relacionados a esta
+  demanda). Ver `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md`,
+  secao "Continuacao da rodada curta de /01-implementacao -- revisao
+  visual completa".
+- 2026-09-25 -- `/03-revisao` INDEPENDENTE final de
+  `tela-inicial-lgpd-totem` -- **VEREDITO: APROVADO**. Revisor sem
+  participacao em nenhuma rodada anterior, instruido a produzir
+  evidencia propria (nao confiar em relatorios anteriores), restrito
+  exclusivamente a `C:\xampp\htdocs\totem-udlog-worktree-lgpd` (branch
+  `tela-inicial-lgpd-totem`), worktree principal nao tocado. Harness
+  estatico proprio (scratchpad, fora do repositorio) + Puppeteer/Chrome
+  real, mesma tecnica ja validada em rodada anterior (zero banco --
+  `AceiteLgpdDao`/`TotemDao`/PDO reais nunca instanciados, so
+  `App\Content\TermoLgpd`, sem dependencia de banco). **Medicao real
+  dos 6 controles em 1080x1920 E 768x1024**: todos exatamente 64px de
+  altura (`.lgpd-btn-ver-termo` 340x64, `.lgpd-checkbox-label` 340x64,
+  `#lgpdBtnContinuar` 340x64, `#lgpdBtnNaoContinuar` 340x64,
+  `#lgpdModalBtnFechar` 64x64, `.modal-lgpd-btn-fechar` 420x64) --
+  confirma de forma independente a correcao 56px->64px ja aplicada.
+  **Fluxo LGPD validado com evidencia propria** (nao presuncao):
+  primeira tela sem flash de `home`; `disabled`+`aria-disabled` reais;
+  clique/Enter/chamada direta do handler via `page.evaluate` sem efeito
+  e zero rede com checkbox desmarcado; marcar checkbox so habilita,
+  zero rede; avanco so apos fetch simulado resolver (interceptacao,
+  zero rede real); falha simulada mantem a tela com toast; refresh e
+  `novoAtendimento()` reiniciam o gate; `localStorage`/
+  `sessionStorage`/cookies sempre vazios antes/depois; modal rolavel
+  (`scrollHeight` 3590 > `clientHeight` em ambas resolucoes), fecha
+  preservando o checkbox; recusa com zero requisicao adicional; zero
+  overflow horizontal. **Todos os 27 estados alcancaveis de
+  `renderTela()` inspecionados nominalmente** (`lgpd`, `home`,
+  `exp_placa`, `exp_selecionar_ordem`, `exp_dados`, `exp_cnh_frente`,
+  `exp_cnh_verso`, `exp_cnh_manual`, `exp_crlv`, `exp_crlv_manual`,
+  `exp_aguarde_documentos`, `exp_confirma`, `exp_ajudante`,
+  `exp_impressao`, `rec_placa_qtd`, `rec_bloqueado`, `rec_digitaliza`,
+  `rec_cliente`, `rec_cnh_frente`, `rec_cnh_verso`, `rec_cnh_manual`,
+  `rec_crlv`, `rec_crlv_manual`, `rec_aguarde_documentos`,
+  `rec_confirma`, `rec_ajudante`, `rec_impressao`) via injecao de
+  `state` sintetico + chamada direta a `renderTela()` real em Chrome
+  real -- todos sem erro de execucao, sem HTML vazio, sem overflow, sem
+  requisicao externa. Confirmado que `case 'rec_cnh'` (28o `case`
+  literal do switch) e INALCANCAVEL por design (comentario no proprio
+  codigo), por isso 27 e o numero correto de estados alcancaveis.
+  **Contraste recalculado de forma independente** (formula WCAG propria,
+  nao copiada): `#3A3A3A`/branco 11,37:1, `#0179AD`/branco e
+  branco/`#0179AD` 4,84:1, `#a32d2d`/branco e branco/`#a32d2d` 7,07:1,
+  `#1d7a5f`/branco e branco/`#1d7a5f` 5,25:1 -- todos PASSAM AA,
+  valores identicos aos ja relatados (recalculo confirma, nao so
+  repete). `--text-secondary`/`--text-muted` reconfirmados sem nenhum
+  uso real em seletor de `app.css`. Zero `:focus-visible` customizado
+  (achado pre-existente, nao bloqueante, ja registrado). Zero
+  gradiente/CDN/hotlink em `app.css`/`app.js`/`index.php`. Zero cor hex
+  hardcoded em `impressao.js`/`diagnostico-impressao.js`.
+  **Integridade do escopo confirmada por hash**: `AceiteLgpdDao.php`
+  (`e1bb91b8bc06fe92fe18339b788854a0`), `AtendimentoController.php`
+  (`d06b822b026a0db4a24466fd218c032b`) e migration 014
+  (`5fa27edd40d4258121d7d56582f1b119`) identicos aos ja registrados --
+  nenhuma alteracao de backend/migration desde o `/02-testes` anterior;
+  unico ajuste de codigo desde entao continua sendo `min-height: 56px
+  -> 64px` em `.lgpd-btn-ver-termo`. `git status --short` do worktree
+  confirmado IDENTICO antes/depois desta revisao. Zero banco (nem
+  descartavel), zero chamada Serpro/VIO/Talent/qualquer API externa (0
+  requisicoes fora de `127.0.0.1` em toda a sessao), zero impressao
+  real, zero acesso a producao/Hostgator, zero Trello, zero
+  commit/push nesta revisao. Pendencias nao bloqueantes reconfirmadas
+  como ainda em aberto (nao verificadas/resolvidas por esta revisao):
+  validacao fisica em monitor vertical real (21,5"); aprovacao formal
+  do DPO sobre o texto do termo antes de producao; decisao de produto
+  sobre prazo de retencao de `tb_lgpd_aceite`; higiene dos arquivos
+  auxiliares de teste pre-existentes ausentes. Ver
+  `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md`, secao
+  "`/03-revisao` INDEPENDENTE final (2026-09-25)". **Demanda liberada
+  para `/04-commit-e-push`.**

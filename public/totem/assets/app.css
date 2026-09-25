@@ -1,9 +1,27 @@
+/* Paleta oficial UDLOG (demanda tela-inicial-lgpd-totem, 2026-09-24) —
+   fonte: .claude/skills/udlog-brand-colors/SKILL.md, ja validada e
+   aplicada ao projeto INTEIRO nesta implementacao (substitui o navy
+   #0b2a45 usado ate aqui como placeholder, ver tabela de mapeamento no
+   handoff desta demanda). Nao alterar os valores hex sem atualizar a
+   skill primeiro. */
+:root {
+    --brand-primary: #0179AD;
+    --background: #FFFFFF;
+    --surface: #FFFFFF;
+    --text-primary: #3A3A3A;
+    --text-secondary: #878789;
+    --text-muted: #9BA0A5;
+    --border: #B0B0B1;
+    --action-primary: #0179AD;
+    --action-primary-text: #FFFFFF;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
 body {
     font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: #fff;
-    color: #0b2a45;
+    background: var(--background);
+    color: var(--text-primary);
 }
 #app {
     height: 100vh;
@@ -17,7 +35,11 @@ body {
 .btn-cancelar {
     background: none;
     border: none;
-    color: #5b6b7a;
+    /* --text-secondary (#878789) reprovaria AA neste tamanho de fonte
+       (15px, abaixo do limiar de ~18-24px recomendado pela skill de
+       paleta para uso de texto secundario) — mantido --text-primary por
+       legibilidade, conforme regra de contraste da propria skill. */
+    color: var(--text-primary);
     font-size: 15px;
     cursor: pointer;
 }
@@ -30,8 +52,10 @@ body {
     justify-content: center;
     gap: 18px;
 }
-.titulo { font-size: 22px; font-weight: 600; text-align: center; }
-.subtitulo { font-size: 15px; color: #5b6b7a; text-align: center; }
+.titulo { font-size: 22px; font-weight: 600; text-align: center; color: var(--text-primary); }
+/* mesma ressalva de contraste do .btn-cancelar acima — 15px fica abaixo do
+   limiar seguro para --text-secondary, mantido --text-primary. */
+.subtitulo { font-size: 15px; color: var(--text-primary); text-align: center; }
 
 .btn-primario, .btn-fantasma, .btn-alerta {
     border-radius: 10px;
@@ -40,61 +64,67 @@ body {
     padding: 16px 22px;
     cursor: pointer;
 }
-.btn-primario { background: #0b2a45; color: #fff; border: 2px solid #0b2a45; }
-.btn-fantasma { background: #fff; color: #0b2a45; border: 2px solid #0b2a45; }
-.btn-alerta { background: #fff; color: #a32d2d; border: 2px solid #a32d2d; }
+.btn-primario { background: var(--action-primary); color: var(--action-primary-text); border: 2px solid var(--action-primary); }
+.btn-fantasma { background: var(--surface); color: var(--brand-primary); border: 2px solid var(--brand-primary); }
+/* excecao semantica mantida (erro/alerta) — cor propria fora da paleta de
+   marca, ja acessivel, sempre usada junto de texto (nunca so cor). */
+.btn-alerta { background: var(--surface); color: #a32d2d; border: 2px solid #a32d2d; }
 .btn-primario:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .grupo-botoes { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 340px; margin: 0 auto; }
 .grupo-botoes-linha { display: flex; gap: 12px; justify-content: center; }
 
 .tile { width: 100%; height: 140px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 20px; font-weight: 600; cursor: pointer; }
-.tile-principal { background: #0b2a45; color: #fff; border: 2px solid #0b2a45; }
-.tile-secundaria { background: #fff; color: #0b2a45; border: 2px solid #0b2a45; }
+.tile-principal { background: var(--action-primary); color: var(--action-primary-text); border: 2px solid var(--action-primary); }
+.tile-secundaria { background: var(--surface); color: var(--brand-primary); border: 2px solid var(--brand-primary); }
 
 input.campo-texto {
     font-size: 26px;
     letter-spacing: 0.06em;
     text-align: center;
     padding: 16px 20px;
-    border: 2px solid #0b2a45;
+    border: 2px solid var(--brand-primary);
     border-radius: 10px;
-    color: #0b2a45;
+    color: var(--text-primary);
     width: 100%;
     max-width: 320px;
     margin: 0 auto;
 }
 .campo { display: flex; flex-direction: column; gap: 4px; }
-.campo label { font-size: 13px; color: #5b6b7a; font-weight: 600; }
+/* ressalva de contraste de novo (13px, ainda menor) — --text-primary. */
+.campo label { font-size: 13px; color: var(--text-primary); font-weight: 600; }
 .campo input {
-    border: 1px solid #cbd5df; border-radius: 8px; padding: 10px 12px;
-    font-size: 16px; color: #0b2a45; background: #fff;
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    font-size: 16px; color: var(--text-primary); background: var(--surface);
 }
 .grade-campos { display: grid; grid-template-columns: 1fr; gap: 10px; max-width: 420px; margin: 0 auto; width: 100%; }
 @media (min-width: 520px) { .grade-campos { grid-template-columns: 1fr 1fr; } }
 
 .linha-confirma { font-size: 15px; }
-.linha-confirma input { border: none; border-bottom: 1px solid #cbd5df; background: transparent; font-size: 15px; color: #0b2a45; font-weight: 600; width: 160px; padding: 2px 0; }
+.linha-confirma input { border: none; border-bottom: 1px solid var(--border); background: transparent; font-size: 15px; color: var(--text-primary); font-weight: 600; width: 160px; padding: 2px 0; }
 
 .caixa-camera { position: relative; width: 100%; max-width: 360px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 4/3; }
 .caixa-camera video { width: 100%; height: 100%; object-fit: cover; }
-.status-leitura { font-size: 13px; color: #5b6b7a; text-align: center; }
+.status-leitura { font-size: 13px; color: var(--text-primary); text-align: center; }
+/* excecao semantica mantida (sucesso) — mesma justificativa do erro acima. */
 .status-leitura.ok { color: #1d7a5f; font-weight: 600; }
 
-.cartao-oc { text-align: left; background: #f7f9fa; border: 1.5px solid #cbd5df; border-radius: 10px; padding: 14px 16px; cursor: pointer; }
-.cartao-oc .numero { font-size: 16px; font-weight: 600; }
-.cartao-oc .detalhe { font-size: 13px; color: #5b6b7a; margin-top: 2px; }
+.cartao-oc { text-align: left; background: #f7f9fa; border: 1.5px solid var(--border); border-radius: 10px; padding: 14px 16px; cursor: pointer; }
+.cartao-oc .numero { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.cartao-oc .detalhe { font-size: 13px; color: var(--text-primary); margin-top: 2px; }
 
-.lista-sugestoes { border: 1px solid #cbd5df; border-radius: 10px; overflow: hidden; max-width: 420px; margin: 0 auto; width: 100%; }
-.lista-sugestoes .item { padding: 12px 14px; font-size: 15px; border-bottom: 1px solid #e6ebef; cursor: pointer; }
+.lista-sugestoes { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; max-width: 420px; margin: 0 auto; width: 100%; }
+.lista-sugestoes .item { padding: 12px 14px; font-size: 15px; border-bottom: 1px solid var(--border); cursor: pointer; }
 .lista-sugestoes .item:last-child { border-bottom: none; }
 .lista-sugestoes .item:hover { background: #f4f6f8; }
 
 .miniaturas { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
-.miniatura { position: relative; width: 32px; height: 40px; background: #0b2a45; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; overflow: visible; }
+.miniatura { position: relative; width: 32px; height: 40px; background: var(--action-primary); border-radius: 5px; display: flex; align-items: center; justify-content: center; color: var(--action-primary-text); font-size: 12px; overflow: visible; }
 .miniatura img { width: 100%; height: 100%; object-fit: cover; border-radius: 5px; }
 /* selo de numero da nota (confirmado/pendente) — demanda talent-doctos-finalizacao-checkin */
 .selo-numero { position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 4px; }
+/* excecoes semanticas mantidas (sucesso/erro) — selo tem TEXTO junto da cor
+   (numero da nota confirmado/pendente), nunca so cor. */
 .selo-numero.ok { background: #1d7a5f; color: #fff; }
 .selo-numero.pendente { background: #a32d2d; color: #fff; }
 
@@ -114,27 +144,33 @@ input.campo-texto {
 .caixa-scanner video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .guia-scanner { position: absolute; inset: 8%; border: 2px dashed rgba(255,255,255,0.85); border-radius: 8px; pointer-events: none; }
 .previa-nota { width: 100%; max-width: 360px; margin: 0 auto; display: block; border-radius: 12px; object-fit: contain; background: #000; flex-shrink: 0; }
-.status-scanner { font-size: 13px; color: #5b6b7a; text-align: center; }
+.status-scanner { font-size: 13px; color: var(--text-primary); text-align: center; }
+/* excecoes semanticas mantidas (sucesso/erro), texto proprio ja indica o
+   estado (nunca so cor). */
 .status-scanner.ok { color: #1d7a5f; font-weight: 600; }
 .status-scanner.erro { color: #a32d2d; font-weight: 600; }
 
-.senha-caixa { border: 2px dashed #cbd5df; border-radius: 10px; padding: 16px 32px; text-align: center; margin: 0 auto; }
-.senha-caixa .rotulo { font-size: 12px; color: #5b6b7a; }
-.senha-caixa .valor { font-size: 40px; font-weight: 700; color: #0b2a45; }
+.senha-caixa { border: 2px dashed var(--border); border-radius: 10px; padding: 16px 32px; text-align: center; margin: 0 auto; }
+.senha-caixa .rotulo { font-size: 12px; color: var(--text-primary); }
+.senha-caixa .valor { font-size: 40px; font-weight: 700; color: var(--text-primary); }
 
-.teclado { display: none; flex-shrink: 0; border-top: 1px solid #e2e8ee; background: #eef1f4; padding: 8px; }
+.teclado { display: none; flex-shrink: 0; border-top: 1px solid var(--border); background: #eef1f4; padding: 8px; }
 .teclado.aberto { display: block; }
 .linha-teclas { display: flex; gap: 4px; margin-bottom: 4px; justify-content: center; }
-.tecla { flex: 1; max-width: 46px; height: 40px; background: #fff; border: 1px solid #cbd5df; border-radius: 6px; font-size: 14px; color: #0b2a45; cursor: pointer; }
+.tecla { flex: 1; max-width: 46px; height: 40px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 14px; color: var(--text-primary); cursor: pointer; }
 .tecla-apagar { max-width: 60px; background: #dbe4ea; }
 .tecla-espaco { flex: 3; max-width: 260px; font-size: 12px; }
-.tecla-ok { max-width: 80px; background: #0b2a45; color: #fff; }
+.tecla-ok { max-width: 80px; background: var(--action-primary); color: var(--action-primary-text); }
 
-.modal-fundo { display: none; position: fixed; inset: 0; background: rgba(11,42,69,0.5); align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+/* scrim neutro (baseado em --text-primary, rgb(58,58,58)) — evita
+   reintroduzir o navy antigo (#0b2a45) so como cor de fundo semi-
+   transparente do overlay; nao e uma cor de marca/acao, so escurece o
+   conteudo por tras do modal. */
+.modal-fundo { display: none; position: fixed; inset: 0; background: rgba(58,58,58,0.5); align-items: center; justify-content: center; padding: 20px; z-index: 50; }
 .modal-fundo.aberto { display: flex; }
-.modal-caixa { background: #fff; border-radius: 14px; padding: 24px; max-width: 320px; text-align: center; display: flex; flex-direction: column; gap: 14px; }
-.modal-caixa .titulo { font-size: 17px; }
-.modal-caixa .subtitulo { font-size: 14px; }
+.modal-caixa { background: var(--surface); border-radius: 14px; padding: 24px; max-width: 320px; text-align: center; display: flex; flex-direction: column; gap: 14px; }
+.modal-caixa .titulo { font-size: 17px; color: var(--text-primary); }
+.modal-caixa .subtitulo { font-size: 14px; color: var(--text-primary); }
 
 /* confirmacao de cancelamento EMPILHADA sobre o modal de numero da nota
    (achado bloqueante do /03-revisao, demanda talent-doctos-finalizacao-checkin)
@@ -158,9 +194,9 @@ input.campo-texto {
    talent-doctos-finalizacao-checkin, achado 2 do /03-revisao) — alvos grandes
    (~64px), NAO reaproveitado por nenhuma outra tela/teclado do projeto. */
 .teclado-numerico-nota { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; max-width: 280px; margin: 0 auto; }
-.tecla-numerica { height: 64px; font-size: 22px; font-weight: 600; background: #fff; border: 2px solid #0b2a45; border-radius: 10px; color: #0b2a45; cursor: pointer; }
+.tecla-numerica { height: 64px; font-size: 22px; font-weight: 600; background: var(--surface); border: 2px solid var(--brand-primary); border-radius: 10px; color: var(--text-primary); cursor: pointer; }
 .tecla-numerica-apagar { background: #dbe4ea; border-color: #dbe4ea; }
-.tecla-numerica-confirmar { background: #0b2a45; border-color: #0b2a45; color: #fff; }
+.tecla-numerica-confirmar { background: var(--action-primary); border-color: var(--action-primary); color: var(--action-primary-text); }
 .tecla-numerica-confirmar:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* botao de saida do modal obrigatorio de numero da nota (achado 1 e achado
@@ -179,9 +215,9 @@ input.campo-texto {
     max-width: 280px;
     margin-left: auto;
     margin-right: auto;
-    background: #fff;
-    color: #0b2a45;
-    border: 2px solid #0b2a45;
+    background: var(--surface);
+    color: var(--brand-primary);
+    border: 2px solid var(--brand-primary);
     border-radius: 10px;
     font-size: 16px;
     font-weight: 600;
@@ -202,14 +238,14 @@ input.campo-texto {
 .impr-btn-alvo { min-height: 64px; }
 
 /* indicador visual de processamento (item 2) — spinner CSS simples,
-   reaproveitando as cores ja existentes do projeto (navy + branco), sem
-   cor nova. Usado nos 4 momentos de espera das telas de impressao. */
+   reaproveitando a cor de acao oficial da marca, sem cor nova. Usado nos 4
+   momentos de espera das telas de impressao. */
 .impr-spinner {
     width: 48px;
     height: 48px;
     margin: 0 auto;
     border: 5px solid #dbe4ea;
-    border-top-color: #0b2a45;
+    border-top-color: var(--action-primary);
     border-radius: 50%;
     animation: impr-girar 0.9s linear infinite;
 }
@@ -217,7 +253,129 @@ input.campo-texto {
     to { transform: rotate(360deg); }
 }
 
-.diag-overlay { position: fixed; inset: 0; background: rgba(11,42,69,0.6); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 70; }
-.diag-caixa { background: #fff; border-radius: 14px; max-width: 420px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; }
-.diag-cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #e2e8ee; font-size: 13px; color: #5b6b7a; font-weight: 600; }
+.diag-overlay { position: fixed; inset: 0; background: rgba(58,58,58,0.6); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 70; }
+.diag-caixa { background: var(--surface); border-radius: 14px; max-width: 420px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; }
+/* 13px — abaixo do limiar seguro para --text-secondary, mantido --text-primary. */
+.diag-cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text-primary); font-weight: 600; }
 .diag-corpo { padding: 24px 20px; display: flex; flex-direction: column; gap: 18px; }
+
+/* ===================================================================
+   Tela LGPD (demanda tela-inicial-lgpd-totem, 2026-09-24) — primeira
+   tela real da SPA, gate obrigatorio antes de 'home'. Namespace .lgpd-*
+   dedicado, sem reaproveitar/alterar nenhuma classe de tela existente.
+   =================================================================== */
+.lgpd-tela { text-align: center; }
+.lgpd-resumo { font-size: 15px; color: var(--text-primary); text-align: left; max-width: 420px; margin: 0 auto; }
+.lgpd-btn-ver-termo {
+    background: var(--surface);
+    color: var(--brand-primary);
+    border: 2px solid var(--brand-primary);
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 14px 18px;
+    min-height: 64px;
+    width: 100%;
+    max-width: 340px;
+    margin: 0 auto;
+    cursor: pointer;
+}
+/* area clicavel do label INTEIRA (nao so o quadrado do checkbox) — alvo de
+   toque minimo de 64px, mesmo padrao ja estabelecido no projeto
+   (.tecla-numerica/.impr-btn-alvo). */
+.lgpd-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    padding: 8px 6px;
+    width: 100%;
+    max-width: 340px;
+    margin: 0 auto;
+    text-align: left;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 600;
+}
+.lgpd-checkbox-label input[type="checkbox"] {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    accent-color: var(--brand-primary);
+    cursor: pointer;
+}
+.lgpd-btn-continuar { width: 100%; max-width: 340px; margin: 0 auto; min-height: 64px; }
+.lgpd-btn-recusar {
+    background: var(--surface);
+    color: var(--text-primary);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    min-height: 64px;
+    width: 100%;
+    max-width: 340px;
+    margin: 0 auto;
+    cursor: pointer;
+}
+
+/* modal dedicado do texto integral do termo — mesma convencao ja madura no
+   projeto (header/footer fixos, corpo com overflow-y:auto), elemento
+   PROPRIO e independente de #modalFundo/#modalCaixa. */
+.modal-fundo-lgpd { z-index: 50; }
+.modal-lgpd-caixa {
+    background: var(--surface);
+    border-radius: 14px;
+    max-width: 460px;
+    width: 100%;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+}
+.modal-lgpd-cabecalho {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 12px 14px 20px;
+    border-bottom: 1px solid var(--border);
+}
+.modal-lgpd-titulo { font-size: 17px; font-weight: 600; color: var(--text-primary); }
+.modal-lgpd-fechar {
+    min-width: 64px;
+    min-height: 64px;
+    background: none;
+    border: none;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+.modal-lgpd-corpo {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 16px 20px;
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.5;
+}
+.modal-lgpd-corpo h3 { font-size: 16px; margin: 16px 0 6px; color: var(--text-primary); }
+.modal-lgpd-corpo h3:first-child { margin-top: 0; }
+.modal-lgpd-corpo p, .modal-lgpd-corpo li { margin-bottom: 8px; }
+.modal-lgpd-corpo ul { padding-left: 20px; }
+.modal-lgpd-corpo a { color: var(--brand-primary); }
+.modal-lgpd-rodape { flex: 0 0 auto; padding: 12px 20px 16px; border-top: 1px solid var(--border); }
+.modal-lgpd-btn-fechar {
+    width: 100%;
+    min-height: 64px;
+    background: var(--action-primary);
+    color: var(--action-primary-text);
+    border: 2px solid var(--action-primary);
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+}

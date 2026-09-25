@@ -6,8 +6,29 @@
 const TOKEN = document.body.dataset.totemToken;
 const API_BASE = '/api/';
 
+// Fonte UNICA do texto/versao/hash do termo LGPD — renderizada no servidor
+// por public/totem/index.php (App\Content\TermoLgpd) e injetada aqui via
+// <script type="application/json" id="lgpd-termo-dados">, nunca duplicada
+// em JS (demanda tela-inicial-lgpd-totem, 2026-09-24).
+const termoLgpdDados = JSON.parse(
+    document.getElementById('lgpd-termo-dados')?.textContent || '{"versao":"","hash":"","texto":""}'
+);
+
 const state = {
-    tela: 'home',
+    // Tela inicial passa a ser 'lgpd' — gate obrigatorio de ciencia/aceite
+    // ANTES de qualquer atendimento (demanda tela-inicial-lgpd-totem,
+    // 2026-09-24). 'home' continua existindo, so passa a ser a tela
+    // SEGUINTE, nao mais a primeira.
+    tela: 'lgpd',
+    // Controle de fluxo em memoria — NUNCA gravado em localStorage/
+    // sessionStorage/cookie, para garantir que qualquer refresh sempre
+    // volta para a tela LGPD com o checkbox desmarcado, por construcao.
+    lgpdAceito: false,
+    // Token de aceite BRUTO (64 hex) recebido de lgpd.php?acao=aceitar —
+    // vive so em memoria durante a sessao do atendimento atual, NUNCA
+    // persistido. Enviado no payload de atendimento.php?acao=iniciar e
+    // limpo logo apos o uso (token e de uso unico de qualquer forma).
+    lgpdTokenAceite: null,
     tipo: null,
     idAtendimento: null,
     placa: '',
@@ -140,7 +161,10 @@ const IDLE_ABANDONO_MS = 30000;
 // mexe em idleTimerAbandono.
 function reiniciarIdle() {
     clearTimeout(idleTimerPrincipal);
-    if (state.tela === 'home') {
+    // 'lgpd' tratada com a MESMA condicao ja existente de 'home' (demanda
+    // tela-inicial-lgpd-totem, 2026-09-24) — nenhum monitoramento de
+    // inatividade antes do motorista sequer iniciar o atendimento.
+    if (state.tela === 'home' || state.tela === 'lgpd') {
         idleEstado = 'inativo';
         return;
     }
@@ -236,7 +260,10 @@ async function cancelarESair() {
 function ir(tela) {
     pararCamera();
     state.tela = tela;
-    document.getElementById('barraCancelar').style.display = tela === 'home' ? 'none' : 'block';
+    // Sem .barra-cancelar em 'lgpd' (mesma decisao ja tomada para 'home':
+    // botao cancelar aparece em toda tela do fluxo EXCETO a inicial —
+    // demanda tela-inicial-lgpd-totem, 2026-09-24).
+    document.getElementById('barraCancelar').style.display = (tela === 'home' || tela === 'lgpd') ? 'none' : 'block';
     fecharTeclado();
     fecharModal();
     // toda troca de tela (cancelar, voltar ao inicio, novo atendimento) fecha
@@ -255,6 +282,7 @@ function ir(tela) {
 function renderTela() {
     const tela = document.getElementById('tela');
     switch (state.tela) {
+        case 'lgpd': tela.innerHTML = telaLgpd(); ligarConsentimentoLgpd(); break;
         case 'home': tela.innerHTML = telaHome(); break;
         case 'exp_placa': tela.innerHTML = telaPlacaExpedicao(); break;
         case 'exp_selecionar_ordem': tela.innerHTML = telaSelecionarOrdem(); ligarCartoesOrdem(); break;
@@ -299,7 +327,12 @@ function renderTela() {
 
 function novoAtendimento() {
     Object.assign(state, {
-        tela: 'home', tipo: null, idAtendimento: null, placa: '',
+        // Reseta o gate LGPD junto com o restante do estado — cancelar,
+        // encerrar ou iniciar um novo atendimento sempre exige nova ciencia
+        // e um novo token de aceite (demanda tela-inicial-lgpd-totem,
+        // 2026-09-24).
+        tela: 'lgpd', lgpdAceito: false, lgpdTokenAceite: null,
+        tipo: null, idAtendimento: null, placa: '',
         ordens: [], dados: {}, notaOrdem: 0, notasImagens: [], notasNumeros: [], previewNotaAtual: null,
         capturaNotaEmAndamento: false, finalizandoDigitalizacao: false, clienteIdentificado: false, ultimaLeituraQr: null,
         exp: estadoExpVazio(),
@@ -309,7 +342,126 @@ function novoAtendimento() {
     ocrNumeroFila = [];
     numeroModalFila = [];
     numeroModalAberta = false;
-    ir('home');
+    ir('lgpd');
+}
+
+// -------------------- tela: LGPD (gate obrigatorio antes de 'home') --------------------
+
+// Foco salvo antes de abrir o modal do termo completo — devolvido ao
+// fechar (nunca altera o estado do checkbox).
+let focoAnteriorModalLgpd = null;
+
+function telaLgpd() {
+    return `<div class="lgpd-tela">
+        <div class="titulo">Aviso de Privacidade — LGPD</div>
+        <div class="subtitulo">Antes de iniciar seu atendimento, leia as informações sobre o tratamento dos seus dados pessoais neste Totem.</div>
+        <p class="lgpd-resumo">Para o Recebimento ou a Expedição, este Totem poderá coletar CNH, CRLV, notas fiscais e outras informações do atendimento. O texto completo explica finalidades, compartilhamento, retenção e seus direitos.</p>
+        <button type="button" class="lgpd-btn-ver-termo" id="lgpdBtnVerTermo">Ver termo completo</button>
+        <label class="lgpd-checkbox-label" for="lgpdCheckbox">
+            <input type="checkbox" id="lgpdCheckbox">
+            <span>Li e estou ciente do Aviso de Privacidade.</span>
+        </label>
+        <button type="button" class="btn-primario lgpd-btn-continuar" id="lgpdBtnContinuar" disabled aria-disabled="true" onclick="aceitarLgpd()">Li e estou ciente — Continuar</button>
+        <button type="button" class="lgpd-btn-recusar" id="lgpdBtnNaoContinuar">Não desejo continuar</button>
+    </div>
+    <div class="modal-fundo modal-fundo-lgpd" id="modalLgpdFundo">
+        <div class="modal-lgpd-caixa" id="modalLgpdCaixa">
+            <div class="modal-lgpd-cabecalho">
+                <div class="modal-lgpd-titulo">Aviso de Privacidade — texto completo</div>
+                <button type="button" class="modal-lgpd-fechar" id="lgpdModalBtnFechar" onclick="fecharModalLgpd()" aria-label="Fechar">✕</button>
+            </div>
+            <div class="modal-lgpd-corpo">${termoLgpdDados.texto}</div>
+            <div class="modal-lgpd-rodape">
+                <button type="button" class="modal-lgpd-btn-fechar" onclick="fecharModalLgpd()">Fechar</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function ligarConsentimentoLgpd() {
+    const checkbox = document.getElementById('lgpdCheckbox');
+    const btnContinuar = document.getElementById('lgpdBtnContinuar');
+    checkbox.checked = false;
+    checkbox.addEventListener('change', () => {
+        // Marcar o checkbox so HABILITA o botao — nunca avanca de tela
+        // sozinho (avanco so ocorre por clique explicito, ver aceitarLgpd()).
+        state.lgpdAceito = checkbox.checked;
+        if (checkbox.checked) {
+            btnContinuar.disabled = false;
+            btnContinuar.removeAttribute('aria-disabled');
+        } else {
+            btnContinuar.disabled = true;
+            btnContinuar.setAttribute('aria-disabled', 'true');
+        }
+    });
+    document.getElementById('lgpdBtnVerTermo').addEventListener('click', abrirModalLgpd);
+    document.getElementById('lgpdBtnNaoContinuar').addEventListener('click', recusarLgpd);
+}
+
+function abrirModalLgpd() {
+    focoAnteriorModalLgpd = document.activeElement;
+    document.getElementById('modalLgpdFundo').classList.add('aberto');
+    document.getElementById('lgpdModalBtnFechar').focus();
+}
+
+function fecharModalLgpd() {
+    // Fechar o modal NUNCA altera o estado do checkbox/botao.
+    document.getElementById('modalLgpdFundo').classList.remove('aberto');
+    if (focoAnteriorModalLgpd && typeof focoAnteriorModalLgpd.focus === 'function') {
+        focoAnteriorModalLgpd.focus();
+    }
+    focoAnteriorModalLgpd = null;
+}
+
+// Acao secundaria: NAO chama a API, NAO coleta nenhum dado — so orienta o
+// motorista a procurar a portaria/um atendente. Reaproveita o modal
+// generico ja usado no projeto (#modalFundo/#modalCaixa, mesmo padrao de
+// confirmarCancelar()) em vez de criar uma tela nova.
+function recusarLgpd() {
+    abrirModal(`
+        <div class="titulo">Atendimento pelo Totem não confirmado</div>
+        <div class="subtitulo">Nenhuma informação foi registrada. Procure a portaria ou um colaborador da UDLOG para receber orientação sobre uma forma alternativa de atendimento.</div>
+        <button class="btn-primario" onclick="fecharModal()">Entendi</button>
+    `);
+}
+
+async function aceitarLgpd() {
+    const checkbox = document.getElementById('lgpdCheckbox');
+    const btnContinuar = document.getElementById('lgpdBtnContinuar');
+    // Nunca confia SO no atributo disabled do DOM (um clique disparado
+    // programaticamente/via devtools nao pode ter efeito) — revalida o
+    // estado real do checkbox e do state antes de qualquer chamada.
+    if (!checkbox || !checkbox.checked || !state.lgpdAceito || btnContinuar.disabled) return;
+
+    btnContinuar.disabled = true;
+    try {
+        const dados = await api('lgpd.php', 'aceitar', {});
+        // Token BRUTO de uso unico — so em memoria, nunca localStorage/
+        // sessionStorage/cookie. So avanca para 'home' DEPOIS do sucesso
+        // desta chamada.
+        state.lgpdTokenAceite = dados.token_aceite;
+        ir('home');
+    } catch (e) {
+        // Falha na emissao do aceite (rede/5xx/etc.): permanece na tela
+        // LGPD, mensagem sanitizada (nunca detalhe tecnico), botao volta a
+        // ficar habilitado para nova tentativa (checkbox continua marcado).
+        btnContinuar.disabled = false;
+        btnContinuar.removeAttribute('aria-disabled');
+        mostrarErroTela(e.message || 'Não foi possível confirmar sua ciência agora. Tente novamente.');
+    }
+}
+
+// Chamada quando atendimento.php?acao=iniciar responde 409 (aceite de
+// privacidade invalido/expirado/ja usado — ex.: motorista demorou mais de
+// 10 minutos entre aceitar e confirmar a placa). Volta o motorista para a
+// tela LGPD (nao para uma tela de erro generica de placa), ja que o aceite
+// expirou e ele precisa reafirmar ciencia — decisao registrada no handoff
+// desta implementacao.
+function voltarParaLgpdPorAceiteExpirado(mensagem) {
+    state.lgpdTokenAceite = null;
+    state.lgpdAceito = false;
+    ir('lgpd');
+    mostrarErroTela(mensagem || 'Aceite de privacidade inválido ou expirado. Confirme novamente.');
 }
 
 // -------------------- tela: inicio --------------------
@@ -339,7 +491,8 @@ async function consultarPlacaExpedicao() {
     if (!placa) return mostrarErroTela('Digite a placa');
     state.placa = placa;
     try {
-        const dados = await api('atendimento.php', 'iniciar', { tipo: 'expedicao', placa });
+        const dados = await api('atendimento.php', 'iniciar', { tipo: 'expedicao', placa, token_aceite: state.lgpdTokenAceite });
+        state.lgpdTokenAceite = null; // token de uso unico, ja consumido pelo backend
         state.idAtendimento = dados.id_atendimento;
         if (dados.proxima_tela === 'selecionar_ordem') {
             state.ordens = dados.ordens;
@@ -348,7 +501,10 @@ async function consultarPlacaExpedicao() {
             state.dados = dados.dados;
             ir('exp_dados');
         }
-    } catch (e) { mostrarErroTela(e.message); }
+    } catch (e) {
+        if (e.status === 409) { voltarParaLgpdPorAceiteExpirado(e.message); return; }
+        mostrarErroTela(e.message);
+    }
 }
 
 // -------------------- expedicao: selecionar ordem de coleta --------------------
@@ -1287,8 +1443,21 @@ async function iniciarRecebimento(excedeLimite) {
     const placa = document.getElementById('inputPlacaRec').value.trim();
     if (!placa) return mostrarErroTela('Digite a placa');
     state.placa = placa;
+    let dados;
     try {
-        const dados = await api('atendimento.php', 'iniciar', { tipo: 'recebimento', placa });
+        // Isolado num try/catch proprio: o 409 de "aceite invalido/expirado"
+        // so pode vir DESTA chamada (acao=iniciar) — as chamadas seguintes
+        // (bloquear-excesso-notas/salvar-etapa) tambem podem responder 409,
+        // mas por motivos completamente diferentes (nao relacionados a
+        // LGPD), entao nao devem ser tratadas como aceite expirado.
+        dados = await api('atendimento.php', 'iniciar', { tipo: 'recebimento', placa, token_aceite: state.lgpdTokenAceite });
+        state.lgpdTokenAceite = null; // token de uso unico, ja consumido pelo backend
+    } catch (e) {
+        if (e.status === 409) { voltarParaLgpdPorAceiteExpirado(e.message); return; }
+        mostrarErroTela(e.message);
+        return;
+    }
+    try {
         state.idAtendimento = dados.id_atendimento;
         if (excedeLimite) {
             await api('atendimento.php', 'bloquear-excesso-notas', { id_atendimento: state.idAtendimento });
@@ -2408,7 +2577,7 @@ let clienteSelecionado = null;
 function telaCliente() {
     clienteSelecionado = null;
     return `<div class="subtitulo">Cliente não identificado — digite o nome ou CNPJ</div>
-        <input class="kb-input" id="inputCliente" placeholder="Digite para buscar" style="font-size:16px;padding:12px;border:2px solid #0b2a45;border-radius:8px;width:100%;max-width:420px;margin:0 auto">
+        <input class="kb-input" id="inputCliente" placeholder="Digite para buscar" style="font-size:16px;padding:12px;border:2px solid var(--brand-primary);border-radius:8px;width:100%;max-width:420px;margin:0 auto">
         <div class="lista-sugestoes" id="listaSugestoes"></div>
         <button class="btn-primario" style="max-width:320px;margin:0 auto" onclick="confirmarCliente()">Avançar</button>`;
 }
@@ -2997,7 +3166,10 @@ function iniciarApp() {
     document.getElementById('tela').addEventListener('focusin', e => {
         if (e.target.classList.contains('kb-input')) abrirTeclado(e.target);
     });
-    ir('home');
+    // 'lgpd' e a primeira tela real da SPA — nenhum outro codigo monta/
+    // mostra 'home' antes deste ponto, entao nao ha flash de 'home'
+    // durante o carregamento (demanda tela-inicial-lgpd-totem, 2026-09-24).
+    ir('lgpd');
 }
 
 iniciarApp();

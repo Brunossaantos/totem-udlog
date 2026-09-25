@@ -6,12 +6,14 @@ use App\Rn\AtendimentoRn;
 use App\Rn\TalentRn;
 use App\Rn\DocumentoRn;
 use App\Rn\OrdemColetaClient;
+use App\Rn\LgpdRn;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
 use App\Dao\OrdemColetaPendenteBaixaDao;
 use Util\Resposta;
 use Util\UploadHelper;
+use PDO;
 
 class AtendimentoController
 {
@@ -23,19 +25,82 @@ class AtendimentoController
         private ?TotemDao $totemDao = null,
         private ?EmpresaDao $empresaDao = null,
         private ?OrdemColetaClient $ordemColetaClient = null,
-        private ?OrdemColetaPendenteBaixaDao $ordemColetaPendenteBaixaDao = null
+        private ?OrdemColetaPendenteBaixaDao $ordemColetaPendenteBaixaDao = null,
+        // Dependencias novas (demanda tela-inicial-lgpd-totem, 2026-09-24),
+        // OPCIONAIS/NULLABLE ao final para preservar 100% dos chamadores
+        // existentes (tests/manual/teste_ordem_coleta_pendente_baixa.php
+        // instancia este Controller sem elas, e nunca chama iniciar()) —
+        // ver comentario em iniciar() sobre o fail-closed quando ausentes.
+        private ?LgpdRn $lgpdRn = null,
+        private ?PDO $pdo = null
     ) {}
 
+    /**
+     * Passa a EXIGIR e validar 'token_aceite' (demanda
+     * tela-inicial-lgpd-totem, 2026-09-24) alem de tipo/placa, ANTES de
+     * qualquer outro processamento — mesmo espirito de Util\Auth::
+     * validarTotem() rodando primeiro no entrypoint.
+     *
+     * Validacao (nesta ordem):
+     *   1. tipo/placa presentes (checagem ja existente, preservada).
+     *   2. token_aceite presente e no formato esperado (string de 64
+     *      caracteres hexadecimais) — ausente/malformado rejeita ANTES de
+     *      tocar o banco.
+     *   3. Consumo ATOMICO do token (App\Rn\LgpdRn::consumir(), que
+     *      delega a App\Dao\AceiteLgpdDao::consumirPorHash() — CAS
+     *      UPDATE...WHERE + rowCount()) dentro de uma transacao real
+     *      (PDO::beginTransaction/commit/rollBack) que tambem envolve o
+     *      INSERT do atendimento (App\Rn\AtendimentoRn::iniciar()).
+     *
+     * DECISAO ARQUITETURAL registrada explicitamente (ver handoff desta
+     * implementacao): esta e a PRIMEIRA transacao explicita do projeto —
+     * todo o resto do codebase usa exclusivamente o padrao CAS sequencial
+     * (UPDATE...WHERE + rowCount(), sem transacao). Adotada aqui porque o
+     * consumo do token e a criacao do atendimento sao,	 por definicao,
+     * uma UNICA operacao logica ("this token buys exactly one
+     * atendimento"): envolver as duas escritas na mesma transacao evita
+     * que uma falha no INSERT (ex.: violacao de constraint inesperada,
+     * falha de conexao no meio) deixe um token "USADO" ORFAO — sem essa
+     * transacao, o motorista precisaria voltar a tela LGPD e gerar um
+     * token novo mesmo quando o problema real foi transitorio no INSERT,
+     * nao no aceite em si. Rollback desfaz o UPDATE do CAS (token volta a
+     * PENDENTE_USO, pode ser tentado de novo) e o INSERT (nenhum
+     * atendimento orfao). NENHUMA chamada de rede (Talent/VIO/OrdemColeta)
+     * acontece dentro da transacao — so as 2 escritas de banco.
+     *
+     * Se $lgpdRn ou $pdo nao foram injetados (uso fora do endpoint HTTP,
+     * ex. alguns testes manuais que nao chamam iniciar()), falha fechada
+     * (500) — nunca cria atendimento sem validar o aceite.
+     *
+     * rowCount()===0 no CAS (por QUALQUER motivo: token ausente,
+     * malformado, desconhecido, expirado, ja consumido, de outro totem,
+     * versao/hash do termo divergente do atual) responde SEMPRE a MESMA
+     * mensagem generica (409) — nunca diferencia a causa, para nao abrir
+     * vetor de enumeracao.
+     */
     public function iniciar(int $idTotem, array $entrada): void
     {
         $tipo = $entrada['tipo'] ?? null;
         $placa = $entrada['placa'] ?? null;
+        $tokenAceite = $entrada['token_aceite'] ?? null;
 
         if (!in_array($tipo, ['expedicao', 'recebimento'], true) || empty($placa)) {
             Resposta::erro('Tipo ou placa nao informados');
         }
 
-        $idAtendimento = $this->atendimentoRn->iniciar($idTotem, $tipo, $placa);
+        if ($this->lgpdRn === null || !$this->lgpdRn->formatoValido($tokenAceite)) {
+            Resposta::erro('Aceite de privacidade invalido ou expirado', 409);
+        }
+
+        if ($this->pdo === null) {
+            // dependencia opcional nao injetada (uso fora do endpoint HTTP)
+            // -- sem transacao/PDO nao ha como consumir o token com
+            // seguranca, falha fechada.
+            Resposta::erro('Nao foi possivel processar o atendimento agora', 500);
+        }
+
+        $idAtendimento = $this->consumirAceiteECriarAtendimento($idTotem, $tipo, $placa, $tokenAceite);
+
         $pasta = UploadHelper::montarPasta($placa);
         $this->atendimentoRn->definirPasta($idAtendimento, $pasta);
 
@@ -57,6 +122,39 @@ class AtendimentoController
         }
 
         Resposta::sucesso(['id_atendimento' => $idAtendimento, 'proxima_tela' => 'quantidade_notas']);
+    }
+
+    /**
+     * Consome o token de aceite LGPD e cria o atendimento na MESMA
+     * transacao real (ver comentario de decisao arquitetural em
+     * iniciar()). rowCount()===0 no CAS de consumo responde 409 generico
+     * e ENCERRA a requisicao (Resposta::erro faz exit) sem deixar a
+     * transacao aberta — o rollback acontece ANTES do exit.
+     */
+    private function consumirAceiteECriarAtendimento(int $idTotem, string $tipo, string $placa, string $tokenAceite): int
+    {
+        $this->pdo->beginTransaction();
+
+        try {
+            $idAceite = $this->lgpdRn->consumir($tokenAceite, $idTotem);
+
+            if ($idAceite === null) {
+                $this->pdo->rollBack();
+                Resposta::erro('Aceite de privacidade invalido ou expirado', 409);
+            }
+
+            $idAtendimento = $this->atendimentoRn->iniciar($idTotem, $tipo, $placa, $idAceite);
+
+            $this->pdo->commit();
+
+            return $idAtendimento;
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            error_log('AtendimentoController::iniciar: falha ao consumir aceite LGPD/criar atendimento (id_totem=' . $idTotem . ')');
+            Resposta::erro('Nao foi possivel processar o atendimento agora', 500);
+        }
     }
 
     /**

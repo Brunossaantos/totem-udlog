@@ -11,9 +11,14 @@ class AtendimentoRn
         private OrdemColetaClient $ordemColetaClient
     ) {}
 
-    public function iniciar(int $idTotem, string $tipo, string $placa): int
+    /**
+     * $idAceiteLgpd opcional (demanda tela-inicial-lgpd-totem, 2026-09-24)
+     * — repassado diretamente para App\Dao\AtendimentoDao::criar(). Ver
+     * comentario la para o motivo de ser NULLABLE/opcional.
+     */
+    public function iniciar(int $idTotem, string $tipo, string $placa, ?int $idAceiteLgpd = null): int
     {
-        return $this->atendimentoDao->criar($idTotem, $tipo, $placa);
+        return $this->atendimentoDao->criar($idTotem, $tipo, $placa, $idAceiteLgpd);
     }
 
     /**

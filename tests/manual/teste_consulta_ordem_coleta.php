@@ -159,6 +159,14 @@ function _ENV_DB_PASS_VALOR(): string
 // tb_atendimento antes de consultar as ordens e falhar). NUNCA apaga a
 // fixture externa OC-TESTE-005 (limpeza documentada separadamente, so
 // depois que os testes desta demanda terminarem).
+//
+// AJUSTE (demanda tela-inicial-lgpd-totem, 2026-09-24, /02-testes):
+// _caso_iniciar_expedicao.php passou a emitir um token de aceite LGPD real
+// (tb_lgpd_aceite) para $idTotem a cada chamada — precisa ser apagado ANTES
+// de tb_totem, senao a FK tb_lgpd_aceite.id_totem -> tb_totem(id_totem)
+// bloqueia o DELETE de tb_totem (efeito colateral esperado do novo
+// contrato, nao um bug de producao).
+$pdo->prepare('DELETE FROM tb_lgpd_aceite WHERE id_totem IN (:t1, :t2)')->execute(['t1' => $idTotem, 't2' => $idTotemInvasor]);
 $pdo->prepare('DELETE FROM tb_atendimento WHERE id_totem IN (:t1, :t2)')->execute(['t1' => $idTotem, 't2' => $idTotemInvasor]);
 $pdo->prepare('DELETE FROM tb_totem WHERE id_totem IN (:t1, :t2)')->execute(['t1' => $idTotem, 't2' => $idTotemInvasor]);
 

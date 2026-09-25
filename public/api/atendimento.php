@@ -13,11 +13,13 @@ use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
 use App\Dao\OrdemColetaDao;
 use App\Dao\OrdemColetaPendenteBaixaDao;
+use App\Dao\AceiteLgpdDao;
 use App\Rn\AtendimentoRn;
 use App\Rn\OrdemColetaClient;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
 use App\Rn\DocumentoRn;
+use App\Rn\LgpdRn;
 use App\Controller\AtendimentoController;
 
 // Bootstrap isolado: mesma protecao aplicada em public/api/nota.php --
@@ -45,6 +47,12 @@ $talentRn = new TalentRn($talentClient, new FilaEnvioDao($pdo), new AtendimentoD
 // aqui (essa dependencia so e necessaria em documento.php?acao=validar-qr).
 $documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo));
 
+// App\Rn\LgpdRn + $pdo (demanda tela-inicial-lgpd-totem, 2026-09-24):
+// exigidos por AtendimentoController::iniciar() para validar/consumir o
+// token de aceite LGPD dentro da mesma transacao que cria o atendimento
+// (ver comentario de decisao arquitetural no proprio Controller).
+$lgpdRn = new LgpdRn(new AceiteLgpdDao($pdo));
+
 $controller = new AtendimentoController(
     $atendimentoRn,
     $talentRn,
@@ -53,7 +61,9 @@ $controller = new AtendimentoController(
     new TotemDao($pdo),
     new EmpresaDao($pdo),
     $ordemColetaClient,
-    new OrdemColetaPendenteBaixaDao($pdo)
+    new OrdemColetaPendenteBaixaDao($pdo),
+    $lgpdRn,
+    $pdo
 );
 
 $acao = $_GET['acao'] ?? '';

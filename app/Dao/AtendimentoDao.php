@@ -8,21 +8,31 @@ class AtendimentoDao
 {
     public function __construct(private PDO $pdo) {}
 
-    public function criar(int $idTotem, string $tipo, string $placa): int
+    /**
+     * $idAceiteLgpd (demanda tela-inicial-lgpd-totem, 2026-09-24): vincula
+     * o atendimento ao aceite do termo LGPD que o originou (ver
+     * sql/migrations/014_tb_lgpd_aceite.sql). Parametro OPCIONAL/NULLABLE
+     * ao final para preservar 100% dos chamadores existentes (testes
+     * manuais e demais fluxos que ainda chamam criar() com so 3
+     * argumentos) — quando omitido, grava NULL (atendimento sem aceite
+     * associado, mesmo comportamento de antes desta demanda).
+     */
+    public function criar(int $idTotem, string $tipo, string $placa, ?int $idAceiteLgpd = null): int
     {
         $codigo = $this->gerarUuid();
 
         $stmt = $this->pdo->prepare('
-            INSERT INTO tb_atendimento (codigo_publico, id_totem, tipo, etapa_atual, status, placa)
-            VALUES (:codigo, :id_totem, :tipo, :etapa, :status, :placa)
+            INSERT INTO tb_atendimento (codigo_publico, id_totem, tipo, etapa_atual, status, placa, id_aceite_lgpd)
+            VALUES (:codigo, :id_totem, :tipo, :etapa, :status, :placa, :id_aceite_lgpd)
         ');
         $stmt->execute([
-            'codigo'   => $codigo,
-            'id_totem' => $idTotem,
-            'tipo'     => $tipo,
-            'etapa'    => 'placa',
-            'status'   => 'em_andamento',
-            'placa'    => strtoupper($placa),
+            'codigo'         => $codigo,
+            'id_totem'       => $idTotem,
+            'tipo'           => $tipo,
+            'etapa'          => 'placa',
+            'status'         => 'em_andamento',
+            'placa'          => strtoupper($placa),
+            'id_aceite_lgpd' => $idAceiteLgpd,
         ]);
 
         return (int) $this->pdo->lastInsertId();
