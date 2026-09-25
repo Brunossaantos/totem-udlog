@@ -47,6 +47,19 @@ class NotaController
         );
     }
 
+    /**
+     * Loga falha tecnica generica de forma minima e segura: nunca inclui
+     * getMessage(), getTraceAsString(), getFile() ou getLine() da
+     * excecao (podem conter SQL, payload, dado pessoal ou detalhe de
+     * integracao externa). Registra so o contexto operacional fixo
+     * (acao) + a classe concreta da excecao, suficiente para diferenciar
+     * rapidamente o tipo de falha em debug futuro sem vazar conteudo.
+     */
+    private function logFalhaTecnica(string $contexto, \Throwable $e): void
+    {
+        error_log($contexto . ': falha nao prevista [' . get_class($e) . ']');
+    }
+
     public function processar(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
@@ -229,7 +242,7 @@ class NotaController
             // status ERRO sem lancar excecao) — mesmo padrao de processar():
             // log tecnico completo no servidor, resposta generica ao totem,
             // nunca vaza mensagem/stack trace da excecao.
-            error_log('identificar-cliente: falha nao prevista: ' . $e->getMessage());
+            $this->logFalhaTecnica("identificar-cliente id_atendimento={$idAtendimento}", $e);
             Resposta::erro('Nao foi possivel identificar o cliente', 500);
         }
 
@@ -298,7 +311,7 @@ class NotaController
                 Resposta::erro('Nota nao encontrada para essa ordem', 404);
                 return;
             }
-            error_log('definir-numero: falha nao prevista: ' . $e->getMessage());
+            $this->logFalhaTecnica("definir-numero id_atendimento={$idAtendimento} ordem={$ordem}", $e);
             Resposta::erro('Nao foi possivel gravar o numero da nota', 500);
             return;
         }

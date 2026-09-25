@@ -788,15 +788,37 @@ de código/commit/handoff, não por descrição textual.
   trataria como "posterior legítimo" em vez de conflito. Achado do
   `qa-testes` em `/02-testes`, severidade observação, não bloqueante,
   não explorável hoje. Registrado para avaliação futura.
-- `NotaController.php` (linhas 232, 293, 297, 301) tem catches de
-  `Throwable`/`RuntimeException` (distintos de `PDOException`)
-  que ainda logam `$e->getMessage()` em `error_log()` — nunca vaza ao
-  cliente (mensagem ao cliente sempre fixa), mas sem a mesma
-  sanitizacao/validacao aplicada ao `PDOException` via
-  `logFalhaBancoPdo()`. Achado do `security-especialista` em
-  `/02-testes` (demanda `integridade-conclusao-atendimento`,
-  2026-09-16), severidade observação, não bloqueante. Registrado para
-  avaliação futura.
+- `NotaController.php` (linhas 232, 301) e `DocumentoController.php`
+  (linhas 236, 248, 422) tem catches de `Throwable`/`RuntimeException`
+  (distintos de `PDOException`) que ainda logam `$e->getMessage()` em
+  `error_log()` — nunca vaza ao cliente (mensagem ao cliente sempre
+  fixa), mas sem a mesma sanitizacao/validacao aplicada ao
+  `PDOException` via `logFalhaBancoPdo()`. Achado original do
+  `security-especialista` em `/02-testes` (demanda
+  `integridade-conclusao-atendimento`, 2026-09-16). **PLANEJADO em
+  2026-09-20** (demanda `sanitizacao-excecoes-lock-documentos`,
+  `/00-planejamento`, 3 sub-agentes independentes): novo metodo
+  privado `logFalhaTecnica(string $contexto, \Throwable $e): void`
+  (duplicado em cada controller, nunca loga `getMessage()`/trace/
+  file/line, so contexto fixo + `get_class($e)` + IDs tecnicos ja
+  seguros como `id_atendimento`/`tipo`/`ordem`), substituindo os 5
+  pontos crus. As 2 comparacoes seguras de `$e->getMessage()` em
+  `NotaController::definirNumero()` (linhas 293/297, contra strings
+  literais conhecidas `numero_nota_duplicado`/`nota_nao_encontrada`)
+  NAO sao alteradas — confirmado que nao sao vazamento, sao controle
+  de fluxo interno. Nenhuma mudanca de contrato HTTP. **IMPLEMENTADA em
+  2026-09-20** (`/01-implementacao`): novo metodo privado
+  `logFalhaTecnica()` duplicado nos 2 controllers, substituindo os 5
+  pontos crus (`DocumentoController.php` L236/L248/L421,
+  `NotaController.php` L232/L301) — nunca loga `getMessage()`/trace/
+  file/line, so contexto fixo + `get_class($e)` + IDs tecnicos ja
+  seguros. Testado: `tests/manual/teste_sanitizacao_logs_documento_nota.php`
+  (29/29, incluindo prova negativa com reversao e hash MD5 identico);
+  as 2 comparacoes seguras de `definirNumero()` confirmadas
+  funcionando identicamente (409/404); nenhum codigo/mensagem HTTP
+  mudou em nenhuma das 29+ suites de regressao reexecutadas. Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`,
+  secao "Resultado da implementacao". Aguardando `/02-testes`.
 - `teste_consulta_ordem_coleta.php` falha (12/17) hoje NAO por
   indisponibilidade do banco externo `udlogo59_db_gestao_coletas`
   (corrigido registro em 2026-09-17 — o usuário confirmou acesso via
@@ -814,10 +836,56 @@ de código/commit/handoff, não por descrição textual.
   retorno — se `GET_LOCK(...,0)` falhar por lock já detido, o código
   prossegue mesmo assim chamando a VIO Decode sem o lock. Pré-existente
   (linha não tocada por `integridade-conclusao-atendimento`), não
-  regressão. Achado do `backend-especialista` em `/03-revisao`
-  (2026-09-17), severidade observação — o próprio comentário do código
-  já documenta que a proteção real contra duplicidade é o CAS por
-  `tentativa_id`, não esse lock. Registrado para avaliação futura.
+  regressão. Achado original do `backend-especialista` em
+  `/03-revisao` (2026-09-17). **PLANEJADO em 2026-09-20** (demanda
+  `sanitizacao-excecoes-lock-documentos`, `/00-planejamento`, 3
+  sub-agentes independentes): confirmado por leitura direta do DAO
+  (nao presumido a partir do comentario) que o CAS por `tentativa_id`
+  em `AtendimentoDao::iniciarProcessamento()`/
+  `gravarResultadoProcessamento()` (`UPDATE...WHERE` atomico) e de
+  fato a protecao real, tornando o cenario "lock ocupado"
+  estruturalmente inatingivel hoje pelo fluxo real da API. **Achado
+  novo desta rodada**: como a chamada a `obterLock()` ocorre ANTES do
+  `try/finally` que libera o lock, uma `PDOException` real dentro de
+  `obterLock()` hoje propaga sem nenhum tratamento (confirmado:
+  `public/api/documento.php` nao tem `try/catch` global em volta da
+  chamada ao controller) — lacuna mais grave que o simples descarte do
+  retorno booleano. Plano: capturar o retorno em variavel local,
+  envolver a chamada em `try/catch (PDOException)` local (log
+  sanitizado via `logFalhaTecnica()`, sem interromper o fluxo), e
+  logar de forma explicita quando o lock nao for adquirido — sem
+  introduzir nenhum HTTP novo (409/423/503 avaliados e descartados por
+  falta de precedente real aplicavel/cenario inatingivel). Nenhuma
+  mudanca de comportamento observavel ao cliente. **IMPLEMENTADA em
+  2026-09-20** (`/01-implementacao`, 2 rodadas): rodada principal
+  implementou exatamente o contrato acima (`$lockAdquirido`
+  capturando o retorno real, `try/catch (PDOException)` na aquisicao).
+  **Achado critico durante os testes da propria rodada principal**:
+  a chamada original e incondicional a `liberarLock()` no `finally`
+  reutilizava a MESMA conexao PDO (compartilhada com `AtendimentoDao`/
+  `DocumentoRn` via `public/api/documento.php`) — se essa conexao
+  morresse entre a aquisicao do lock e o `finally`, `RELEASE_LOCK`
+  lancava uma SEGUNDA `PDOException` nao capturada, propagando sem
+  tratamento. Corrigido em rodada curta subsequente, restrita a
+  `DocumentoController.php`: `liberarLock()` so e chamada quando
+  `$lockAdquirido === true`, envolvida em `try/catch (PDOException)`
+  propria (log sanitizado via `logFalhaTecnica()`, nunca sobrescreve
+  `$erroMensagem`/`$erroCodigoHttp` ja definidos por uma falha
+  principal anterior, nunca gera fatal error, nenhuma
+  reconexao/retry). Testado com evidencia real (nao so leitura de
+  codigo): `tests/manual/teste_lock_obter_lock_documento.php` ampliado
+  para 25/25, cobrindo adquirido/nao-adquirido/NULL/PDOException na
+  aquisicao/conexao perdida apos aquisicao/PDOException na
+  liberacao/prova negativa automatizada (confirma que a excecao ESCAPA
+  se a protecao for removida, revertida com hash MD5 identico).
+  Concorrencia real e CAS reconfirmados intactos
+  (`teste_concorrencia_real_iniciar_processamento.php` 2/2). Nenhum
+  codigo/mensagem HTTP mudou. Gerou uma nova pendencia separada,
+  **NAO corrigida nesta demanda**: ver
+  `robustez-falha-conexao-processamento-documentos` mais abaixo nesta
+  mesma secao. Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`,
+  secao "Resultado da implementacao". Aguardando `/02-testes`.
 - Correspondência prática de `jsQR.binaryData` com o raw value esperado
   pela VIO Decode não confirmada — só teste físico com QR real resolve.
 - Origem da chave de acesso da NF-e na tela `rec_digitaliza` sem o
@@ -830,6 +898,47 @@ de código/commit/handoff, não por descrição textual.
   `RazaoSocialMatcher` — a recalibrar com dados reais de produção.
 - Causa raiz do encoding corrompido (mojibake) na migration 003 nunca
   foi investigada na origem (só os dados já gravados foram corrigidos).
+- **NOVA, registrada em 2026-09-20** (demanda
+  `sanitizacao-excecoes-lock-documentos`, achado durante `/01-implementacao`):
+  `robustez-falha-conexao-processamento-documentos` —
+  `public/api/documento.php` constrói `AtendimentoDao`, `DocumentoRn`/
+  `VioCacheDao` e o mecanismo de lock de `DocumentoController`
+  compartilhando a MESMA instância PDO (`Bootstrap::conectar()`), não
+  conexões independentes. Se essa conexão INTEIRA morrer (não só a
+  query pontual do lock, já protegida por
+  `sanitizacao-excecoes-lock-documentos`), qualquer operação de
+  persistência POSTERIOR na mesma requisição — incluindo
+  `AtendimentoDao::gravarResultadoProcessamento()`, chamada sem
+  proteção adicional dentro dos catches internos de
+  `iniciarProcessamento()` — também pode lançar `PDOException` não
+  capturada, propagando sem tratamento. Pré-existente, mais amplo que
+  o ciclo do lock já corrigido, não corrigido nesta demanda (fora do
+  escopo autorizado, exigiria tocar `AtendimentoDao.php`). Demanda
+  futura dedicada deverá avaliar: fronteira sanitizada para falha
+  TOTAL de conexão; comportamento do estado `PROCESSANDO` de
+  `tb_atendimento` nesse cenário (hoje só recuperado por timeout, via
+  a lógica de "tentativa obsoleta" já existente); necessidade de
+  auditoria; garantia de ausência de persistência parcial. **Nenhuma
+  reconexão ou retry automático deve ser implementado sem
+  planejamento próprio.** Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`.
+- **NOVA, observação registrada em 2026-09-20** (achado durante os
+  testes de regressão de `sanitizacao-excecoes-lock-documentos`, não
+  investigada/corrigida — arquivo pré-existente não tocado por esta
+  demanda): `tests/manual/teste_concorrencia_real_iniciar_processamento.php`
+  não neutraliza `VIO_AMBIENTE` antes de exercitar o fluxo real de
+  `iniciarProcessamento()` — o `.env` de desenvolvimento local tem
+  `VIO_AMBIENTE=trial` com `VIO_TRIAL_BEARER`/`VIO_TRIAL_DECODE_URL`
+  configurados (ambiente local TEM acesso de saída à internet,
+  confirmado), então não é possível descartar que essa suite
+  pré-existente esteja de fato tentando uma chamada de rede real ao
+  endpoint de trial da VIO Decode com bytes de QR sintéticos (que
+  seriam rejeitados de qualquer forma, gerando a mesma mensagem
+  sanitizada genérica que um erro de rede geraria — indistinguível
+  pela mensagem). Os testes NOVOS desta demanda neutralizam
+  `VIO_AMBIENTE` explicitamente; suites pré-existentes que usam o
+  fluxo real deveriam adotar o mesmo padrão. Severidade a avaliar,
+  não corrigido.
 
 #### 2. AGUARDANDO DECISÃO DE PRODUTO
 
@@ -884,6 +993,21 @@ de código/commit/handoff, não por descrição textual.
   funcional.
 - Rótulo de origem de validação (VIO_TRIAL/MANUAL) duplicado entre
   front-end e back-end — funciona, mas é regra de negócio repetida.
+- `tests/manual/teste_rebaixamento_manual.php` tem 1 asserção com
+  redação mais forte do que o que de fato verifica (sem perda de
+  cobertura real confirmada). Achado de `/02-testes` independente da
+  demanda `vio-hardening-sem-credenciais` (2026-09-19). Organizado
+  nesta lista pela demanda `sanitizacao-excecoes-lock-documentos`
+  (2026-09-20, `/00-planejamento`) — não corrigido, fora do escopo
+  funcional dessa demanda.
+- `ehValorPlaceholder()` (`DocumentoRn.php`) trata qualquer valor de
+  dígito único como placeholder — um `exercicio` legítimo de 1 dígito
+  é teoricamente possível, ainda que improvável na prática. Achado de
+  `/03-revisao` final da demanda `vio-hardening-sem-credenciais`
+  (2026-09-20). Organizado nesta lista pela demanda
+  `sanitizacao-excecoes-lock-documentos` (2026-09-20,
+  `/00-planejamento`) — não corrigido, fora do escopo funcional dessa
+  demanda.
 
 #### 6. RESOLVIDO nesta rodada de saneamento (removidos da lista ativa, preservados na tabela da seção 5 com `~~riscado~~`)
 
@@ -4491,3 +4615,399 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   liberada para `/04-commit-e-push`.** Cartao Trello mantido em
   "Sprint Bruno - Fazendo [Semanal]" ate a confirmacao do push:
   `card_id 6ab02761c4533394692c13b3`.
+- 2026-09-20 -- `/00-planejamento` da nova demanda
+  `sanitizacao-excecoes-lock-documentos`, restrita a 3 pontos: (1)
+  sanitizar catches de `Throwable` em `DocumentoController.php` que
+  ainda logam `$e->getMessage()` cru; (2) mesmo para catches
+  nao-`PDOException` em `NotaController.php`; (3) tratamento explicito
+  do retorno de `DocumentoController::obterLock()`. Investigacao com 3
+  sub-agentes independentes (`backend-especialista`,
+  `security-especialista`, `explorer`), nenhum alterando arquivo de
+  producao -- so leitura/analise. Confirmado por leitura direta de
+  codigo: 5 pontos de log cru (3 em `DocumentoController.php`, linhas
+  236/248/422; 2 em `NotaController.php`, linhas 232/301), nenhum
+  vazando ao cliente HTTP (so ao `error_log()` do servidor); as 2
+  comparacoes de `$e->getMessage()` contra strings literais em
+  `NotaController::definirNumero()` (linhas 293/297) confirmadas
+  seguras (controle de fluxo interno, nao vazamento) e preservadas
+  sem alteracao; `verificarRateLimit()` (`NotaController`) confirmado
+  ja sanitizado (padrao ouro, sem mudanca). Para o lock: confirmado
+  por leitura direta do `AtendimentoDao` (nao presumido a partir de
+  comentario) que o CAS por `tentativa_id` e a protecao real,
+  tornando "lock ocupado" estruturalmente inatingivel hoje. **Achado
+  novo desta rodada**: a chamada a `obterLock()` ocorre ANTES do
+  `try/finally` que libera o lock -- uma `PDOException` real ali hoje
+  propaga sem tratamento nenhum (confirmado: `public/api/documento.php`
+  nao tem `try/catch` global em volta da chamada ao controller),
+  lacuna mais grave que o simples descarte do retorno booleano ja
+  documentado. Estrategia consolidada (convergencia dos 3
+  sub-agentes): novo metodo privado `logFalhaTecnica()` duplicado em
+  cada controller (nunca loga `getMessage()`/trace/file/line, so
+  contexto fixo + `get_class($e)` + IDs tecnicos ja seguros);
+  `obterLock()` com retorno capturado + `try/catch (PDOException)`
+  local (log sanitizado, sem interromper o fluxo) -- **sem introduzir
+  nenhum HTTP novo** (409/423/503 avaliados e descartados por falta
+  de precedente real aplicavel a um cenario estruturalmente
+  inatingivel). Nenhuma mudanca de contrato HTTP em nenhum ponto.
+  Nenhuma decisao tecnica ficou bloqueante (3 sub-agentes
+  convergentes); 2 pontos de preferencia do usuario registrados como
+  nao bloqueantes (aceitar "logar e prosseguir" sem HTTP novo para o
+  lock; aceitar helper duplicado em vez de trait compartilhado). Os 2
+  achados de baixa severidade ja existentes no changelog
+  (`teste_rebaixamento_manual.php`, `ehValorPlaceholder()` com digito
+  unico) foram organizados nesta rodada na secao "5. OBSERVACAO DE
+  BAIXA SEVERIDADE" de 5.1, sem correcao (fora do escopo funcional
+  desta demanda). Zero codigo alterado, zero banco tocado, zero
+  credencial usada, zero chamada real a VIO/Talent/Serpro, zero
+  documento/CPF/placa real, zero commit/push, zero acao no Trello
+  (nao solicitada nesta demanda). Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`.
+  **Aguardando confirmacao do usuario para avancar a
+  `/01-implementacao`.**
+- 2026-09-20 -- `/01-implementacao` da demanda
+  `sanitizacao-excecoes-lock-documentos`, em 2 rodadas.
+  **Rodada principal** (`backend-especialista`): confirmado por
+  leitura do codigo real que nao havia divergencia material do
+  planejamento. Novo metodo privado `logFalhaTecnica()` duplicado em
+  `DocumentoController.php`/`NotaController.php`, substituindo os 5
+  pontos de `error_log(...getMessage())` cru (linhas 236/248/421 e
+  232/301); as 2 comparacoes seguras de `definirNumero()` preservadas
+  intocadas; `verificarRateLimit()` e catches de `PDOException`
+  intocados. `obterLock()` com retorno capturado
+  (`$adquiriuLock`/depois renomeado `$lockAdquirido`) e
+  `try/catch (PDOException)` na aquisicao. Testes novos:
+  `teste_sanitizacao_logs_documento_nota.php` (29/29, com prova
+  negativa e hash MD5 identico) e `teste_lock_obter_lock_documento.php`
+  (12/12 inicialmente). 29 suites de regressao reexecutadas sem queda
+  alem da pre-existente e ja documentada de
+  `teste_consulta_ordem_coleta.php`. **Achado critico durante os
+  proprios testes**: a chamada original e incondicional a
+  `liberarLock()` no `finally` reutilizava a mesma conexao PDO
+  compartilhada com `AtendimentoDao`/`DocumentoRn` -- se essa conexao
+  morresse entre a aquisicao do lock e o `finally`, `RELEASE_LOCK`
+  lancava uma segunda `PDOException` nao capturada, propagando sem
+  tratamento -- fora do que o planejamento original havia analisado
+  (que cobriu so a query de aquisicao). Rodada interrompida sem
+  correcao adicional, achado reportado ao usuario conforme instrucao
+  explicita de parar diante de divergencia do planejamento aprovado.
+  **Rodada curta de correcao** (decisao do usuario: opcao "a", restrita
+  a `DocumentoController.php`, sem tocar `AtendimentoDao.php`):
+  `$lockAdquirido` so vira `true` quando `obterLock()` confirma
+  aquisicao real; `liberarLock()` no `finally` so e chamada quando
+  `$lockAdquirido === true`, envolvida em `try/catch (PDOException)`
+  propria (log sanitizado via `logFalhaTecnica()`, nunca sobrescreve
+  falha principal ja capturada, nunca gera fatal error, sem
+  reconexao/retry). `teste_lock_obter_lock_documento.php` ampliado
+  para 25/25 (novos cenarios: PDOException na aquisicao com spy real
+  de chamadas via `PDO::ATTR_STATEMENT_CLASS`, conexao perdida apos
+  aquisicao, PDOException na liberacao capturada e sanitizada, prova
+  negativa automatizada com reversao e hash MD5 identico). Regressao
+  focada reconfirmada: `teste_sanitizacao_logs_documento_nota.php`
+  29/29, `teste_identificar_cliente.php` 36/36,
+  `teste_concorrencia_real_iniciar_processamento.php` 2/2 (CAS
+  reconfirmado como protecao efetiva), mais 8 suites de
+  Documento/CNH/CRLV/VIO/OCR/Recebimento/Expedicao sem queda. Nenhum
+  codigo/mensagem HTTP mudou em nenhum cenario, em nenhuma rodada.
+  Nova pendencia registrada (nao corrigida):
+  `robustez-falha-conexao-processamento-documentos` (fronteira
+  sanitizada para falha TOTAL de conexao, mais ampla que o ciclo do
+  lock -- exigiria tocar `AtendimentoDao.php`, fora do escopo desta
+  demanda). Observacao nova registrada (nao corrigida): suite
+  pre-existente `teste_concorrencia_real_iniciar_processamento.php`
+  nao neutraliza `VIO_AMBIENTE`, ambiente local tem acesso de saida a
+  internet confirmado -- nao e possivel descartar chamada de rede real
+  ao endpoint de trial da VIO Decode nessa suite pre-existente
+  (diferente dos testes novos desta demanda, que neutralizam
+  explicitamente). 1 incidente de debug (sobrescrita acidental
+  temporaria de `DocumentoController.php`, revertida via indice git,
+  2 registros de teste orfaos removidos) e zero residuo confirmado ao
+  final em ambas as rodadas. `git diff --check` sem erro. Escopo de
+  arquivos de producao confirmado restrito a
+  `DocumentoController.php`/`NotaController.php`. Zero credencial
+  real/chamada real a Talent-VIO-Serpro/dado real usado pela
+  implementacao e pelos testes NOVOS desta demanda; zero impressao;
+  zero acesso a producao/Hostgator; zero acao no Trello; zero
+  commit/push. Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`,
+  secao "Resultado da implementacao". **Demanda liberada para
+  `/02-testes` independente.**
+- 2026-09-24 -- `/02-testes` independente da demanda
+  `sanitizacao-excecoes-lock-documentos`. 3 revisores independentes
+  (`qa-testes`, `security-especialista`, `backend-especialista`),
+  nenhum participante da implementacao, instruidos a nao confiar nos
+  resultados relatados e produzir evidencia propria. Nenhum alterou
+  codigo de producao (unica mutacao em cada revisor foi a prova
+  negativa, sempre revertida com hash MD5 identico). `security-especialista`
+  e `backend-especialista`: APROVADO em seus escopos, com evidencia
+  real e independente confirmando 100% do relatado na implementacao
+  (sanitizacao dos 5 pontos via bateria propria de marcadores
+  sinteticos em 4 canais; ciclo do lock reproduzido com banco
+  descartavel proprio, incluindo confirmacao real -- nao so
+  documentacao -- de que o MySQL/MariaDB libera named lock
+  automaticamente ao matar a conexao dona; CAS por `tentativa_id`
+  reconfirmado como protecao efetiva via concorrencia real; prova
+  negativa propria de cada revisor com hash MD5 identico; zero
+  chamada externa possivel; zero residuo). **`qa-testes`: PRECISA DE
+  AJUSTE, achado BLOQUEANTE novo**: os 2 testes versionados desta
+  demanda (`teste_sanitizacao_logs_documento_nota.php`,
+  `teste_lock_obter_lock_documento.php`) dependem de helpers
+  `tests/manual/_*.php` NUNCA versionados no git
+  (`.gitignore:37 tests/manual/_*.php`) -- confirmado por prova real
+  (arvore hermetica via `git archive HEAD`, execucao a partir de
+  diretorio diferente): ambos os testes falham com erro fatal
+  (`Failed opening required`) se os helpers nao existirem fisicamente
+  no worktree, tornando-os IRREPRODUZIVEIS a partir de um `git clone`
+  limpo. Restante do escopo do `qa-testes` (ciclo do lock, regressao
+  completa -- todas as 31 suites reexecutadas batendo exatamente com
+  as contagens do handoff --, prova negativa, zero chamada
+  externa/residuo) sem nenhum achado, confirmado de forma
+  independente. **Veredito consolidado: PRECISA DE AJUSTE**,
+  exclusivamente pelo achado de reprodutibilidade/versionamento --
+  nenhum achado tecnico/funcional contrario a implementacao em nenhum
+  dos 3 escopos. Decisao necessaria (nao tomada pelo orquestrador nem
+  pelos revisores, aguardando o usuario): force-adicionar os helpers
+  novos (mesmo padrao ja usado 2x no projeto para
+  `_fixtures_talent.php`/`_fixtures_identificar_cliente.php`),
+  inlinar o conteudo dos helpers nos 2 testes versionados, ou aceitar
+  formalmente que sao "so reproduziveis localmente" (nao recomendado).
+  Observacao nao bloqueante registrada por 2 revisores: `docs/indexTotem.html`
+  e `tests/nf_teste/` aparecem untracked no repositorio -- confirmado
+  pelo orquestrador que sao pre-existentes a esta demanda, nao
+  investigados (fora de escopo). Zero credencial real/chamada real a
+  Talent-VIO-Serpro/dado real usado por nenhum revisor; zero
+  impressao; zero acesso a producao/Hostgator; zero acao no Trello;
+  zero commit/push. Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`,
+  secao "Resultado de /02-testes independente". **Demanda retorna
+  para rodada curta de `/01-implementacao`, restrita a resolver o
+  achado de reprodutibilidade dos testes -- decisao do usuario sobre
+  qual das 3 opcoes seguir e necessaria antes de prosseguir.**
+- 2026-09-25 -- Segunda rodada de `/02-testes` independente da demanda
+  `sanitizacao-excecoes-lock-documentos`. 3 revisores independentes
+  (`qa-testes`, `security-especialista`, `backend-especialista`),
+  nenhum participante de rodadas anteriores, trabalhando exclusivamente
+  no worktree principal (nunca tocando o worktree isolado
+  `totem-udlog-worktree-lgpd` da demanda `tela-inicial-lgpd-totem`,
+  ja aprovada e aguardando commit -- confirmado intocado por todos os
+  revisores e pelo orquestrador). `security-especialista`: APROVADO
+  (5 pontos de sanitizacao + 10 cenarios do lock reconfirmados com
+  evidencia real, prova negativa propria no Ponto 3 com hash
+  identico, `AtendimentoDao.php` intocado). `qa-testes` e
+  `backend-especialista`: **PRECISA DE AJUSTE**, cada um
+  reproduzindo de forma TOTALMENTE independente (arvore hermetica
+  propria via `git archive HEAD`) o MESMO achado bloqueante ja
+  registrado na rodada de 24/09 -- `Fatal error: Uncaught Error:
+  Failed opening required` para `_mocks_sanitizacao_logs.php` e
+  `_spy_lock_pdo.php`, helpers indispensaveis para os 2 testes novos
+  versionados, nunca commitados (`.gitignore:37`). Suites obrigatorias
+  reexecutadas no worktree real batendo com o esperado (29/29, 25/25,
+  36/36) mais 7 suites de regressao adicionais sem queda. Achado NOVO,
+  nao bloqueante, fora do escopo desta demanda: residuo pre-existente
+  `tb_totem.codigo='TESTE_VIO'` (`id_totem=1848`) no banco de dev
+  real, originado da PROPRIA rodada de `/02-testes` de 24/09 (cleanup
+  via `register_shutdown_function` nao disparou naquela execucao) --
+  tentativa de remocao corretamente bloqueada pelo sistema de
+  permissoes do ambiente, nao removido, registrado para limpeza
+  futura. **Veredito consolidado: PRECISA DE AJUSTE**, pelo MESMO
+  motivo da rodada anterior (reprodutibilidade em arvore limpa) --
+  decisao entre force-add/inline/aceitar "so local" continua pendente
+  do usuario, nao decidida por nenhum revisor. Zero residuo novo
+  causado por esta demanda, zero nova chamada externa, zero commit/
+  push, worktree LGPD confirmado intocado durante toda a rodada. Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`,
+  secao "Resultado de /02-testes independente -- segunda rodada".
+- 2026-09-25 -- Rodada curta de `/01-implementacao` da demanda
+  `sanitizacao-excecoes-lock-documentos`, restrita a resolver o achado
+  BLOQUEANTE de reprodutibilidade confirmado por 2 revisores em 2
+  rodadas de `/02-testes` (24/09, 25/09). Decisao do usuario: opcao
+  (b), inlinar. `teste_sanitizacao_logs_documento_nota.php` e
+  `teste_lock_obter_lock_documento.php` foram reescritos para nao
+  depender de NENHUM arquivo `_*.php` nao versionado: o codigo-fonte
+  dos 2 helpers requeridos diretamente (`_mocks_sanitizacao_logs.php`,
+  `_spy_lock_pdo.php`) foi inlinado como string nowdoc dentro do
+  proprio arquivo de teste (ativado via `eval()` quando usado
+  diretamente no processo principal); os 7 subprocessos
+  (`_caso_iniciar_processamento_marcador.php`,
+  `_caso_preencher_manual_marcador.php`,
+  `_caso_identificar_cliente_marcador.php`,
+  `_caso_definir_numero_marcador.php`,
+  `_caso_iniciar_processamento_lock_falha_aquisicao_sem_rede.php`,
+  `_caso_iniciar_processamento_lock_perdido_apos_aquisicao.php`, e o
+  reaproveitado `_caso_iniciar_processamento_vio_indisponivel.php`)
+  passaram a ser gerados em tempo de execucao como scripts PHP
+  TEMPORARIOS (`sys_get_temp_dir()`, fora de `tests/manual/`,
+  removidos ao final via `register_shutdown_function`) -- abordagem
+  (b) do proprio pedido do usuario, escolhida para os 7 por precisarem
+  genuinamente rodar em processo separado (isolamento de
+  env vars/`http_response_code()`/conexao PDO derrubada via `KILL`,
+  sem afetar o processo principal do teste nem a conexao usada para
+  orquestrar/limpar o banco). 8 helpers `_*.php` ficaram orfaos (nenhum
+  outro teste versionado os usa) e foram DELETADOS:
+  `_mocks_sanitizacao_logs.php`, `_spy_lock_pdo.php`,
+  `_caso_iniciar_processamento_marcador.php`,
+  `_caso_preencher_manual_marcador.php`,
+  `_caso_identificar_cliente_marcador.php`,
+  `_caso_definir_numero_marcador.php`,
+  `_caso_iniciar_processamento_lock_falha_aquisicao_sem_rede.php`,
+  `_caso_iniciar_processamento_lock_perdido_apos_aquisicao.php`.
+  `_caso_iniciar_processamento_vio_indisponivel.php` foi MANTIDO (nao
+  deletado) -- ainda usado por 2 arquivos fora do escopo desta demanda:
+  `tests/manual/teste_integridade_conclusao_atendimento.php`
+  (VERSIONADO, de demanda anterior) e `tests/manual/_qa02_independente.php`
+  (artefato local de um revisor, nao versionado). Achado NOVO, nao
+  bloqueante, fora do escopo desta demanda: `teste_integridade_conclusao_atendimento.php`,
+  apesar de VERSIONADO, tambem depende de
+  `_caso_iniciar_processamento_vio_indisponivel.php`, que continua NAO
+  versionado -- ou seja, essa suite pre-existente tem a MESMA lacuna de
+  reprodutibilidade em arvore limpa que esta demanda corrigiu para os
+  seus 2 proprios testes, mas nao foi corrigida aqui (fora do escopo
+  autorizado, arquivo daquela demanda nao tocado). Registrado para
+  avaliacao futura.
+  Contagens exatas idênticas antes/depois da mudanca: 29/29
+  (`teste_sanitizacao_logs_documento_nota.php`), 25/25
+  (`teste_lock_obter_lock_documento.php`) -- reexecutadas no worktree
+  real e novamente apos a delecao dos 8 helpers orfaos, sem nenhuma
+  queda. Prova de reprodutibilidade em arvore hermetica PROPRIA
+  (`git write-tree` do indice com os 4 arquivos alterados/criados
+  desta rodada staged -- `app/Controller/DocumentoController.php`,
+  `app/Controller/NotaController.php`, os 2 testes reescritos --,
+  `git archive` da tree resultante extraida num diretorio temporario
+  fora do repositorio, `vendor/` e `.env` copiados por cima -- ambos
+  gitignorados mas necessarios para a suite rodar de fato contra o
+  banco, o achado core sob prova e a AUSENCIA de `Fatal error: Failed
+  opening required`, nao a config de ambiente): os 2 testes rodaram
+  COM SUCESSO nessa arvore, 29/29 e 25/25, ZERO `Fatal error`. Unica
+  divergencia de hash MD5 encontrada na comparacao pos-hoc de
+  `DocumentoController.php` entre a arvore hermetica e o worktree real
+  foi CRLF/LF (conversao cosmetica do Git no Windows, `git archive` nao
+  aplica `autocrlf` -- confirmado por `diff` com `tr -d '\r'` mostrando
+  conteudo IDENTICO) -- mesmo tipo de divergencia cosmetica ja
+  documentada como benigna em rodadas anteriores desta demanda. Zero
+  alteracao em `app/Controller/DocumentoController.php`,
+  `app/Controller/NotaController.php` ou qualquer outro arquivo de
+  producao (unica mutacao foi a propria prova negativa JA embutida em
+  cada teste, sempre revertida com hash MD5 identico ao baseline,
+  confirmado tanto no worktree real quanto dentro da arvore hermetica).
+  Zero chamada real a VIO/Serpro/Talent/API externa. Zero impressao.
+  Zero producao/Hostgator. Zero banco real alterado permanentemente
+  (fixtures sinteticas com marcador `SANIT0920_*`/`LOCK0920_*`,
+  removidas ao final, confirmado 0 residuo em ambas as suites, em
+  ambas as execucoes). Zero Trello. Zero commit/push. Worktree isolado
+  `totem-udlog-worktree-lgpd` (demanda `tela-inicial-lgpd-totem`, ja
+  aprovada, aguardando commit) confirmado INTOCADO (`git status
+  --short` identico antes/depois desta rodada). **Achado de
+  reprodutibilidade marcado como RESOLVIDO** -- demanda pronta para
+  nova rodada de `/02-testes` focada em confirmar esta correcao
+  especifica (reproduzir a arvore hermetica de forma independente e
+  confirmar ausencia do `Fatal error` antes reportado, alem de
+  reconfirmar as 29/25 asserções). Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`,
+  secao "Resultado de /01-implementacao -- rodada curta de correcao de
+  reprodutibilidade (2026-09-25)".
+
+- **`qa-testes`, validacao curta e focada de `/02-testes` (2026-09-25,
+  demanda `sanitizacao-excecoes-lock-documentos`, exclusivamente sobre
+  a correcao de reprodutibilidade) -- Veredito: APROVADO.** Revisor
+  INDEPENDENTE (nao participou de nenhuma rodada anterior desta
+  demanda), instruido a nao confiar nos resultados relatados e
+  produzir evidencia propria. Trabalhou exclusivamente no worktree
+  principal (`C:\xampp\htdocs\totem-udlog`, branch `main`); confirmado
+  por `git status --short` identico no inicio e no fim que o worktree
+  isolado `totem-udlog-worktree-lgpd` permaneceu INTOCADO.
+  Evidencia propria, ponto a ponto:
+  1) Execucao direta no worktree real:
+     `teste_sanitizacao_logs_documento_nota.php` 29/29,
+     `teste_lock_obter_lock_documento.php` 25/25 (contagens exatas
+     confirmadas pela propria execucao, nao aceitas do relato).
+  2) Arvore hermetica propria (nao aceitou o relato da rodada
+     anterior): `git add` temporario dos 4 arquivos desta correcao (2
+     testes + handoff + `ia_development_state.md`) sobre `HEAD`,
+     `git write-tree` (sem nenhum commit real), `git archive <tree>`
+     extraido num diretorio fora do repositorio (scratchpad da sessao),
+     `git reset` imediato desfazendo o staging. `vendor/` e `.env`
+     copiados por cima (ambos gitignorados, infraestrutura de execucao
+     local, nao fazem parte da prova de "versionado"). Ambos os testes
+     executados dentro dessa arvore: **29/29 e 25/25, zero `Fatal
+     error`, zero `Failed opening required`** (confirmado por `grep`
+     dedicado sobre a saida completa de ambas as execucoes, nao so
+     inspecao visual).
+  3) Ausencia dos 8 helpers removidos: confirmado por tentativa direta
+     de acesso a cada um dos 8 caminhos (`_mocks_sanitizacao_logs.php`,
+     `_spy_lock_pdo.php`, `_caso_iniciar_processamento_marcador.php`,
+     `_caso_preencher_manual_marcador.php`,
+     `_caso_identificar_cliente_marcador.php`,
+     `_caso_definir_numero_marcador.php`,
+     `_caso_iniciar_processamento_lock_falha_aquisicao_sem_rede.php`,
+     `_caso_iniciar_processamento_lock_perdido_apos_aquisicao.php`) --
+     nenhum existe mais em `tests/manual/`. `grep` de
+     `require|include` nos 2 testes versionados confirma zero
+     referencia a qualquer um dos 8; as unicas dependencias externas
+     sao `vendor/autoload.php` e os fixtures PRE-EXISTENTES ja
+     versionados `_fixtures_talent.php`/`_fixtures_identificar_cliente.php`/
+     `_caso_nota_definir_numero.php` (confirmados em `git ls-files`,
+     fora do escopo desta correcao).
+  4) Hashes MD5 de `app/Controller/DocumentoController.php`
+     (`9eaf33dbeec39a11a4885170c89a7fc2`) e
+     `app/Controller/NotaController.php` (`c8cce20b7c37a893db2b7945800c90f1`)
+     confirmados IDENTICOS ao baseline documentado no handoff, antes E
+     depois da execucao dos 2 testes no worktree real (as provas
+     negativas embutidas em cada teste mutam e revertem os arquivos --
+     confirmado sem residuo); e identicos (apos normalizar CRLF/LF com
+     `tr -d '\r'`, mesma divergencia cosmetica ja documentada em
+     rodadas anteriores) entre a arvore hermetica e o worktree real.
+  5) `docs/indexTotem.html` e `tests/nf_teste/` reconfirmados como
+     observacao NAO bloqueante ja registrada, pre-existente a esta
+     demanda -- nao investigados, fora do escopo desta validacao.
+  6) `tests/manual/_caso_iniciar_processamento_vio_indisponivel.php`
+     confirmado ausente de `git ls-files` (nao versionado) -- achado
+     JA registrado como pendencia de OUTRA demanda
+     (`teste_integridade_conclusao_atendimento.php`), reconfirmado como
+     tal, NAO tratado como novo achado bloqueante desta validacao,
+     conforme escopo definido.
+  7) Zero chamada externa: confirmado por `grep` que ambos os testes
+     fazem `unset($_ENV['VIO_AMBIENTE'])`/`putenv('VIO_AMBIENTE')`
+     antes de qualquer caminho que chegue a `iniciarProcessamento()`.
+  8) Escopo de arquivos alterados pela rodada de correcao conforme
+     descrito no handoff (`git status --short` do worktree principal
+     inalterado antes/depois desta validacao, alem do `git add`/`git
+     reset` temporario do passo 2, sem residuo).
+  9) Zero commit, zero push, zero banco alterado permanentemente
+     (nenhuma fixture nova criada por esta validacao -- so reexecucao
+     das suites, que fazem sua propria limpeza confirmada nas proprias
+     saidas).
+  **Conclusao: demanda `sanitizacao-excecoes-lock-documentos` PRONTA
+  para `/03-revisao`.** Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`,
+  secao "Resultado de /02-testes -- validacao curta e focada da
+  correcao de reprodutibilidade (2026-09-25)".
+- 2026-09-25 -- `/03-revisao` independente da demanda
+  `sanitizacao-excecoes-lock-documentos`, focada exclusivamente na
+  rodada curta de inlining (correcao de reprodutibilidade). 2
+  revisores independentes (`backend-especialista`,
+  `security-especialista`), nenhum participante de rodada anterior,
+  trabalhando exclusivamente no worktree principal (worktree LGPD
+  confirmado intocado por ambos e pelo orquestrador). Ambos:
+  APROVADO. `backend-especialista` confirmou preservacao integral de
+  cobertura (29 e 25 asserções, comparacao linha a linha com o
+  handoff), provas negativas genuinamente detectoras (nao
+  sempre-verdes), mecanismo de `KILL CONNECTION_ID()` validado por
+  execucao real, reprodutibilidade confirmada em arvore hermetica
+  propria (zero `Fatal error`), hashes de producao intactos,
+  documentacao fiel ao codigo real. `security-especialista` confirmou
+  os 9 pontos de seguranca do escopo com evidencia real, incluindo 2
+  testes proprios construidos do zero (cleanup sob falha forcada em 3
+  modos, isolamento do `KILL CONNECTION_ID()` contra banco descartavel
+  proprio) -- 3 observacoes NAO bloqueantes registradas (ausencia de
+  checagem explicita de codigo de saida de subprocesso; uso do banco
+  de dev real em vez de descartavel nos cenarios de `KILL
+  CONNECTION_ID()`, seguro por isolamento de conexao mas fora do
+  padrao mais rigoroso; 1 ponto que define `VIO_AMBIENTE=trial` com
+  endpoint local inexistente em vez de neutralizar, seguro na pratica
+  mas inconsistente com a redacao do resto da suite) -- nenhuma
+  bloqueante, nenhuma corrigida nesta etapa (fora do escopo desta
+  correcao pontual). Zero arquivo alterado por nenhum revisor, zero
+  chamada externa, zero commit/push. Ver
+  `docs/handoffs/2026-09-20-sanitizacao-excecoes-lock-documentos.md`,
+  secao "Resultado de /03-revisao independente". **Demanda
+  `sanitizacao-excecoes-lock-documentos` liberada para
+  `/04-commit-e-push`.**

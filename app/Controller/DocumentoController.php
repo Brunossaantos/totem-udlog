@@ -214,7 +214,38 @@ class DocumentoController
         // garantia real contra duplicidade/zumbi e o tentativa_id acima, nao
         // este lock (que e liberado ao fim da conexao mesmo em erro fatal).
         $chaveLock = "vio_validar_{$idAtendimento}_{$tipo}";
-        $this->obterLock($chaveLock);
+        // Estado local explicito do lock: so vira true quando obterLock()
+        // de fato CONFIRMAR a aquisicao (GET_LOCK retornando 1). Qualquer
+        // outro caminho (GET_LOCK 0/NULL via retorno false, ou PDOException
+        // na aquisicao) mantem false -- e e esse valor, nunca uma suposicao,
+        // que decide la embaixo no finally se liberarLock() pode ser
+        // chamada (chamar RELEASE_LOCK para uma chave que este processo
+        // nunca chegou a adquirir seria, na melhor das hipoteses, um no-op
+        // sem efeito, mas nao ha necessidade de arriscar isso).
+        $lockAdquirido = false;
+        try {
+            $lockAdquirido = $this->obterLock($chaveLock);
+        } catch (\PDOException $e) {
+            // Fecha a lacuna confirmada no planejamento: uma falha de banco ao
+            // tentar o lock adicional (defesa em profundidade, nao a
+            // protecao primaria) NAO deve propagar sem tratamento -- o CAS
+            // por tentativa_id, ja vencido acima, e quem realmente garante
+            // exclusividade. Loga de forma sanitizada e prossegue exatamente
+            // como se o lock nao tivesse sido adquirido ($lockAdquirido
+            // permanece false).
+            $this->logFalhaTecnica("iniciar-processamento (obter lock adicional) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
+        }
+        if (!$lockAdquirido) {
+            // Cenario teoricamente inatingivel hoje: iniciarProcessamento() do
+            // AtendimentoDao ja garante exclusividade via UPDATE...WHERE
+            // atomico (CAS por tentativa_id) antes deste ponto -- este lock e
+            // defesa em profundidade, nao a protecao primaria. Logado para
+            // investigacao caso ocorra (bug futuro/reentrancia/chave
+            // reaproveitada), mas NAO interrompe o processamento -- nao ha
+            // precedente no projeto de tratar "lock ocupado" como erro ao
+            // cliente, e o CAS ja fecha essa brecha estruturalmente.
+            error_log("iniciar-processamento: lock adicional nao adquirido (defesa em profundidade, CAS ja garantiu exclusividade) id_atendimento={$idAtendimento} tipo={$tipo}");
+        }
 
         // Correcao (demanda integridade-conclusao-atendimento, 2026-09-16):
         // Resposta::erro()/exit() NUNCA e chamado dentro deste try/finally —
@@ -233,7 +264,7 @@ class DocumentoController
             try {
                 $vio = new VioDecodeClient();
             } catch (\Throwable $e) {
-                error_log('iniciar-processamento: falha ao inicializar VioDecodeClient: ' . $e->getMessage());
+                $this->logFalhaTecnica("iniciar-processamento (inicializar VioDecodeClient) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
                 $this->atendimentoDao->gravarResultadoProcessamento($idAtendimento, $tipo, $tentativaId, 'ERRO');
                 $erroMensagem = 'Servico de validacao de documento indisponivel no momento';
                 $erroCodigoHttp = 503;
@@ -245,7 +276,7 @@ class DocumentoController
                         ? $this->documentoRn->validarCnh($atendimento, $vio, $bytesQrBrutos)
                         : $this->documentoRn->validarCrlv($atendimento, $vio, $bytesQrBrutos);
                 } catch (\Throwable $e) {
-                    error_log('iniciar-processamento: falha nao prevista: ' . $e->getMessage());
+                    $this->logFalhaTecnica("iniciar-processamento id_atendimento={$idAtendimento} tipo={$tipo}", $e);
                     $this->atendimentoDao->gravarResultadoProcessamento($idAtendimento, $tipo, $tentativaId, 'ERRO');
                     $erroMensagem = 'Nao foi possivel validar o documento agora';
                     $erroCodigoHttp = 500;
@@ -274,7 +305,34 @@ class DocumentoController
                 }
             }
         } finally {
-            $this->liberarLock($chaveLock);
+            // So tenta liberar o lock se este processo de fato o adquiriu
+            // ($lockAdquirido === true) -- nunca chama liberarLock() para uma
+            // chave que nunca foi obtida por esta conexao.
+            //
+            // Envolvida em try/catch propria: se a conexao PDO morrer entre a
+            // aquisicao do lock (acima) e este finally, RELEASE_LOCK pode
+            // lancar uma \PDOException aqui dentro. Isso NUNCA pode escapar
+            // de iniciarProcessamento() sem tratamento -- por isso a
+            // excecao e contida e so logada de forma sanitizada, sem nunca
+            // sobrescrever $erroMensagem/$erroCodigoHttp ja definidos pelos
+            // catches acima (a resposta HTTP emitida logo depois deste
+            // try/finally continua refletindo exclusivamente a falha
+            // principal, se houver, nunca a falha de liberacao do lock).
+            //
+            // Nao ha reconexao/retry aqui: quando o MySQL/MariaDB encerra a
+            // conexao (por qualquer motivo), o proprio servidor libera todos
+            // os named locks pertencentes aquela sessao automaticamente --
+            // ou seja, mesmo que RELEASE_LOCK falhe por a conexao ja estar
+            // morta, o lock em si ja NAO esta mais "preso" no servidor. Esta
+            // protecao existe so para conter a excecao, nunca para evitar um
+            // lock realmente preso.
+            if ($lockAdquirido) {
+                try {
+                    $this->liberarLock($chaveLock);
+                } catch (\PDOException $e) {
+                    $this->logFalhaTecnica("iniciar-processamento (liberar lock adicional) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
+                }
+            }
         }
 
         if ($erroMensagem !== null) {
@@ -419,7 +477,7 @@ class DocumentoController
 
             $this->atendimentoDao->marcarProcessamentoConcluido($idAtendimento, $tipo);
         } catch (\Throwable $e) {
-            error_log('preencher-manual: falha nao prevista: ' . $e->getMessage());
+            $this->logFalhaTecnica("preencher-manual id_atendimento={$idAtendimento} tipo={$tipo}", $e);
             Resposta::erro('Nao foi possivel processar o preenchimento manual agora', 500);
         }
 
@@ -508,6 +566,19 @@ class DocumentoController
      * A conexao PDO do proprio request mantem o lock ate liberarLock() ou
      * o fim da conexao (mesmo em erro fatal), sem exigir tabela nova.
      */
+    /**
+     * Loga falha tecnica generica de forma minima e segura: nunca inclui
+     * getMessage(), getTraceAsString(), getFile() ou getLine() da
+     * excecao (podem conter SQL, payload, dado pessoal ou detalhe de
+     * integracao externa). Registra so o contexto operacional fixo
+     * (acao) + a classe concreta da excecao, suficiente para diferenciar
+     * rapidamente o tipo de falha em debug futuro sem vazar conteudo.
+     */
+    private function logFalhaTecnica(string $contexto, \Throwable $e): void
+    {
+        error_log($contexto . ': falha nao prevista [' . get_class($e) . ']');
+    }
+
     private function obterLock(string $chave): bool
     {
         if ($this->pdo === null) {

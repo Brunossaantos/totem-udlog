@@ -412,10 +412,20 @@ try {
 
     // Caso 15: excecao nao prevista na chamada de negocio -- Controller
     // responde erro generico (500) e NUNCA vaza a mensagem tecnica da
-    // excecao NA RESPOSTA AO TOTEM (a mensagem tecnica DEVE aparecer no log
-    // do servidor via error_log -- por isso ela e esperada em saida_bruta,
-    // que mistura stdout+stderr do subprocesso; a checagem de "nao vazar" e
-    // sempre sobre o campo `erro` do JSON, que e o que o totem realmente recebe).
+    // excecao NA RESPOSTA AO TOTEM NEM NO LOG DO SERVIDOR.
+    //
+    // ATUALIZADO (demanda sanitizacao-excecoes-lock-documentos, 2026-09-20):
+    // ate 2026-09-19 este catch (\Throwable $e) em
+    // NotaController::identificarCliente() logava $e->getMessage() em texto
+    // claro via error_log() -- por isso a assercao original esperava
+    // encontrar 'detalhe tecnico sensivel' em saida_bruta (log do servidor).
+    // A partir desta demanda o log passa a usar
+    // NotaController::logFalhaTecnica(), que NUNCA inclui getMessage() --
+    // so o contexto fixo ("identificar-cliente id_atendimento=...") e
+    // get_class($e). A assercao abaixo foi invertida para refletir o novo
+    // comportamento (mais seguro): a mensagem tecnica NAO aparece em NENHUM
+    // lugar observavel (nem resposta ao totem, nem log), so a classe da
+    // excecao.
     $c15 = rodarCasoController('excecao');
     checar(
         'Caso 15: Controller trata excecao nao prevista com mensagem generica na RESPOSTA ao totem',
@@ -429,8 +439,13 @@ try {
         $c15
     );
     checar(
-        'Caso 15: mensagem tecnica da excecao FOI registrada no log tecnico do servidor (error_log, nao perdida)',
-        stripos($c15['saida_bruta'], 'detalhe tecnico sensivel') !== false,
+        'Caso 15: mensagem tecnica da excecao (getMessage()) NAO e mais registrada em NENHUM lugar (log sanitizado desde 2026-09-20 -- so contexto fixo + classe da excecao)',
+        stripos($c15['saida_bruta'], 'detalhe tecnico sensivel') === false,
+        $c15
+    );
+    checar(
+        'Caso 15: log tecnico do servidor contem o contexto fixo sanitizado + classe da excecao (RuntimeException), formato NotaController::logFalhaTecnica()',
+        (bool) preg_match('/identificar-cliente id_atendimento=\d+: falha nao prevista \[RuntimeException\]/', $c15['saida_bruta']),
         $c15
     );
 
