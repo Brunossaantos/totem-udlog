@@ -2069,3 +2069,830 @@ Apos esta rodada, restam apenas: validacao fisica em monitor vertical
 real (21,5"); higiene dos arquivos auxiliares de teste pre-existentes
 ausentes (nao relacionados a esta demanda, ja registrado em rodadas
 anteriores).
+
+## Logo oficial na tela LGPD (reabertura pontual, 2026-09-25)
+
+### Isolamento confirmado
+
+Rodada executada exclusivamente dentro de
+`C:\xampp\htdocs\totem-udlog-worktree-lgpd` (branch
+`tela-inicial-lgpd-totem`, HEAD inicial `5ad2a4e`). `git status
+--short` do worktree principal (`C:\xampp\htdocs\totem-udlog`, branch
+`main`) confirmado IDENTICO antes e depois desta rodada (apenas os
+3 itens pre-existentes nao relacionados: `.claude/skills/`,
+`docs/indexTotem.html`, `tests/nf_teste/`) -- nenhuma leitura/escrita
+feita nele.
+
+### Decisao do usuario (reabertura pontual, explicita, restrita)
+
+O usuario forneceu o logo oficial local
+(`public/totem/assets/udlog.png`) e autorizou explicitamente: "para a
+tela lgpd pode deixar a logo". Isso reabre, SOMENTE para `telaLgpd()`,
+a decisao geral registrada na secao 4 de `ia_development_state.md`
+("sem header/barra de marca decorativa fixa no topo das telas"). A
+decisao geral continua valendo integralmente para todas as outras
+telas do totem (`home` e os 25+ demais estados do fluxo de
+Recebimento/Expedicao) -- nenhuma delas foi tocada nesta rodada,
+confirmado por grep em `app.js` (`lgpd-logo`/`udlog.png`/`<img` so
+aparecem na linha do `telaLgpd()`; `telaHome()` sem alteracao).
+
+### Arquivo do logo usado
+
+`public/totem/assets/udlog.png` -- PNG real, 1024x328px (razao
+~3,1220:1), MD5 `eba13a5f7648a326f262f201d0ab4682`. Ja existia local
+no worktree antes desta rodada (copiado pelo usuario em rodada
+anterior), nao baixado de CDN/rede nesta rodada.
+
+### Codigo adicionado
+
+`public/totem/assets/app.js`, dentro de `telaLgpd()`, primeiro filho
+do markup, antes do titulo/texto/checkbox/botoes:
+
+    <img class="lgpd-logo" src="assets/udlog.png" alt="UDLOG">
+
+`public/totem/assets/app.css`, novo bloco (dentro da secao ja
+existente "Tela LGPD"), ANTES de `.lgpd-tela`:
+
+    .lgpd-logo { display: block; max-width: 240px; width: 100%; height: auto; margin: 0 auto; }
+
+Sem `position:absolute`/`fixed` (diferente do header do prototipo
+`docs/indexTotem.html` rejeitado no planejamento original) -- o logo
+faz parte do fluxo normal do layout (`.lgpd-tela`, dentro de `.tela`
+com `display:flex; flex-direction:column`), empurrando o conteudo
+abaixo dele. Proporcao preservada via `max-width` + `height:auto`,
+sem esticar/distorcer, sem recolorir -- conforme regra 8 de
+`.claude/skills/udlog-brand-colors/SKILL.md`.
+
+### Verificacao (evidencia real, Puppeteer)
+
+Harness estatico temporario (`public/_verify_lgpd_logo.php`, criado
+so para este teste, apontando para `assets/app.css`/`assets/udlog.png`
+reais do worktree, HTML da tela copiado literalmente do retorno atual
+de `telaLgpd()`) servido via `php -S 127.0.0.1:8098 -t public`;
+capturado com Puppeteer (`puppeteer@24.15.0`, instalacao global) nas
+2 resolucoes ja usadas em rodadas anteriores. Harness removido do
+worktree ao final (nunca commitado, `git status --short` confirmado
+limpo de vestigios apos remocao).
+
+Resultado medido via `page.evaluate()` (bounding boxes reais, nao
+presuncao):
+
+- **1080x1920**: `imgRect` `240x76.875px` (ratio `3.122`, identico ao
+  esperado `1024/328=3.122`); zero sobreposicao entre `.lgpd-logo` e
+  `#lgpdBtnVerTermo`/`.lgpd-checkbox-label`/`#lgpdBtnContinuar`/
+  `#lgpdBtnNaoContinuar`; `btnContinuarRect.bottom` (1159.19px) dentro
+  do viewport (1920px) sem rolagem forcada; `docScrollH` igual a
+  `viewportH` (1920px, sem overflow).
+- **768x1024**: mesma proporcao (`3.122`); zero sobreposicao; botao
+  "Continuar" alcancavel sem rolagem (`bottom` 721.19px dentro de
+  1024px de viewport); `docScrollH` igual a `viewportH`.
+- Screenshots conferidos visualmente (nao so bounding boxes): logo com
+  as cores originais (leao azul + "UD LOG / UNITED LOGISTICS"),
+  nitido, sem distorcao, centralizado, empurrando o titulo/texto para
+  baixo -- nenhum elemento cortado ou sobreposto nas 2 resolucoes.
+- Alvos de toque dos demais controles inalterados: `.lgpd-checkbox-label`,
+  `.lgpd-btn-continuar`, `.lgpd-btn-recusar`, `.lgpd-btn-ver-termo`
+  mantem `min-height: 64px` (nenhuma regra de CSS deles foi tocada
+  nesta rodada).
+- `telaHome()` e o restante de `renderTela()` conferidos por leitura
+  direta -- nenhuma outra tela ganhou `<img>`/logo/header.
+
+### Confirmacoes de escopo
+
+Zero chamada real a VIO/Serpro/Talent. Zero impressao. Zero banco real
+alterado ou consultado (harness de verificacao nao depende de banco,
+so HTML/CSS estatico). Zero Trello. Zero commit/push. Zero CDN/hotlink
+(logo servido do arquivo local do proprio worktree). Nenhum arquivo de
+backend tocado (`app/Dao/`, `app/Rn/`, `app/Controller/`, migrations).
+Worktree principal confirmado intocado (`git status --short` identico
+antes/depois).
+
+### Arquivos alterados nesta rodada
+
+- `public/totem/assets/app.js` -- `<img class="lgpd-logo">` adicionado
+  em `telaLgpd()`.
+- `public/totem/assets/app.css` -- classe `.lgpd-logo` adicionada.
+- `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md` -- esta secao.
+- `ia_development_state.md` -- registro aditivo equivalente.
+
+## Rodada de alinhamento visual com `docs/indexTotem.html` (2026-09-25)
+
+Rodada curta de `/01-implementacao`, restrita a 4 dos 6 ajustes
+classificados como "seguros de alinhar" com o prototipo (os outros 2 sao
+de TEXTO e ja tinham sido aplicados manualmente pelo usuario em rodada
+anterior -- fora do escopo desta). Nenhuma alteracao em backend, banco,
+integracao externa. Zero commit/push (por restricao explicita desta
+rodada).
+
+### Ajuste 1 -- ordem do botao "Ver termo completo"
+
+Movido para DEPOIS do checkbox (antes vinha antes), igual ao prototipo
+onde o link fica dentro/depois da area de consentimento.
+
+`public/totem/assets/app.js`, dentro de `telaLgpd()`:
+
+Antes:
+
+    <button type="button" class="lgpd-btn-ver-termo" id="lgpdBtnVerTermo">Ver termo completo</button>
+    <label class="lgpd-checkbox-label" for="lgpdCheckbox">
+        <input type="checkbox" id="lgpdCheckbox">
+        <span>Li e estou ciente do Aviso de Privacidade.</span>
+    </label>
+
+Depois:
+
+    <label class="lgpd-checkbox-label" for="lgpdCheckbox">
+        <input type="checkbox" id="lgpdCheckbox">
+        <span>Li e estou ciente do Aviso de Privacidade.</span>
+    </label>
+    <button type="button" class="lgpd-btn-ver-termo" id="lgpdBtnVerTermo">Ver termo completo</button>
+
+A ordem geral do fluxo (consentimento antes do botao principal "Li e
+estou ciente -- Continuar") NAO foi alterada -- so a posicao do link "Ver
+termo completo" dentro dessa area, exatamente como pedido.
+
+### Ajuste 2 -- seta no botao principal
+
+`public/totem/assets/app.css`, novo bloco:
+
+    .lgpd-btn-continuar::after {
+        content: "→";
+        margin-left: 10px;
+        font-weight: 700;
+    }
+
+Escolhida a forma via `::after` (nao alterar o texto do botao em `app.js`,
+que ja tinha sido fixado em rodada anterior), mesmo padrao visual do
+prototipo (`.start-button::after { content: "→"; }`). Texto do botao
+("Li e estou ciente — Continuar") permanece intocado.
+
+### Ajuste 3 -- tamanho do checkbox visual (28px -> 34px)
+
+`public/totem/assets/app.css`:
+
+Antes:
+
+    .lgpd-checkbox-label input[type="checkbox"] {
+        width: 28px;
+        height: 28px;
+        ...
+    }
+
+Depois:
+
+    .lgpd-checkbox-label input[type="checkbox"] {
+        width: 34px;
+        height: 34px;
+        ...
+    }
+
+`.lgpd-checkbox-label` (o `<label>` inteiro, area clicavel real) NAO foi
+tocado -- continua com `min-height: 64px`. Medicao real via Puppeteer
+(`page.evaluate()`, bounding box do `<label>`) confirmou **64px de altura
+exatos** nas 2 resolucoes apos a mudanca do checkbox visual, sem
+regressao do alvo de toque minimo.
+
+### Ajuste 4 -- largura do modal "Ver termo completo" -- decisao: MANTIDA
+
+Avaliado antes de alterar: a largura atual de `.modal-lgpd-caixa`
+(`max-width: 460px`) ja foi validada fisicamente em 1080x1920 e 768x1024
+em rodadas anteriores (aprovacao de `/02-testes`/`/03-revisao` ja
+registradas em `ia_development_state.md`). Na resolucao mais estreita ja
+testada (768px, com 20px de padding de cada lado vindo de `.modal-fundo`),
+460px ocupa ~63% da largura util (728px) -- bem dentro do teto de 90%
+definido para esta rodada. O valor de referencia do prototipo (1000px,
+`min(100%, 1000px)`) e claramente pensado para desktop/paisagem e nao
+serve de meta para a tela retrato real (18,5" vertical) deste totem.
+Decisao tecnica: **NAO aumentar** -- a largura atual ja e adequada ao
+formato retrato, o texto legal se beneficia de uma coluna mais estreita
+(melhor legibilidade) e um aumento sem necessidade arriscaria regredir
+evidencia de QA ja aprovada sem ganho real de UX. Justificativa completa
+documentada como comentario no proprio CSS, acima de `.modal-lgpd-caixa`.
+
+### Verificacao (evidencia real, Puppeteer)
+
+Harness estatico temporario (`public/_verify_lgpd_ajustes.php`, criado so
+para este teste -- carrega `totem/assets/app.css`/`app.js` reais do
+worktree via `<link>`/`<script src>`, chama `telaLgpd()` e
+`ligarConsentimentoLgpd()` reais no DOM, sem duplicar/copiar HTML a mao)
+servido via `php -S 127.0.0.1:8930 -t public`; capturado com Puppeteer
+(`puppeteer@24.15.0`, instalacao global) nas 2 resolucoes ja usadas em
+rodadas anteriores. Harness removido do worktree ao final (`git status
+--short` confirmado sem vestigios apos remocao).
+
+Resultado medido via `page.evaluate()` (bounding boxes e `getComputedStyle`
+reais, nao presuncao), identico nas 2 resolucoes (1080x1920 e 768x1024):
+
+- **Ordem**: `.lgpd-tela` filhos, na ordem real do DOM:
+  `IMG.lgpd-logo`, `DIV.titulo`, `DIV.subtitulo`, `P.lgpd-resumo`,
+  `LABEL.lgpd-checkbox-label`, `BUTTON.lgpd-btn-ver-termo`,
+  `BUTTON.btn-primario.lgpd-btn-continuar`,
+  `BUTTON.lgpd-btn-recusar` -- confirma "Ver termo completo" depois do
+  checkbox, antes do botao "Continuar".
+- **Seta**: `getComputedStyle(continuar, '::after').content` ===
+  `"→"` (com aspas literais no valor computado do CSS) nas 2 resolucoes;
+  confirmado tambem visualmente no screenshot.
+- **Checkbox**: `checkbox.getBoundingClientRect()` = `34x34px` exatos nas
+  2 resolucoes (era 28x28px antes).
+- **Area clicavel do label**: `checkboxLabel.getBoundingClientRect().height`
+  = **64px exatos** nas 2 resolucoes -- alvo de toque minimo preservado,
+  achado critico de rodada anterior nao regrediu.
+- **Modal "Ver termo completo"**: `modalLgpdCaixa.getBoundingClientRect().width`
+  = **460px** nas 2 resolucoes (inalterado, decisao documentada acima);
+  aberto via clique real no botao "Ver termo completo" (nao presuncao).
+- Sem overflow/rolagem forcada em nenhuma das 2 resolucoes
+  (`docScrollH === viewportH === 1920` e `=== 1024`, respectivamente).
+- Screenshots conferidos visualmente: nenhum elemento cortado ou
+  sobreposto; seta visivel (ainda que em cinza claro, estado
+  `disabled` do botao, esperado); botao "Ver termo completo" claramente
+  depois do checkbox; modal do termo abre sem estourar a largura da tela
+  em nenhuma das 2 resolucoes.
+
+### Confirmacao -- Grupo B intocado (leitura direta do CSS/JS final apos a mudanca)
+
+- Logo continua local (`assets/udlog.png`), sem CDN/hotlink, sem
+  `position:absolute/fixed` -- bloco `.lgpd-logo` inalterado nesta rodada.
+- Ordem geral consentimento-antes-de-acao preservada -- botao principal
+  continua depois do checkbox; so o link "Ver termo completo" mudou de
+  posicao dentro dessa area, como pedido.
+- Nenhum botao de recusa foi adicionado dentro do modal; `#lgpdBtnNaoContinuar`
+  continua fora do modal, sem cor verde/vermelho (`.lgpd-btn-recusar`
+  inalterado: `border: 2px solid var(--border)`, sem `#198754`/`#DC3545`).
+- Overlay do modal (`.modal-fundo`, `rgba(58,58,58,0.5)`) nao foi tocado.
+- Tipografia nao alterada -- `.lgpd-resumo`, `.lgpd-checkbox-label`,
+  `.lgpd-btn-continuar` continuam nos mesmos `font-size` (15px/16px),
+  nenhuma escala grande do prototipo foi introduzida.
+- `border-radius` dos botoes nao foi tocado (`grep` confirmado, zero
+  diff em `border-radius` nesta rodada).
+- Nenhum gradiente decorativo, `.kiosk-label`, `.secure-label` ou
+  `.footer-note` foi adicionado (grep confirmado, zero ocorrencia).
+- `var(--text-secondary)`/`var(--text-muted)` continuam fora de qualquer
+  texto da tela LGPD (grep confirmado, zero ocorrencia nas classes
+  `.lgpd-*`).
+- Meta viewport (`maximum-scale`/`user-scalable`) nao foi tocada nesta
+  rodada -- nenhum arquivo de `index.php` foi alterado.
+- **Validacao real de backend intocada**: `app/Controller/LgpdController.php`,
+  `AceiteLgpdDao.php`, `LgpdRn.php`, `AtendimentoController.php` nao foram
+  lidos nem abertos para edicao nesta rodada -- `git status --short`
+  confirma zero alteracao em `app/`.
+
+### Confirmacoes de escopo
+
+Zero banco real (harness estatico, sem dependencia de banco). Zero
+chamada externa (todas as requisicoes do teste ficaram em
+`127.0.0.1:8930`). Zero commit/push. Worktree principal
+(`C:\xampp\htdocs\totem-udlog`) nao tocado nesta rodada -- nenhum comando
+executado fora de `C:\xampp\htdocs\totem-udlog-worktree-lgpd`.
+
+### Arquivos alterados nesta rodada (alinhamento visual)
+
+- `public/totem/assets/app.js` -- reordenado `#lgpdBtnVerTermo` para
+  depois do `<label class="lgpd-checkbox-label">` dentro de `telaLgpd()`.
+- `public/totem/assets/app.css` -- `.lgpd-checkbox-label input[type="checkbox"]`
+  (28px -> 34px), novo bloco `.lgpd-btn-continuar::after` (seta), novo
+  comentario justificando a manutencao de `.modal-lgpd-caixa` em 460px.
+- `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md` -- esta secao.
+
+## Rodada de acabamento visual final -- 11 ajustes autorizados explicitamente
+pelo usuario (2026-09-25)
+
+Rodada curta de `/01-implementacao`, com autorizacao EXPLICITA do usuario
+para os 11 ajustes abaixo, incluindo 2 trade-offs de acessibilidade
+conhecidos e aceitos deliberadamente por ele (ver registro formal na
+secao seguinte). Escopo restrito a `telaLgpd()`/CSS `.lgpd-*`/
+`.modal-lgpd-*`. Zero banco real, zero chamada externa, zero commit/push,
+zero alteracao em `app/` (Controller/Dao/Rn) ou `sql/migrations/`.
+
+### Ajustes aplicados
+
+1. **"Ver termo completo" volta a ser LINK** -- classe renomeada de
+   `.lgpd-btn-ver-termo` para `.lgpd-link-ver-termo` (em `app.js` e
+   `app.css`), sem borda/fundo, `text-decoration: underline`, cor
+   `var(--brand-primary)`, sem `min-height: 64px` garantido (antes tinha).
+   **TRADE-OFF DE ACESSIBILIDADE ACEITO EXPLICITAMENTE PELO USUARIO**:
+   alvo de toque real medido em ~38px de altura do elemento clicavel
+   (`getBoundingClientRect().height`, confirmado via Puppeteer nas 2
+   resolucoes), abaixo do alvo minimo de 64px usado no resto do projeto.
+   Documentado tambem como comentario no proprio CSS, acima de
+   `.lgpd-link-ver-termo`.
+
+2. **Texto secundario** -- `.lgpd-resumo` e (novo seletor escopado)
+   `.lgpd-tela .subtitulo` passam a usar `var(--text-secondary)`
+   (`#878789`), antes `var(--text-primary)`. **TRADE-OFF DE
+   ACESSIBILIDADE ACEITO EXPLICITAMENTE PELO USUARIO**: contraste
+   resultante de ~3,6:1 sobre fundo branco, abaixo do minimo AA (4,5:1)
+   para texto normal -- aceito deliberadamente SOMENTE nestes dois
+   elementos da tela LGPD, para alinhar ao protótipo
+   (`docs/indexTotem.html` usa a mesma cor em `.subtitle`). Documentado
+   como comentario no CSS.
+
+3. **Cores do modal do termo** -- decisao tomada: manter o modal com UM
+   UNICO botao "Fechar" (mais simples e mais seguro que adicionar um
+   segundo botao "Li e estou ciente"), restilizado com verde `#198754`
+   (mesma cor do protótipo) em vez do azul de acao generico usado antes.
+   Nenhum botao novo foi adicionado dentro do modal -- decisao
+   deliberada para NAO criar um segundo caminho de "aceite" visualmente
+   parecido com um aceite real. O botao "Fechar" continua chamando
+   somente `fecharModalLgpd()`, que NUNCA altera `state.lgpdAceito`/o
+   checkbox nem dispara nenhuma chamada de rede (confirmado por leitura
+   do codigo e por teste real de clique via Puppeteer, sem nenhum
+   `fetch` disparado).
+
+4. **Botao "Não desejo continuar"** -- FUNCIONALIDADE preservada
+   integralmente (continua fora do modal, na tela principal, chamando
+   `recusarLgpd()`, sem coleta de dado, orientando a procurar a
+   portaria/um colaborador). Restilizado visualmente com contorno e
+   texto vermelhos (`#DC3545`, cor do "Recusar" do protótipo) em vez do
+   cinza neutro usado antes -- so a classe `.lgpd-btn-recusar` foi
+   tocada, nenhuma outra classe generica de alerta (`.btn-alerta`) foi
+   alterada.
+
+5. **Overlay do modal** -- `.modal-fundo-lgpd` (classe adicional no mesmo
+   elemento que ja tem `.modal-fundo`) ganhou `background: rgba(0, 0, 0,
+   0.62)`, que vence na cascata por vir depois de `.modal-fundo` no
+   arquivo (mesma especificidade, ordem de declaracao decide). O
+   `.modal-fundo` generico (usado pelos outros modais do projeto)
+   permanece em `rgba(58,58,58,0.5)`, confirmado sem alteracao por
+   leitura direta do CSS.
+
+6. **Tipografia** -- 2 novos seletores escopados `.lgpd-tela .titulo`
+   (28px) e `.lgpd-tela .subtitulo` (18px), sem tocar `.titulo`/
+   `.subtitulo` genericos (usados em outras 49 ocorrencias em `app.js`,
+   confirmado por grep antes de editar). `.lgpd-resumo` tambem subiu de
+   15px para 16px.
+
+7. **Border-radius** -- ampliado so nas classes proprias da tela LGPD:
+   `.lgpd-btn-continuar` e `.lgpd-btn-recusar` de 10px para 18px,
+   `.modal-lgpd-caixa` de 14px para 20px, `.modal-lgpd-btn-fechar` de
+   10px para 18px. `.btn-primario`/`.modal-caixa` genericos nao foram
+   tocados.
+
+8. **Gradiente decorativo** -- novo `.lgpd-tela::after` (`position:
+   absolute; inset: 0; z-index: -1`), gradiente sutil
+   `linear-gradient(180deg, rgba(1, 121, 173, 0.07), transparent 42%)`,
+   `pointer-events: none`. `.lgpd-tela` ganhou `position: relative` para
+   servir de contexto de posicionamento (nao afeta o fluxo dos filhos,
+   que continuam no `flex-direction: column` herdado de `.tela`).
+
+9. **Logo** -- `max-width` de `.lgpd-logo` ampliado de 240px para 300px
+   (medido via Puppeteer nas 2 resolucoes ANTES de fixar o valor -- sem
+   sobreposicao com o titulo/subtitulo em nenhuma das duas, confirmado
+   por `logoOverlapsTitulo === false`). Continua local
+   (`assets/udlog.png`, sem CDN), sem `position: absolute/fixed`.
+
+10. **Zoom** -- nao tocado (nenhum arquivo `index.php` alterado nesta
+    rodada, `meta viewport` intacta).
+
+11. **Validacao de aceite real no backend** -- nao tocado. Nenhum arquivo
+    de `app/` foi lido nem editado nesta rodada (`git status --short --
+    app/` sem output ao final).
+
+### Registro formal da aceitacao dos 2 trade-offs de acessibilidade
+
+O usuario confirmou EXPLICITAMENTE, no pedido desta rodada, que aceita
+deliberadamente os 2 trade-offs abaixo, restritos EXCLUSIVAMENTE a
+`telaLgpd()`/`.lgpd-*`/`.modal-lgpd-*` (nenhuma outra tela do projeto foi
+ou sera afetada por esta decisao):
+
+- **Alvo de toque reduzido no link "Ver termo completo"**: ~38px medido
+  (bem abaixo dos 64px usados no resto do projeto e mesmo abaixo da
+  estimativa inicial de ~56px), aceito para alinhar ao `.terms-link` do
+  protótipo.
+- **Contraste reduzido (~3,6:1, abaixo de AA) no subtitulo e no resumo da
+  tela LGPD**: aceito para alinhar ao `.subtitle`/uso de
+  `var(--text-secondary)` do protótipo.
+
+### Verificacao (evidencia real, Puppeteer)
+
+Harness estatico temporario (`public/totem/_verify_lgpd_visual.php` --
+diferente do usado na rodada anterior, criado dentro de `public/totem/`
+desta vez para que o caminho relativo `assets/udlog.png` resolva
+identico ao app real; carrega `assets/app.css`/`app.js` reais via
+`<link>`/`<script src>`, injeta `#lgpd-termo-dados` e
+`data-totem-token`, chama `telaLgpd()`/`ligarConsentimentoLgpd()` reais
+-- sem duplicar HTML a mao) servido via `php -S 127.0.0.1:8931 -t
+public`, capturado com Puppeteer (`puppeteer@24.15.0`, instalacao
+global) nas 2 resolucoes de teste (1080x1920 e 768x1024). Harness e um
+segundo harness auxiliar para a tela `home`
+(`public/totem/_verify_home_visual.php`) removidos do worktree ao final
+-- `git status --short` confirmado sem vestigios de nenhum dos dois apos
+a remocao.
+
+Resultado medido via `page.evaluate()` (bounding boxes e
+`getComputedStyle` reais), identico nas 2 resolucoes salvo onde indicado:
+
+- **Ordem dos filhos de `.lgpd-tela`**: `IMG.lgpd-logo`, `DIV.titulo`,
+  `DIV.subtitulo`, `P.lgpd-resumo`, `LABEL.lgpd-checkbox-label`,
+  `BUTTON.lgpd-link-ver-termo`, `BUTTON.btn-primario.lgpd-btn-continuar`,
+  `BUTTON.lgpd-btn-recusar` -- inalterada nesta rodada (nenhum item pedia
+  mudanca de ordem).
+- **Logo**: `logoWidth === 300` nas 2 resolucoes, `logoOverlapsTitulo ===
+  false` nas 2 -- sem sobreposicao.
+- **Titulo/subtitulo**: `tituloFontSize === "28px"`, `subtituloFontSize
+  === "18px"`, `subtituloColor === "rgb(135, 135, 137)"` (== `#878789`)
+  nas 2 resolucoes.
+- **Resumo**: `resumoColor === "rgb(135, 135, 137)"`, `resumoFontSize ===
+  "16px"`.
+- **Link "Ver termo completo"**: `linkColor === "rgb(1, 121, 173)"`,
+  `linkTextDecoration === "underline"`, `linkBorderWidth === "0px"`,
+  `linkHeight === 38` (alvo de toque real, ver trade-off acima).
+- **Checkbox/label**: `labelHeight === 64` nas 2 resolucoes -- alvo de
+  toque de 64px do checkbox (rodada anterior) NAO regrediu.
+- **Botao "Continuar"**: `continuarRadius === "18px"`,
+  `continuarAfterContent === "\"→\""` (seta preservada da rodada
+  anterior).
+- **Botao "Não desejo continuar"**: `recusarColor === "rgb(220, 53, 69)"`
+  (`#DC3545`), `recusarBorderColor === "rgb(220, 53, 69)"`,
+  `recusarRadius === "18px"`, `recusarVisible === true` nas 2 resolucoes
+  -- **botao continua visivel e funcional na tela principal, fora do
+  modal**.
+- **Modal do termo**: aberto via clique real em `#lgpdBtnVerTermo`;
+  `overlayBg === "rgba(0, 0, 0, 0.62)"` nas 2 resolucoes;
+  `modalCaixaRadius === "20px"`; `modalFecharBg === "rgb(25, 135, 84)"`
+  (`#198754`) -- botao unico "Fechar", verde.
+- **Zero chamada de rede indevida**: `netRequests` filtrados por fora de
+  `127.0.0.1` retornou lista vazia nas 2 resolucoes, mesmo apos clicar em
+  "Ver termo completo" e no botao "Fechar" do modal -- confirma que o
+  novo estilo do botao "Fechar" nao introduziu nenhum `fetch`/chamada de
+  rede alem do fluxo real ja existente (`aceitarLgpd()`, no botao
+  principal fora do modal, nao clicado neste teste para nao disparar
+  `api()` contra um endpoint inexistente no harness estatico).
+- Sem overflow horizontal em nenhuma resolucao (`overflowX === false`).
+- Screenshots conferidos visualmente (anexo do relatorio desta sessao):
+  tela principal com logo/titulo/subtitulo/resumo mais proximos do
+  protótipo, link sublinhado, botao "Continuar" azul com seta, botao
+  "Não desejo continuar" com contorno vermelho bem visivel ao lado;
+  modal com overlay escuro, cabecalho, corpo com texto de teste e botao
+  "Fechar" verde ocupando a largura do rodape.
+
+### Confirmacao -- nenhuma outra tela do totem foi afetada
+
+Verificado com um segundo harness estatico dedicado
+(`public/totem/_verify_home_visual.php`, tambem removido ao final)
+renderizando `telaHome()` real (nao tela LGPD) com o mesmo `app.css` real
+do worktree:
+
+- `.titulo` generico (fora de `.lgpd-tela`) continua em `22px`,
+  `rgb(58, 58, 58)` (`var(--text-primary)`) -- os novos seletores
+  escopados `.lgpd-tela .titulo`/`.lgpd-tela .subtitulo` NAO vazaram
+  para `telaHome()`.
+- `.tile-principal` continua com `background: rgb(1, 121, 173)`
+  (`var(--action-primary)`) e `border-radius: 14px` -- nenhuma classe
+  `.tile-*`/`.btn-primario`/`.modal-caixa` generica foi tocada nesta
+  rodada.
+- Leitura completa de `renderTela()` em `app.js` confirma que o `switch`
+  permanece identico (nenhuma tela nova, nenhuma tela removida, nenhuma
+  mudanca de roteamento).
+
+### Confirmacoes finais de restricao
+
+- Zero banco real (harness estatico, sem dependencia de banco/`Bootstrap::conectar`).
+- Zero chamada externa (todas as requisicoes do teste ficaram em `127.0.0.1:8931`).
+- Zero commit/push nesta rodada.
+- Worktree principal (`C:\xampp\htdocs\totem-udlog`) nao tocado --
+  nenhum comando executado fora de
+  `C:\xampp\htdocs\totem-udlog-worktree-lgpd`.
+- `app/Controller/LgpdController.php`, `AceiteLgpdDao.php`, `LgpdRn.php`,
+  `AtendimentoController.php` e `sql/migrations/` nao foram lidos nem
+  abertos para edicao nesta rodada -- `git status --short -- app/` sem
+  output ao final, confirmando zero alteracao.
+
+### Arquivos alterados nesta rodada (acabamento visual)
+
+- `public/totem/assets/app.js` -- renomeada a classe do botao "Ver termo
+  completo" de `lgpd-btn-ver-termo` para `lgpd-link-ver-termo` dentro de
+  `telaLgpd()` (nenhuma outra mudanca de estrutura/ordem/logica).
+- `public/totem/assets/app.css` -- ajustes 1 a 9 acima (logo, gradiente,
+  tipografia escopada, cor do resumo/subtitulo, link do termo, radius
+  dos botoes/modal, cor do botao recusar, overlay do modal, botao
+  "Fechar" do modal), todos dentro do namespace `.lgpd-*`/`.modal-lgpd-*`.
+- `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md` -- esta secao.
+- `ia_development_state.md` -- registro aditivo equivalente.
+
+## Rodada "transplante literal" (2026-09-25) -- valores CSS copiados
+EXATOS do prototipo, nao aproximados
+
+Rodada solicitada apos o usuario reportar que a tela ainda ficava visualmente
+muito diferente do prototipo mesmo apos a rodada de "acabamento visual"
+anterior (que usava valores aproximados/estimados). Desta vez TODOS os
+valores literais (px, `clamp()`, hex, `rgba()`, `font-weight`,
+`letter-spacing` etc.) de cada elemento correspondente do prototipo
+(`docs/indexTotem.html`) foram copiados exatamente, com adaptacao restrita
+ao estritamente necessario (estrutura de wrappers, nomes de classe,
+integracao com o backend real). Escopo restrito a `telaLgpd()`/CSS
+`.lgpd-*`/`.modal-lgpd-*`. Zero banco real, zero chamada externa, zero
+commit/push, zero alteracao em `app/`/`sql/migrations/`.
+
+### Estrutura HTML -- reescrita para espelhar os wrappers do prototipo
+
+`public/totem/assets/app.js`, `telaLgpd()` reescrita para incluir os
+wrappers `.lgpd-content-panel` / `.lgpd-intro` / `.lgpd-actions` /
+`.lgpd-consent-area`, equivalentes a `.content-panel` / `.intro` /
+`.actions` / `.consent-area` do prototipo (antes a tela tinha todos os
+elementos soltos direto dentro de `.lgpd-tela`, sem essa hierarquia).
+
+**Mapeamento de CONTEUDO -- nenhum texto foi alterado, so o PAPEL VISUAL
+de 3 elementos ja existentes, para bater com a hierarquia do prototipo**
+(eyebrow pequeno / h1 grande / subtitle medio):
+
+| Texto (inalterado) | Antes (rodada anterior) | Agora |
+|---|---|---|
+| "Seja bem-vindo" | `.titulo` (28px, maior elemento) | `.lgpd-eyebrow` (pequeno, azul, uppercase, letter-spacing 0.16em) -- mesmo texto do `.eyebrow` do prototipo |
+| "Vamos iniciar seu atendimento." | `.subtitulo` (18px, `--text-secondary`) | `.lgpd-titulo`, tag `<h1>` (42-76px via `clamp`, `font-weight:750`, `letter-spacing:-0.04em`) -- mesmo papel do `h1` do prototipo (sem o "?" final, que nao foi adicionado -- conteudo/copy fora de escopo) |
+| Paragrafo de resumo (CNH/CRLV/notas fiscais) | `.lgpd-resumo` (16px) | `.lgpd-subtitulo` (20-31px via `clamp`, `--text-secondary`, `max-width:650px`) -- sem equivalente literal no prototipo (que so tem eyebrow/h1/subtitle), escolhido por ocupar a mesma posicao estrutural (logo abaixo do h1) |
+
+Essa inversao (o que antes era o "titulo" grande virou o eyebrow pequeno, e
+vice-versa) explica boa parte da diferenca visual reportada pelo usuario:
+a rodada anterior tinha a enfase invertida em relacao ao prototipo.
+
+**Ordem interativa preservada (fora do escopo desta demanda, que e so
+visual)**: o prototipo tem o botao "Iniciar" ANTES da `.consent-area`
+(checkbox+link); a ordem real do totem (consentimento antes da acao,
+aprovada em rodada anterior) foi MANTIDA -- `.lgpd-consent-area` continua
+vindo antes de `.lgpd-btn-continuar`. Documentado como comentario no
+proprio `app.js`.
+
+### Valores CSS transplantados literalmente (prototipo -> `.lgpd-*`/`.modal-lgpd-*`)
+
+Variaveis do prototipo com hex identico a variaveis ja existentes em
+`:root` de `app.css` foram REAPROVEITADAS (nao duplicadas):
+`--brand-primary`/`--text-secondary`/`--border`/`--action-primary(-text)`
+ja existiam com os mesmos hex; `--neutral-500` (`#9BA0A5`) do prototipo ==
+`--text-muted` ja existente (mesmo valor), reaproveitado.
+
+| Elemento | Selector prototipo | Selector real | Valores literais aplicados |
+|---|---|---|---|
+| Wrapper de tela | `.kiosk-screen` | `.lgpd-tela` | `padding: clamp(24px, 5vw, 64px)`; `display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%`. Acrescimo necessario: `min-height:100%` (nao existe no prototipo, que usa `min-height:100vh` porque `.kiosk-screen` e a viewport inteira -- aqui e filho de `.tela`, entao `100%` do espaco ja disponivel produz o mesmo efeito: gradiente cobrindo a altura TOTAL, nao so a altura do conteudo) |
+| Gradiente decorativo | `.hero::after` | `.lgpd-tela::after` | `linear-gradient(90deg, rgba(1,121,173,0.12), transparent 38%, transparent 62%, rgba(1,121,173,0.12))` -- literal (antes era `linear-gradient(180deg, rgba(1,121,173,0.07), transparent 42%)`, aproximado). `z-index:-1` mantido (reforco de seguranca, ver comentario no CSS) |
+| Painel branco | `.content-panel` (+ regra `padding-top:250px` do prototipo) | `.lgpd-content-panel` | `width:min(100%,780px)`; `padding: clamp(48px,6svh,82px) clamp(34px,7vw,78px)`; `padding-top:250px` (reserva espaco para a logo absoluta); `position:relative; z-index:2` |
+| `.content-panel > div` | idem | `.lgpd-content-panel > div` | `width:100%` |
+| Bloco logo+textos | `.intro` | `.lgpd-intro` | `width:min(100%,760px); margin-inline:auto; text-align:center` |
+| Logo | `.brand-logo` | `.lgpd-logo` | `position:absolute; top:0; left:42%; transform:translateX(-50%); width:min(80%,520px); height:auto; object-fit:contain` -- autorizado explicitamente nesta rodada ("pode copiar tamanho/posicao se couber"); continua LOCAL (`assets/udlog.png`), sem CDN. Medido via Puppeteer: **520px larg./167px alt. (1080x1920)** e **508px larg./163px alt. (768x1024)**, sem sobreposicao com eyebrow/titulo em nenhuma das duas |
+| "Seja bem-vindo" | `.eyebrow` | `.lgpd-eyebrow` | `font-size:clamp(15px,1.8vw,23px); font-weight:800; letter-spacing:0.16em; text-transform:uppercase; color:var(--brand-primary)` |
+| "Vamos iniciar seu atendimento." | `h1` | `.lgpd-titulo` | `font-size:clamp(42px,6.2vw,76px); font-weight:750; line-height:1.08; letter-spacing:-0.04em; color:var(--text-primary)` |
+| Paragrafo de resumo | `.subtitle` | `.lgpd-subtitulo` | `font-size:clamp(20px,2.6vw,31px); line-height:1.48; color:var(--text-secondary); max-width:650px; margin:24px auto 0` |
+| Area de acoes | `.actions` | `.lgpd-actions` | `width:min(100%,700px); margin-top:clamp(48px,6svh,88px)` |
+| Caixa de consentimento | `.consent-area` | `.lgpd-consent-area` | `padding:26px 24px; border:1px solid rgba(176,176,177,0.72); border-radius:20px; background:rgba(155,160,165,0.07)` |
+| Label do checkbox | `.consent-label` | `.lgpd-checkbox-label` | `display:grid; grid-template-columns:34px 1fr; gap:18px; align-items:start` |
+| Checkbox | `.consent-checkbox` | `.lgpd-checkbox` | `width:34px; height:34px; accent-color:var(--brand-primary)` |
+| Texto do consentimento | `.consent-text` | `.lgpd-consent-text` | `font-size:clamp(18px,2.15vw,27px); line-height:1.45; color:var(--text-primary)` |
+| Link "Ver termo completo" | `.terms-link` | `.lgpd-link-ver-termo` | `font-size:clamp(17px,2vw,24px); font-weight:800; letter-spacing:0.08em; text-decoration:underline; text-underline-offset:6px; color:var(--brand-primary)` |
+| Botao "Continuar" | `.start-button` (+ `::after`, `:active`, `:disabled`) | `.lgpd-btn-continuar` | `min-height:clamp(82px,8svh,112px); padding:20px 34px; border-radius:20px; box-shadow:0 14px 30px rgba(1,121,173,0.28); font-size:clamp(26px,3.2vw,39px); font-weight:800; letter-spacing:0.02em`; `::after{content:"→"}`; `:active{transform:scale(0.985)}`; `:disabled{opacity:0.46;box-shadow:none}` |
+| Botao "Não desejo continuar" | SEM equivalente (extra autorizado) | `.lgpd-btn-recusar` | Metricas copiadas de `.modal-button`: `min-height:62px; padding:14px 26px; border-radius:12px; font-size:clamp(17px,1.9vw,22px); font-weight:750`; cor de contorno `#DC3545` (do `.refuse`) mantida |
+| Overlay do modal | `.modal-overlay` | `.modal-fundo-lgpd` | `padding:clamp(16px,3vw,42px); background:rgba(0,0,0,0.62)` |
+| Caixa do modal | `.privacy-modal` | `.modal-lgpd-caixa` | `width:min(100%,1000px)` (literal -- antes fixado em 460px por decisao tecnica; agora usa o teto de 1000px do prototipo, que via `min()` escala sozinho sem overflow); `max-height:92svh; border-radius:18px; box-shadow:0 30px 90px rgba(0,0,0,0.40)` |
+| Cabecalho do modal | `.modal-header`/`h2` | `.modal-lgpd-cabecalho`/`.modal-lgpd-titulo` | `padding:clamp(22px,3vw,34px); background:var(--brand-primary); color:var(--action-primary-text)`; titulo `font-size:clamp(24px,3vw,36px); font-weight:750; line-height:1.25` (cor herdada, branco) |
+| Corpo do modal | `.modal-body` (+ `h3`/`p`/`ul`/`li`/`a`) | `.modal-lgpd-corpo` | `padding:clamp(26px,4vw,48px); font-size:clamp(17px,2vw,23px); line-height:1.58`; `h3{margin:34px 0 12px}`; `p{margin:0 0 20px}`; `ul{padding-left:32px}`; `li+li{margin-top:7px}`; `a{font-weight:700; color:var(--brand-primary)}` |
+| Rodape do modal | `.modal-actions` | `.modal-lgpd-rodape` | `gap:16px; padding:20px clamp(22px,3vw,34px); border-top:1px solid var(--border)` |
+| Botao "Fechar" | `.modal-button.accept` | `.modal-lgpd-btn-fechar` | `min-height:62px; padding:14px 26px; border-radius:12px; font-size:clamp(17px,1.9vw,22px); font-weight:750; background:#198754` |
+
+### Adaptacoes estritamente necessarias (documentadas tambem como comentario no CSS/JS)
+
+- `.lgpd-tela` ganhou `min-height:100%` (nao existe no prototipo) para o
+  gradiente `::after` cobrir a altura TOTAL disponivel, nao so a altura do
+  conteudo -- sem isso o gradiente ficava "encolhido" ao redor do cartao
+  em vez de tela cheia (achado desta rodada, corrigido apos comparacao
+  visual real via Puppeteer).
+- `.lgpd-btn-continuar`/`.lgpd-btn-recusar` ganharam `margin-top`
+  (34px/16px) que no prototipo pertencia a `.consent-area`/nao existia --
+  necessario porque a ORDEM dos filhos e diferente (ver "ordem interativa
+  preservada" acima).
+- `.modal-lgpd-cabecalho` ganhou `display:flex; justify-content:space-between`
+  (o prototipo nao tem essa regra porque so tem `h2`, sem botao X) --
+  necessario para posicionar o `#lgpdModalBtnFechar` (elemento extra ja
+  existente, mantido).
+- `.modal-lgpd-fechar` (botao X) teve a cor trocada para
+  `var(--action-primary-text)` (branco), sem equivalente no prototipo --
+  necessario porque agora esta sobre o fundo azul do cabecalho (antes o
+  cabecalho nao tinha cor de fundo).
+- `.modal-lgpd-btn-fechar` ganhou `width:100%` (o prototipo so aplica
+  largura total aos botoes dentro do media query `max-width:640px`) --
+  mantido incondicional porque e o UNICO botao do rodape (decisao ja
+  tomada de nao duplicar um segundo "aceite" dentro do modal) e a tela
+  retrato do totem esta sempre dentro dessa faixa estreita.
+- `z-index` do overlay do modal mantido em `50` (nao `1000` do prototipo)
+  -- decisao tecnica, nao visual: mantem a escala de camadas ja existente
+  no projeto (`.modal-fundo-inatividade` usa `80`).
+
+### Trade-off de acessibilidade NOVO, surgido da propria literalidade (reportado, nao decidido silenciosamente)
+
+O `.consent-label` do prototipo (`display:grid`, sem `min-height`)
+resultou, medido via Puppeteer, em **35px de altura real** do
+`<label class="lgpd-checkbox-label">` (antes: 64px, alvo de toque minimo
+ja estabelecido no projeto e protegido em 2 rodadas anteriores). Esta
+rodada seguiu a instrucao explicita de transplantar o valor literal (o
+prototipo nao reserva altura minima nesse elemento), mas a REGRESSAO NAO
+FOI decidida silenciosamente -- fica registrada aqui para o usuario avaliar
+se quer um ajuste pontual (ex.: `min-height` como excecao so nesta label,
+sem alterar o restante do layout) numa proxima rodada.
+
+### Verificacao (evidencia real, Puppeteer, comparacao lado a lado)
+
+Harnesses estaticos temporarios `public/totem/_verify_lgpd_literal.php`
+(renderiza `telaLgpd()` real) e `public/totem/_verify_home_literal.php`
+(renderiza `telaHome()` real), ambos carregando `assets/app.css`/`app.js`
+REAIS via `<link>`/`<script src>`, servidos via `php -S 127.0.0.1:8932 -t
+public`; `docs/indexTotem.html` servido em paralelo via `php -S
+127.0.0.1:8933 -t docs` para comparacao lado a lado no mesmo navegador
+(Puppeteer `puppeteer@24.15.0`, instalacao global). Ambos os harnesses
+REMOVIDOS ao final -- `git status --short` confirmado sem vestigios.
+
+Capturas nas 2 resolucoes de teste (1080x1920 e 768x1024), tela principal
++ modal aberto + estado com checkbox marcado, comparadas visualmente lado
+a lado com as capturas equivalentes do prototipo. **Resultado: visual
+praticamente identico** -- mesma cor/posicao de eyebrow, mesmo peso/escala
+do titulo, mesmo tom do texto secundario, mesma caixa de consentimento
+(cor de fundo, borda, radius), mesmo botao com seta e sombra ao habilitar,
+mesmo gradiente de fundo cobrindo a tela inteira, mesmo cabecalho azul do
+modal com titulo branco, mesmo corpo de texto, mesmo botao verde no
+rodape. Diferencas residuais conhecidas e justificadas (ver "Adaptacoes
+estritamente necessarias" acima): estrutura de conteudo em 3 blocos em vez
+de exatamente eyebrow+h1+subtitle do prototipo (resumo sem equivalente
+literal), ordem consentimento-antes-de-acao (decisao de fluxo protegida,
+fora de escopo), botao extra "Não desejo continuar", modal com 1 botao em
+vez de 2, logo local em vez de CDN.
+
+Medido via `page.evaluate()` (bounding boxes e `getComputedStyle` reais):
+
+- **Sem overlap do logo** com eyebrow/titulo nas 2 resolucoes
+  (`logoOverlapsEyebrow === false`, `logoOverlapsTitulo === false`).
+- **Sem overflow horizontal** em nenhuma resolucao (`overflowX === false`),
+  incluindo dentro da caixa do modal (`caixaOverflowX === false`) mesmo com
+  o novo teto de 1000px.
+- **Sem overflow vertical forcado**: `docScrollH === viewportH` nas 2
+  resolucoes (1920/1920 e 1024/1024).
+- Tipografia/cores conferem exatamente com os valores `clamp()`/hex
+  listados na tabela acima, calculados corretamente para cada viewport
+  (ex.: `.lgpd-titulo` -> 66.96px em 1080px de largura e 47.6px em 768px,
+  dentro da curva do `clamp(42px,6.2vw,76px)`).
+- **Botao "Continuar" habilitado** (apos marcar o checkbox via clique
+  real): `box-shadow === "rgba(1, 121, 173, 0.28) 0px 14px 30px 0px"`,
+  igual ao valor literal `0 14px 30px rgba(1,121,173,0.28)` do prototipo;
+  desabilitado, `box-shadow === "none"` (tambem literal, `:disabled` do
+  prototipo).
+- **Zero chamada de rede indevida**: `netReqs` (filtrado por fora de
+  `127.0.0.1`) retornou lista vazia nas 2 resolucoes, mesmo apos abrir e
+  fechar o modal do termo.
+- **`telaHome()` inalterada**: harness dedicado confirmou `.titulo`
+  generico em `22px`/`rgb(58,58,58)` e `.tile-principal` em
+  `rgb(1,121,173)`/`border-radius:14px`, identico ao baseline anterior --
+  os novos seletores `.lgpd-*` nao vazaram para nenhuma outra tela.
+
+### Confirmacoes finais de restricao
+
+- Zero banco real (harnesses estaticos, sem `Bootstrap::conectar`).
+- Zero chamada externa (todas as requisicoes ficaram em `127.0.0.1:8932`/
+  `127.0.0.1:8933`, confirmado via `page.on('request')` filtrado).
+- Zero commit/push nesta rodada.
+- Worktree principal (`C:\xampp\htdocs\totem-udlog`) nao tocado -- nenhum
+  comando executado fora de `C:\xampp\htdocs\totem-udlog-worktree-lgpd`.
+- **`app/` e `sql/migrations/` nao tocados**: `git status --short -- app/
+  sql/migrations/` sem output ao final, confirmando zero alteracao. Nenhum
+  arquivo de `Controller`/`Dao`/`Rn` foi lido nesta rodada.
+- Logo continua LOCAL (`assets/udlog.png`), sem CDN/hotlink.
+- Zoom nao tocado -- nenhum arquivo `index.php` alterado nesta rodada,
+  `meta viewport` (`maximum-scale=1.0, user-scalable=no`) intacta.
+- Harnesses temporarios (`_verify_lgpd_literal.php`,
+  `_verify_home_literal.php`) removidos do worktree ao final, `git status
+  --short` sem vestigios de nenhum dos dois.
+
+### Arquivos alterados nesta rodada ("transplante literal")
+
+- `public/totem/assets/app.js` -- `telaLgpd()` reescrita com a nova
+  hierarquia de wrappers (`.lgpd-content-panel`/`.lgpd-intro`/
+  `.lgpd-actions`/`.lgpd-consent-area`), 3 elementos de texto existentes
+  remapeados para eyebrow/h1/subtitle (mesmos textos, novas classes/tags),
+  IDs preservados integralmente (nenhum seletor usado por
+  `ligarConsentimentoLgpd()`/`aceitarLgpd()`/`abrirModalLgpd()`/
+  `fecharModalLgpd()` foi alterado).
+- `public/totem/assets/app.css` -- bloco `.lgpd-*`/`.modal-lgpd-*` inteiro
+  reescrito com os valores literais da tabela acima.
+- `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md` -- esta secao.
+- `ia_development_state.md` -- registro aditivo equivalente.
+
+## Ajuste final de texto do botao e correcoes de layout (2026-09-25)
+
+Apos varias idas e vindas do usuario sobre o rotulo do botao principal
+("Li e estou ciente — Continuar" vs "Iniciar"), foi confirmado que
+**"Iniciar" e a versao final correta**.
+
+### Impacto no termo LGPD (`app/Content/TermoLgpd.php`)
+
+A clausula 9 ("Ciencia do usuario") citava literalmente o rotulo do
+botao no texto legal: *'Ao marcar a opcao de ciencia e selecionar
+"Li e estou ciente — Continuar"...'*. Como o rotulo real do botao
+mudou para "Iniciar", o texto canonico precisou ser atualizado para
+nao ficar factualmente incorreto -- alterado para *'...selecionar
+"Iniciar"...'*.
+
+**Consequencia de versionamento (regra ja estabelecida, aplicada
+agora)**: qualquer alteracao no texto canonico exige nova versao +
+novo hash. `TermoLgpd::VERSAO` avancou de `2026-09-24-v1` para
+`2026-09-25-v2`. `TermoLgpd::hash()` e sempre derivado do proprio
+texto (nunca hardcoded), entao o hash mudou automaticamente junto.
+
+**A aprovacao do DPO (Flavio Carvalho) registrada anteriormente para
+a v1 NAO se estende a v2** -- e exatamente o cenario que a propria
+regra documentada previa ("se o texto canonico mudar no futuro,
+devera receber nova versao e nova aprovacao formal"). "Aprovacao
+formal do texto pelo DPO antes de ativacao em producao" volta a ser
+pendencia ATIVA desta demanda, agora para a versao `2026-09-25-v2`
+especificamente -- a aprovacao anterior fica registrada no historico
+como valida apenas para o conteudo exato da v1 (nunca apagada, so
+superada).
+
+Comentario de cabecalho do arquivo (`app/Content/TermoLgpd.php`,
+linhas 49-54) atualizado com um bloco de HISTORICO documentando as 2
+versoes e o motivo da mudanca, sem alterar a natureza do aviso
+"VERSAO INICIAL PARA DESENVOLVIMENTO, NAO APROVADA PELO DPO" ja
+presente no topo do arquivo (que nunca chegou a ser atualizado para
+"aprovada" em codigo -- so na documentacao -- entao nao precisou ser
+revertido, so o historico foi adicionado).
+
+### Correcoes de layout (`app.css`/`app.js`, so tela LGPD)
+
+1. **Bug de centralizacao**: `.lgpd-actions` (checkbox, link "ver
+   termo", botao principal) nao tinha `margin:auto`, diferente de
+   `.lgpd-intro` (logo/titulo) que ja tinha -- ficava colado a
+   esquerda da tela em vez de centralizado. Corrigido: `margin: <valor
+   original> auto 0 auto;`.
+2. **Largura/padding do container**: `.lgpd-content-panel` tinha
+   `width: min(100%, 780px)` e `padding-top: 250px` herdados do
+   transplante literal do prototipo (que reservava espaco para o logo
+   `position:absolute`). Pedido explicito do usuario: a tela LGPD
+   precisa ocupar a mesma "resolucao"/largura das demais telas do
+   totem (padrao `.tela`, largura total) -- alterado para `width:
+   100%`, `padding-top:250px` removido.
+3. **Logo**: revertida de `position:absolute` (transplantado do
+   prototipo) para o fluxo NORMAL do layout -- `display:block;
+   max-width:300px; width:100%; height:auto; margin:0 auto ... 0
+   auto;` -- consequencia direta do item 2 (sem mais precisar reservar
+   espaco fixo).
+4. **Gradiente decorativo removido**: `.lgpd-tela::after` (gradiente
+   `linear-gradient(90deg, ...)` transplantado literalmente do
+   prototipo) removido por pedido explicito do usuario -- "o fundo
+   precisa ser todo da mesma cor".
+5. **Paragrafo de resumo**: texto trocado de "Para o Recebimento ou a
+   Expedicao, este Totem podera coletar CNH, CRLV, notas fiscais..."
+   para "Tenha os seus documentos em mao para continuar." (pedido
+   explicito do usuario, mais proximo do subtitulo original do
+   prototipo).
+6. **Botao "Nao desejo continuar" removido** da tela principal --
+   decisao EXPLICITA do usuario, reabrindo/revertendo um requisito
+   funcional que havia sido pedido no inicio da implementacao
+   ("disponibilizar acao secundaria clara"). Confirmado pelo
+   orquestrador antes de executar (nao e mudanca puramente visual, e
+   reversao de requisito de produto) -- usuario confirmou
+   explicitamente. Funcao JS orfa `recusarLgpd()` (nunca mais
+   referenciada) tambem removida do codigo.
+
+### Escopo desta rodada
+
+Alterado: `public/totem/assets/app.css`, `public/totem/assets/app.js`,
+`app/Content/TermoLgpd.php` (so texto/versao, interface
+`texto()/versao()/hash()` inalterada), `ia_development_state.md`, e
+esta secao do handoff. **Nenhum arquivo de backend de validacao/
+persistencia do aceite** (`AceiteLgpdDao.php`, `LgpdRn.php`,
+`LgpdController.php`, `AtendimentoController.php`, migration 014)
+foi tocado -- o mecanismo de seguranca do aceite (token opaco, CAS,
+transacao, hash do termo conferido no consumo) permanece 100%
+intocado e continua validando contra `TermoLgpd::hash()` em tempo
+real (ou seja, a mudanca de versao/hash e automaticamente respeitada
+pelo backend sem nenhuma alteracao de codigo nele).
+
+### Pendencia reaberta
+
+"Aprovacao formal do DPO sobre o texto do termo antes de ativacao em
+producao" -- ATIVA novamente, agora para `2026-09-25-v2`.
+
+## Aprovacao do DPO -- registro factual, versao 2026-09-25-v2
+
+Em 25/09/2026, Bruno Santos confirmou ao projeto que o texto do termo
+LGPD, na versao `2026-09-25-v2` (apos a correcao da clausula 9 para
+citar "Iniciar" em vez do rotulo antigo do botao "Li e estou ciente —
+Continuar"), foi aprovado por Flavio Carvalho, Encarregado pelo
+Tratamento de Dados (DPO) da UDLOG.
+
+O canal e a data original da manifestacao do DPO nao foram fornecidos
+ao repositorio -- nenhuma evidencia documental adicional (e-mail,
+chamado, assinatura, anexo) foi inventada ou versionada.
+
+Esta aprovacao vale exclusivamente para o conteudo exato da versao
+`2026-09-25-v2`. Se o texto canonico mudar novamente no futuro,
+devera receber NOVA versao e NOVA aprovacao formal antes de qualquer
+ativacao em producao -- mesma regra ja aplicada quando a v1 foi
+substituida pela v2.
+
+"Aprovacao formal do texto pelo DPO antes de ativacao em producao"
+REMOVIDA novamente da lista de pendencias desta demanda (a pendencia
+reaberta na secao anterior deste handoff esta agora fechada para a
+v2). Comentario de cabecalho de `app/Content/TermoLgpd.php` atualizado
+com o mesmo registro factual.
+
+### Pendencias nao bloqueantes remanescentes
+
+Apos este registro, restam: validacao fisica em monitor vertical real
+(21,5"); decisao/higiene de arquivos auxiliares de teste pre-existentes
+ausentes (nao relacionados a esta demanda). Retencao de
+`tb_lgpd_aceite` ja resolvida em rodada anterior (acompanha o
+atendimento, sem prazo independente).

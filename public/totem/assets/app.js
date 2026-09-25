@@ -352,17 +352,46 @@ function novoAtendimento() {
 let focoAnteriorModalLgpd = null;
 
 function telaLgpd() {
+    // Estrutura de wrappers alinhada ao prototipo docs/indexTotem.html
+    // (.content-panel/.intro/.actions/.consent-area), namespace .lgpd-*
+    // dedicado -- transplante literal de CSS, rodada 2026-09-25 "transplante
+    // literal" (ver handoff). Mapeamento de CONTEUDO (texto nao foi
+    // alterado, so a classe/role visual de cada elemento existente):
+    // - texto "Seja bem-vindo" (antes .titulo, 28px) agora e o eyebrow
+    //   (pequeno, azul, uppercase) -- mesmo texto do .eyebrow do prototipo.
+    // - texto "Vamos iniciar seu atendimento." (antes .subtitulo, 18px)
+    //   agora e o H1 grande -- mesmo papel do .h1 do prototipo.
+    // - paragrafo de resumo (existente, sem equivalente literal no
+    //   prototipo) passa a usar a tipografia do .subtitle do prototipo.
+    // ORDEM interativa (consentimento antes da acao) MANTIDA como nas
+    // rodadas anteriores -- prototipo tem o botao ANTES da area de
+    // consentimento, mas essa e uma decisao de fluxo ja aprovada
+    // anteriormente e fora do escopo desta demanda (so visual), nao foi
+    // invertida.
     return `<div class="lgpd-tela">
-        <div class="titulo">Aviso de Privacidade — LGPD</div>
-        <div class="subtitulo">Antes de iniciar seu atendimento, leia as informações sobre o tratamento dos seus dados pessoais neste Totem.</div>
-        <p class="lgpd-resumo">Para o Recebimento ou a Expedição, este Totem poderá coletar CNH, CRLV, notas fiscais e outras informações do atendimento. O texto completo explica finalidades, compartilhamento, retenção e seus direitos.</p>
-        <button type="button" class="lgpd-btn-ver-termo" id="lgpdBtnVerTermo">Ver termo completo</button>
-        <label class="lgpd-checkbox-label" for="lgpdCheckbox">
-            <input type="checkbox" id="lgpdCheckbox">
-            <span>Li e estou ciente do Aviso de Privacidade.</span>
-        </label>
-        <button type="button" class="btn-primario lgpd-btn-continuar" id="lgpdBtnContinuar" disabled aria-disabled="true" onclick="aceitarLgpd()">Li e estou ciente — Continuar</button>
-        <button type="button" class="lgpd-btn-recusar" id="lgpdBtnNaoContinuar">Não desejo continuar</button>
+        <section class="lgpd-content-panel">
+            <div>
+                <header class="lgpd-intro">
+                    <img class="lgpd-logo" src="assets/udlog.png" alt="UDLOG United Logistics">
+                    <p class="lgpd-eyebrow">Seja bem-vindo</p>
+                    <h1 class="lgpd-titulo">Vamos iniciar seu atendimento.</h1>
+                    <p class="lgpd-subtitulo">Tenha os seus documentos em mão para continuar.</p>
+                </header>
+
+                <div class="lgpd-actions">
+                    <div class="lgpd-consent-area">
+                        <label class="lgpd-checkbox-label" for="lgpdCheckbox">
+                            <input class="lgpd-checkbox" type="checkbox" id="lgpdCheckbox">
+                            <span class="lgpd-consent-text">Li e estou ciente do Aviso de Privacidade.</span>
+                        </label>
+
+                        <button type="button" class="lgpd-link-ver-termo" id="lgpdBtnVerTermo" aria-label="Ver termo completo de privacidade">Ver termo completo</button>
+                    </div>
+
+                    <button type="button" class="lgpd-btn-continuar" id="lgpdBtnContinuar" disabled aria-disabled="true" onclick="aceitarLgpd()">Iniciar</button>
+                </div>
+            </div>
+        </section>
     </div>
     <div class="modal-fundo modal-fundo-lgpd" id="modalLgpdFundo">
         <div class="modal-lgpd-caixa" id="modalLgpdCaixa">
@@ -395,7 +424,6 @@ function ligarConsentimentoLgpd() {
         }
     });
     document.getElementById('lgpdBtnVerTermo').addEventListener('click', abrirModalLgpd);
-    document.getElementById('lgpdBtnNaoContinuar').addEventListener('click', recusarLgpd);
 }
 
 function abrirModalLgpd() {
@@ -411,18 +439,6 @@ function fecharModalLgpd() {
         focoAnteriorModalLgpd.focus();
     }
     focoAnteriorModalLgpd = null;
-}
-
-// Acao secundaria: NAO chama a API, NAO coleta nenhum dado — so orienta o
-// motorista a procurar a portaria/um atendente. Reaproveita o modal
-// generico ja usado no projeto (#modalFundo/#modalCaixa, mesmo padrao de
-// confirmarCancelar()) em vez de criar uma tela nova.
-function recusarLgpd() {
-    abrirModal(`
-        <div class="titulo">Atendimento pelo Totem não confirmado</div>
-        <div class="subtitulo">Nenhuma informação foi registrada. Procure a portaria ou um colaborador da UDLOG para receber orientação sobre uma forma alternativa de atendimento.</div>
-        <button class="btn-primario" onclick="fecharModal()">Entendi</button>
-    `);
 }
 
 async function aceitarLgpd() {

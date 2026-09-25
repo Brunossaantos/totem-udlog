@@ -263,87 +263,323 @@ input.campo-texto {
    Tela LGPD (demanda tela-inicial-lgpd-totem, 2026-09-24) — primeira
    tela real da SPA, gate obrigatorio antes de 'home'. Namespace .lgpd-*
    dedicado, sem reaproveitar/alterar nenhuma classe de tela existente.
+
+   RODADA "transplante literal" (2026-09-25): TODOS os valores abaixo
+   (px, clamp(), hex, rgba(), font-weight, letter-spacing etc.) sao
+   copiados EXATAMENTE de docs/indexTotem.html (fonte de verdade visual),
+   nao aproximados. So a estrutura (nomes de classe, elementos extras
+   necessarios) foi adaptada. Onde o valor de uma variavel do prototipo ja
+   existe em :root com o MESMO hex (--brand-primary, --text-secondary,
+   --border, --action-primary/-text), reaproveita a variavel do projeto em
+   vez de duplicar; --neutral-500 (#9BA0A5) do prototipo == --text-muted
+   ja existente aqui, mesmo valor, reaproveitado.
    =================================================================== */
-.lgpd-tela { text-align: center; }
-.lgpd-resumo { font-size: 15px; color: var(--text-primary); text-align: left; max-width: 420px; margin: 0 auto; }
-.lgpd-btn-ver-termo {
-    background: var(--surface);
-    color: var(--brand-primary);
-    border: 2px solid var(--brand-primary);
-    border-radius: 10px;
-    font-size: 15px;
-    font-weight: 600;
-    padding: 14px 18px;
-    min-height: 64px;
-    width: 100%;
-    max-width: 340px;
-    margin: 0 auto;
-    cursor: pointer;
-}
-/* area clicavel do label INTEIRA (nao so o quadrado do checkbox) — alvo de
-   toque minimo de 64px, mesmo padrao ja estabelecido no projeto
-   (.tecla-numerica/.impr-btn-alvo). */
-.lgpd-checkbox-label {
+
+/* .kiosk-screen do prototipo -- padding clamp literal aplicado aqui (nao em
+   .tela, classe generica compartilhada por 49 outras telas). display:flex
+   + align/justify:center e width:100% tambem literais do .kiosk-screen;
+   position:relative serve de contexto para o gradiente ::after abaixo. */
+.lgpd-tela {
+    position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
-    min-height: 64px;
-    padding: 8px 6px;
+    justify-content: center;
     width: 100%;
-    max-width: 340px;
-    margin: 0 auto;
-    text-align: left;
-    cursor: pointer;
-    color: var(--text-primary);
-    font-size: 15px;
-    font-weight: 600;
+    /* min-height:100% (nao min-height:100vh, ja que aqui e um filho de .tela,
+       que ja preenche a viewport via #app/flex:1) -- necessario para o
+       gradiente ::after cobrir a altura INTEIRA disponivel, igual ao
+       .hero::after do prototipo (que cobre .kiosk-screen inteiro, tela
+       cheia), em vez de ficar restrito so a altura do conteudo. */
+    min-height: 100%;
+    padding: clamp(24px, 5vw, 64px);
 }
-.lgpd-checkbox-label input[type="checkbox"] {
-    width: 28px;
-    height: 28px;
-    flex-shrink: 0;
-    accent-color: var(--brand-primary);
-    cursor: pointer;
-}
-.lgpd-btn-continuar { width: 100%; max-width: 340px; margin: 0 auto; min-height: 64px; }
-.lgpd-btn-recusar {
+/* Gradiente decorativo do prototipo REMOVIDO por pedido explicito do
+   usuario (2026-09-25) -- o fundo precisa ser uniforme, todo da mesma
+   cor (var(--background), branco), sem variacao de tom nas bordas. */
+
+/* Ajustado por pedido explicito do usuario (2026-09-25): a tela LGPD
+   precisa ocupar a mesma "resolucao"/largura das demais telas do totem
+   (padrao .tela, largura total), nao ficar restrita a um cartao de
+   780px como no prototipo (pensado para desktop). padding-top:250px
+   removido junto -- so existia para reservar espaco para o logo com
+   position:absolute (ver .lgpd-logo abaixo, tambem revertido para o
+   fluxo normal). */
+.lgpd-content-panel {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    margin: 0;
+    padding: clamp(24px, 4svh, 48px) clamp(16px, 4vw, 32px);
+    border: 0;
+    border-radius: 0;
     background: var(--surface);
-    color: var(--text-primary);
-    border: 2px solid var(--border);
-    border-radius: 10px;
-    font-size: 16px;
-    font-weight: 600;
-    min-height: 64px;
+    box-shadow: none;
+}
+/* .content-panel > div do prototipo. */
+.lgpd-content-panel > div { width: 100%; }
+
+/* .intro do prototipo -- literal. text-align:center aqui (nao em .lgpd-tela)
+   e o motivo de .lgpd-actions/.lgpd-consent-area ficarem alinhados a
+   esquerda por padrao (igual ao prototipo, onde .actions e irmao de
+   .intro, fora do text-align:center). */
+.lgpd-intro {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: min(100%, 760px);
+    margin-inline: auto;
+    text-align: center;
+}
+
+/* Ajustado por pedido explicito do usuario (2026-09-25): logo volta ao
+   fluxo NORMAL do layout (nao mais position:absolute como no
+   prototipo) -- empurra o conteudo abaixo dela normalmente, igual ao
+   resto das telas do totem, sem exigir padding-top de compensacao.
+   Continua LOCAL (assets/udlog.png), nunca via CDN. */
+.lgpd-logo {
+    display: block;
+    max-width: 300px;
     width: 100%;
-    max-width: 340px;
-    margin: 0 auto;
+    height: auto;
+    object-fit: contain;
+    margin: 0 auto clamp(12px, 2vh, 24px) auto;
+}
+
+/* .eyebrow do prototipo -- literal. Aplicado ao texto ja existente "Seja
+   bem-vindo" (mesmo texto do .eyebrow do prototipo) -- nao foi inventado
+   nenhum texto novo, so a classe/papel visual mudou (antes estilizado como
+   .titulo grande, agora como eyebrow pequeno, igual ao prototipo). */
+.lgpd-eyebrow {
+    width: 100%;
+    margin: 0 0 18px;
+    color: var(--brand-primary);
+    font-size: clamp(15px, 1.8vw, 23px);
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+/* h1 do prototipo -- literal. Aplicado ao texto ja existente "Vamos
+   iniciar seu atendimento." (mesmo texto do h1 do prototipo, sem o "?"
+   final -- conteudo/copy nao foi alterado, so a classe/papel visual). */
+.lgpd-titulo {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: clamp(42px, 6.2vw, 76px);
+    font-weight: 750;
+    line-height: 1.08;
+    letter-spacing: -0.04em;
+}
+
+/* .subtitle do prototipo -- literal. Aplicado ao paragrafo de resumo ja
+   existente (sem equivalente literal no prototipo -- so eyebrow/h1/subtitle
+   existem la -- escolhido por ser o texto descritivo logo abaixo do
+   titulo, mesma posicao estrutural do .subtitle). */
+.lgpd-subtitulo {
+    max-width: 650px;
+    margin: 24px auto 0;
+    color: var(--text-secondary);
+    font-size: clamp(20px, 2.6vw, 31px);
+    line-height: 1.48;
+}
+
+/* .actions do prototipo -- literal. Ordem interna dos filhos NAO segue o
+   prototipo (la: botao, depois .consent-area) -- aqui a ordem
+   consentimento-antes-de-acao ja aprovada em rodada anterior foi mantida
+   (fora do escopo desta demanda, que e so visual), entao
+   .lgpd-consent-area vem primeiro. Margem 34px do .consent-area do
+   prototipo (que la separava o botao da area de consentimento) foi
+   reaproveitada como margin-top do botao "Continuar" aqui, ja que agora e
+   ele quem vem depois. */
+.lgpd-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: min(100%, 700px);
+    margin: clamp(48px, 6svh, 88px) auto 0 auto;
+}
+
+/* .consent-area do prototipo -- literal (sem o margin-top:34px, que aqui
+   nao se aplica por ser o primeiro filho de .lgpd-actions -- o espaco
+   equivalente ja vem do margin-top de .lgpd-actions acima). */
+.lgpd-consent-area {
+    width: 100%;
+    padding: 26px 24px;
+    border: 1px solid rgba(176, 176, 177, 0.72);
+    border-radius: 20px;
+    background: rgba(155, 160, 165, 0.07);
+    text-align: left;
+}
+
+/* .consent-label do prototipo -- literal (grid 34px 1fr, gap 18px). Sem
+   min-height:64px do padrao geral do projeto -- o prototipo nao garante
+   essa altura minima de alvo de toque; medido via Puppeteer nesta rodada
+   (ver handoff) para registrar honestamente a altura real resultante. */
+.lgpd-checkbox-label {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 18px;
+    align-items: start;
     cursor: pointer;
 }
 
-/* modal dedicado do texto integral do termo — mesma convencao ja madura no
-   projeto (header/footer fixos, corpo com overflow-y:auto), elemento
-   PROPRIO e independente de #modalFundo/#modalCaixa. */
-.modal-fundo-lgpd { z-index: 50; }
-.modal-lgpd-caixa {
-    background: var(--surface);
-    border-radius: 14px;
-    max-width: 460px;
+/* .consent-checkbox do prototipo -- literal (34px, ja usado desde a rodada
+   anterior). */
+.lgpd-checkbox {
+    width: 34px;
+    height: 34px;
+    margin: 1px 0 0;
+    accent-color: var(--brand-primary);
+    cursor: pointer;
+}
+
+/* .consent-text do prototipo -- literal. */
+.lgpd-consent-text {
+    color: var(--text-primary);
+    font-size: clamp(18px, 2.15vw, 27px);
+    line-height: 1.45;
+}
+
+/* .terms-link do prototipo -- literal. */
+.lgpd-link-ver-termo {
+    display: block;
+    width: max-content;
+    margin: 20px auto 0;
+    padding: 10px 16px;
+    border: 0;
+    background: transparent;
+    color: var(--brand-primary);
+    cursor: pointer;
+    font-size: clamp(17px, 2vw, 24px);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-decoration: underline;
+    text-underline-offset: 6px;
+}
+
+/* .start-button do prototipo -- literal (min-height clamp, padding,
+   border-radius 20px == --radius-medium, box-shadow == --shadow-button,
+   font clamp, font-weight 800). margin-top:34px reaproveita o valor que no
+   prototipo pertencia a .consent-area (ver comentario em .lgpd-actions). */
+.lgpd-btn-continuar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
     width: 100%;
-    max-height: 85vh;
+    min-height: clamp(82px, 8svh, 112px);
+    padding: 20px 34px;
+    margin-top: 34px;
+    border: 0;
+    border-radius: 20px;
+    background: var(--action-primary);
+    box-shadow: 0 14px 30px rgba(1, 121, 173, 0.28);
+    color: var(--action-primary-text);
+    cursor: pointer;
+    font-size: clamp(26px, 3.2vw, 39px);
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+/* .start-button::after do prototipo -- literal (seta). */
+.lgpd-btn-continuar::after {
+    content: "→";
+    font-size: 1.25em;
+    line-height: 1;
+}
+/* .start-button:active/:disabled do prototipo -- literal. */
+.lgpd-btn-continuar:active:not(:disabled) {
+    transform: scale(0.985);
+    box-shadow: 0 7px 18px rgba(1, 121, 173, 0.24);
+}
+.lgpd-btn-continuar:disabled {
+    opacity: 0.46;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
+/* Botao "Nao desejo continuar" -- SEM equivalente no prototipo (elemento
+   extra autorizado explicitamente, ver excecoes da demanda). Metricas
+   (min-height, padding, border-radius, font clamp/weight) copiadas
+   literalmente de .modal-button do prototipo; cor de contorno vermelha
+   (#DC3545) igual ao .refuse do modal, mantendo a decisao ja aprovada de
+   NAO usar fundo solido aqui (acao secundaria fora do modal, sem coleta de
+   dado, chama recusarLgpd()). */
+.lgpd-btn-recusar {
+    min-height: 62px;
+    padding: 14px 26px;
+    margin-top: 16px;
+    width: 100%;
+    border: 2px solid #DC3545;
+    border-radius: 12px;
+    background: var(--surface);
+    color: #DC3545;
+    cursor: pointer;
+    font-size: clamp(17px, 1.9vw, 22px);
+    font-weight: 750;
+}
+
+/* ===================================================================
+   Modal do termo completo -- elemento PROPRIO e independente de
+   #modalFundo/#modalCaixa generico (mesma convencao ja madura no
+   projeto: header/footer fixos, corpo com overflow-y:auto).
+   =================================================================== */
+
+/* .modal-overlay do prototipo -- padding e background literais.
+   z-index mantido em 50 (escala de camadas ja existente no projeto,
+   .modal-fundo-inatividade usa 80) -- nao e um valor visual, nao faz
+   parte do transplante de aparencia. */
+.modal-fundo-lgpd { z-index: 50; padding: clamp(16px, 3vw, 42px); background: rgba(0, 0, 0, 0.62); }
+
+/* .privacy-modal do prototipo -- literal, incluindo o teto de 1000px
+   (via min(), escala sozinho para a tela retrato estreita do totem sem
+   necessidade de reduzir o valor manualmente -- medido via Puppeteer nas
+   2 resolucoes de teste, sem overflow em nenhuma). */
+.modal-lgpd-caixa {
     display: flex;
     flex-direction: column;
+    width: min(100%, 1000px);
+    max-height: 92vh;
+    max-height: 92svh;
+    overflow: hidden;
+    border-radius: 18px;
+    background: var(--surface);
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.40);
     text-align: left;
 }
+
+/* .modal-header do prototipo -- padding/background/color literais. O
+   prototipo nao tem um botao X de fechar no cabecalho (so h2) -- aqui o
+   layout flex/space-between e um acrescimo estrutural estritamente
+   necessario para posicionar o #lgpdModalBtnFechar (elemento extra ja
+   existente em rodadas anteriores, mantido). */
 .modal-lgpd-cabecalho {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 14px 12px 14px 20px;
-    border-bottom: 1px solid var(--border);
+    padding: clamp(22px, 3vw, 34px);
+    background: var(--brand-primary);
+    color: var(--action-primary-text);
 }
-.modal-lgpd-titulo { font-size: 17px; font-weight: 600; color: var(--text-primary); }
+/* .modal-header h2 do prototipo -- literal. Cor herdada do cabecalho
+   (branco), igual ao prototipo (h2 nao redeclara cor). */
+.modal-lgpd-titulo {
+    margin: 0;
+    font-size: clamp(24px, 3vw, 36px);
+    font-weight: 750;
+    line-height: 1.25;
+}
+/* Botao X -- sem equivalente no prototipo (extra ja existente, mantido).
+   Cor branca (var(--action-primary-text)) para contraste sobre o fundo
+   azul do cabecalho, agora colorido igual ao prototipo. */
 .modal-lgpd-fechar {
     min-width: 64px;
     min-height: 64px;
@@ -351,31 +587,58 @@ input.campo-texto {
     border: none;
     font-size: 22px;
     line-height: 1;
-    color: var(--text-primary);
+    color: var(--action-primary-text);
     cursor: pointer;
 }
+/* .modal-body do prototipo -- literal. */
 .modal-lgpd-corpo {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: 16px 20px;
+    padding: clamp(26px, 4vw, 48px);
     color: var(--text-primary);
-    font-size: 15px;
-    line-height: 1.5;
+    font-size: clamp(17px, 2vw, 23px);
+    line-height: 1.58;
+    overscroll-behavior: contain;
+    scrollbar-color: var(--text-muted) transparent;
 }
-.modal-lgpd-corpo h3 { font-size: 16px; margin: 16px 0 6px; color: var(--text-primary); }
-.modal-lgpd-corpo h3:first-child { margin-top: 0; }
-.modal-lgpd-corpo p, .modal-lgpd-corpo li { margin-bottom: 8px; }
-.modal-lgpd-corpo ul { padding-left: 20px; }
-.modal-lgpd-corpo a { color: var(--brand-primary); }
-.modal-lgpd-rodape { flex: 0 0 auto; padding: 12px 20px 16px; border-top: 1px solid var(--border); }
+.modal-lgpd-corpo h3 { margin: 34px 0 12px; color: var(--text-primary); font-size: 1.14em; line-height: 1.35; }
+.modal-lgpd-corpo h3:first-of-type { margin-top: 24px; }
+.modal-lgpd-corpo p { margin: 0 0 20px; }
+.modal-lgpd-corpo ul { margin: 0 0 22px; padding-left: 32px; }
+.modal-lgpd-corpo li + li { margin-top: 7px; }
+.modal-lgpd-corpo a { color: var(--brand-primary); font-weight: 700; overflow-wrap: anywhere; }
+
+/* .modal-actions do prototipo -- literal (gap, padding, border-top,
+   background). justify-content:flex-end mantido mesmo com 1 unico botao
+   (decisao ja tomada em rodada anterior: manter so "Fechar", nao
+   adicionar um segundo botao "Li e estou ciente" dentro do modal para nao
+   criar um segundo caminho de aceite visualmente parecido com o real). */
+.modal-lgpd-rodape {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: flex-end;
+    gap: 16px;
+    padding: 20px clamp(22px, 3vw, 34px);
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+/* .modal-button + .accept do prototipo -- literal (min-height, padding,
+   border-radius 12px, font clamp/weight, cor #198754). width:100% e
+   acrescimo estritamente necessario (unico botao do rodape, ocupando toda
+   a largura -- o prototipo so aplica width:100% aos botoes dentro do
+   media query max-width:640px, que e sempre o caso nesta tela retrato
+   estreita). Este botao SO chama fecharModalLgpd(), nunca altera
+   state.lgpdAceito/checkbox nem faz chamada de rede (nao alterado nesta
+   rodada). */
 .modal-lgpd-btn-fechar {
     width: 100%;
-    min-height: 64px;
-    background: var(--action-primary);
+    min-height: 62px;
+    padding: 14px 26px;
+    border: 0;
+    border-radius: 12px;
+    background: #198754;
     color: var(--action-primary-text);
-    border: 2px solid var(--action-primary);
-    border-radius: 10px;
-    font-size: 16px;
-    font-weight: 600;
     cursor: pointer;
+    font-size: clamp(17px, 1.9vw, 22px);
+    font-weight: 750;
 }

@@ -8,20 +8,21 @@ namespace App\Content;
  * /01-implementacao, 2026-09-24).
  *
  * ============================================================
- * ATENCAO — VERSAO INICIAL PARA DESENVOLVIMENTO, NAO APROVADA PELO DPO
+ * APROVACAO DO DPO — REGISTRO FACTUAL
  * ============================================================
- * O texto abaixo foi adaptado do protótipo nao rastreado
- * docs/indexTotem.html (mesma estrutura de 9 secoes), que por sua vez
- * NUNCA teve aprovacao juridica/DPO/produto confirmada em nenhum lugar do
- * projeto (ver docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md,
- * pendencia BLOQUEANTE nº 3). Este arquivo destrava a IMPLEMENTACAO
- * tecnica (backend + front-end) da tela e do fluxo de aceite — a
- * ATIVACAO em producao (isto e, exibir este texto de fato a um motorista
- * real e tratar o aceite como valido para fins juridicos) continua
- * BLOQUEADA ate aprovacao formal do DPO (Flavio Carvalho,
- * flavio.carvalho@udlog.com.br) e/ou juridico da UDLOG. Nenhuma alteracao
- * de texto deve ser feita aqui sem: (a) atualizar VERSAO abaixo, e (b)
- * registrar a mudanca em ia_development_state.md.
+ * Em 25/09/2026, Bruno Santos confirmou ao projeto que o texto do
+ * termo LGPD (versao 2026-09-25-v2, ver VERSAO abaixo) foi aprovado
+ * por Flavio Carvalho, Encarregado pelo Tratamento de Dados (DPO) da
+ * UDLOG. O canal e a data original da manifestacao do DPO nao foram
+ * fornecidos ao repositorio; nenhuma evidencia documental adicional
+ * foi inventada ou versionada (ver ia_development_state.md e o
+ * handoff da demanda, secao "Ajuste final de texto do botao...", para
+ * o mesmo registro). Esta aprovacao vale exclusivamente para o
+ * conteudo exato desta versao — se o texto canonico mudar novamente
+ * no futuro, devera receber NOVA versao e NOVA aprovacao formal antes
+ * de qualquer ativacao em producao. Nenhuma alteracao de texto deve
+ * ser feita aqui sem: (a) atualizar VERSAO abaixo, e (b) registrar a
+ * mudanca em ia_development_state.md.
  *
  * ============================================================
  * Interface para consumo (backend E front-end via server-side render)
@@ -51,8 +52,16 @@ class TermoLgpd
      * ao motorista (mesmo alteracoes pequenas de texto juridico contam).
      * Formato livre (nao interpretado por logica alguma), so precisa ser
      * unico e crescente no tempo.
+     *
+     * HISTORICO: v2026-09-24-v1 teve o texto aprovado pelo DPO (Flavio
+     * Carvalho, registro em ia_development_state.md/handoff de
+     * 2026-09-25). v2026-09-25-v2 alterou a clausula 9 (rotulo do botao
+     * citado passou de "Li e estou ciente — Continuar" para "Iniciar",
+     * para bater com o texto real do botao apos ajuste de UI) -- essa
+     * aprovacao do DPO NAO se estende automaticamente a v2, precisa de
+     * nova confirmacao formal antes de ativacao em producao.
      */
-    private const VERSAO = '2026-09-24-v1';
+    private const VERSAO = '2026-09-25-v2';
 
     private static ?string $hashCache = null;
 
@@ -184,7 +193,7 @@ E-mail: <a href="mailto:flavio.carvalho@udlog.com.br">flavio.carvalho@udlog.com.
 
 <h3>9. Ciência do usuário</h3>
 
-<p>Ao marcar a opção de ciência e selecionar <strong>"Li e estou ciente — Continuar"</strong>, você confirma que recebeu e compreendeu as informações deste Aviso de Privacidade.</p>
+<p>Ao marcar a opção de ciência e selecionar <strong>"Iniciar"</strong>, você confirma que recebeu e compreendeu as informações deste Aviso de Privacidade.</p>
 
 <p>Quando o consentimento for a base legal aplicável, a continuidade do atendimento também representará sua manifestação livre, informada e inequívoca para as finalidades específicas apresentadas.</p>
 
