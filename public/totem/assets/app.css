@@ -504,27 +504,6 @@ input.campo-texto {
     cursor: not-allowed;
 }
 
-/* Botao "Nao desejo continuar" -- SEM equivalente no prototipo (elemento
-   extra autorizado explicitamente, ver excecoes da demanda). Metricas
-   (min-height, padding, border-radius, font clamp/weight) copiadas
-   literalmente de .modal-button do prototipo; cor de contorno vermelha
-   (#DC3545) igual ao .refuse do modal, mantendo a decisao ja aprovada de
-   NAO usar fundo solido aqui (acao secundaria fora do modal, sem coleta de
-   dado, chama recusarLgpd()). */
-.lgpd-btn-recusar {
-    min-height: 62px;
-    padding: 14px 26px;
-    margin-top: 16px;
-    width: 100%;
-    border: 2px solid #DC3545;
-    border-radius: 12px;
-    background: var(--surface);
-    color: #DC3545;
-    cursor: pointer;
-    font-size: clamp(17px, 1.9vw, 22px);
-    font-weight: 750;
-}
-
 /* ===================================================================
    Modal do termo completo -- elemento PROPRIO e independente de
    #modalFundo/#modalCaixa generico (mesma convencao ja madura no
@@ -632,7 +611,7 @@ input.campo-texto {
    rodada). */
 .modal-lgpd-btn-fechar {
     width: 100%;
-    min-height: 62px;
+    min-height: 64px;
     padding: 14px 26px;
     border: 0;
     border-radius: 12px;

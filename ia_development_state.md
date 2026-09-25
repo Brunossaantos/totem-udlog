@@ -5767,3 +5767,31 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   desta demanda (agora coberta pela v2). Comentario de cabecalho de
   `app/Content/TermoLgpd.php` atualizado com o mesmo registro. Zero
   alteracao de codigo funcional nesta entrada -- so documentacao.
+- 2026-09-25 -- **Validacao fisica no monitor vertical de 21,5" --
+  registro factual**: Bruno Santos confirmou ao projeto que a
+  validacao fisica da tela LGPD (commit `30f70c0`) foi realizada no
+  equipamento real e passou SEM problemas (toque, legibilidade,
+  layout, sem corte de conteudo). Ultima pendencia nao bloqueante
+  fechada -- restam apenas itens de higiene pre-existentes nao
+  relacionados a esta demanda (arquivos auxiliares de teste ausentes).
+  Demanda pronta para uma rodada final de `/03-revisao` independente
+  antes do push definitivo.
+- 2026-09-25 -- Limpeza final da tela LGPD, pos `/03-revisao` final
+  (commit `30f70c0`): removida a classe CSS orfa `.lgpd-btn-recusar`
+  (e o comentario desatualizado que citava `recusarLgpd()`, funcao ja
+  removida anteriormente); `.modal-lgpd-btn-fechar` (botao de fechar
+  do rodape do modal do termo) ajustado de `min-height:62px` para
+  `64px`. Validado por medicao real (Puppeteer, 2 resolucoes): botao
+  agora mede exatamente 64px nas duas. Confirmado por busca global:
+  zero ocorrencia viva de `.lgpd-btn-recusar`/`recusarLgpd` em
+  qualquer arquivo de codigo. Reconfirmado que os 2 trade-offs de
+  acessibilidade ja aceitos pelo usuario permanecem com as mesmas
+  medidas (checkbox ~35px, "ver termo completo" ~44-51px) -- nao
+  alterados por esta limpeza. Confirmado por diff que os 10 arquivos
+  de backend/migration/termo (`AceiteLgpdDao.php`, `LgpdRn.php`,
+  `LgpdController.php`, `AtendimentoController.php`,
+  `AtendimentoDao.php`, `AtendimentoRn.php`, `lgpd.php`,
+  `atendimento.php`, migration 014, `TermoLgpd.php`) permanecem
+  byte-identicos ao commit `30f70c0`. `php -l`/`node --check`/`git
+  diff --check` sem erro. Zero banco real, zero chamada externa,
+  zero commit/push nesta entrada de log -- registro pre-commit.

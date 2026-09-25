@@ -2896,3 +2896,50 @@ Apos este registro, restam: validacao fisica em monitor vertical real
 ausentes (nao relacionados a esta demanda). Retencao de
 `tb_lgpd_aceite` ja resolvida em rodada anterior (acompanha o
 atendimento, sem prazo independente).
+
+## Validacao fisica -- registro factual (2026-09-25)
+
+Bruno Santos confirmou ao projeto que a validacao fisica da tela LGPD
+(commit `30f70c0`, monitor vertical de 21,5" real) foi realizada e
+**passou sem nenhum problema** -- toque, legibilidade, layout, sem
+corte de conteudo.
+
+Ultima pendencia nao bloqueante fechada. Restam apenas itens de
+higiene pre-existentes, nao relacionados a esta demanda (arquivos
+auxiliares de teste ausentes, ja documentados em rodadas anteriores).
+
+Proximo passo: rodada final de `/03-revisao` independente sobre o
+estado atual (pos-checkpoint `30f70c0`), antes do push definitivo.
+
+## Limpeza final pos `/03-revisao` (2026-09-25)
+
+Corrigido o unico achado nao bloqueante da revisao final:
+
+1. **Classe CSS orfa removida**: `.lgpd-btn-recusar` (regra completa +
+   comentario que citava `recusarLgpd()`, funcao ja removida numa
+   rodada anterior) -- confirmado por busca global que nao ha mais
+   nenhuma ocorrencia viva em `app.css`/`app.js` (so mencoes
+   historicas em handoff/state file, esperadas).
+2. **Alvo de toque do botao de fechar do rodape do modal**:
+   `.modal-lgpd-btn-fechar` ajustado de `min-height:62px` para
+   `64px`. Medido via Puppeteer real apos a mudanca: **64px exatos
+   nas 2 resolucoes** (1080x1920, 768x1024).
+
+Validacao independente (sub-agente dedicado, so verificacao, nenhuma
+alteracao): modal continua abrindo/rolando/fechando normalmente pelos
+2 botoes (rodape e X do cabecalho); os 2 trade-offs de acessibilidade
+ja aceitos pelo usuario permanecem com as mesmas medidas (checkbox
+~35px, "ver termo completo" ~44-51px), nao afetados por esta limpeza;
+os 10 arquivos de backend/migration/termo (`AceiteLgpdDao.php`,
+`LgpdRn.php`, `LgpdController.php`, `AtendimentoController.php`,
+`AtendimentoDao.php`, `AtendimentoRn.php`, `lgpd.php`,
+`atendimento.php`, migration 014, `TermoLgpd.php`) confirmados
+byte-identicos ao commit `30f70c0` (nenhum tocado); `php -l`/
+`node --check`/`git diff --check` sem erro real.
+
+Nenhum residuo de ferramenta de teste (Puppeteer instalado
+temporariamente via `npm install --no-save`, removido por completo ao
+final -- confirmado ausencia de `node_modules`/`package.json` no
+`git status`).
+
+Demanda pronta para o commit de limpeza final e o push definitivo.
