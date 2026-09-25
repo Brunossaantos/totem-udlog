@@ -121,9 +121,16 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
   navegação humana)
 - Talent espera anexos como **JSON com os arquivos em base64** (não é
   multipart/form-data)
-- Identidade visual: seguir o padrão de https://udlog.com.br/ — paleta
-  exata ainda não confirmada, está com navy (#0b2a45) + branco como
-  placeholder
+- Identidade visual: paleta oficial UDLOG CONFIRMADA e aplicada em
+  2026-09-24/25 (demanda `tela-inicial-lgpd-totem`) a todo o
+  front-end do totem (27 estados) — `#0179AD` (acao principal/links/
+  foco), `#3A3A3A` (texto principal), `#878789` (texto secundario, so
+  com contraste suficiente), `#9BA0A5` (icones/info terciaria, nunca
+  texto essencial), `#B0B0B1` (bordas/divisores), `#FFFFFF` (fundo/
+  superficie). O navy (`#0b2a45`) + branco anterior era placeholder
+  provisorio, substituido — mencoes historicas a ele no changelog
+  abaixo refletem o estado anterior a essa demanda, nao a pendencia
+  atual.
 
 ## 5. Pendências reais (não inventar — perguntar ou aguardar)
 
@@ -134,7 +141,7 @@ premissa anterior, incorreta, registrada até 2026-09-03.)
 | ~~URL, autenticação e formato de resposta da API do Talent~~ | `app/Rn/TalentClient.php` | PARCIALMENTE RESOLVIDA em 2026-09-09 — contrato oficial confirmado via `MANUAL_TALENT_WMS.pdf` lido na íntegra: endpoint real é `POST https://api.talentcs.com.br/Portaria/Checkin` (o placeholder anterior `/atendimentos` nunca existiu no manual). Documentado em `docs/manual_talent.md`. **Ainda não confirmado**: formato do retorno de sucesso/erro deste endpoint específico (não documentado no manual) — bloqueia saber como preencher `talent_senha`/`talent_protocolo` corretamente. Handoff: `docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md` |
 | Viabilidade/convênio da API Prodesp (CNH/CRLV) | `app/Rn/ProdespClient.php` | Não confirmado — pode nunca ser viável; QR da CNH digital é payload assinado, QR do CRLV-e costuma ser só link de validação |
 | Origem/sincronização de `tb_cliente` para clientes futuros (além dos 38 já inseridos) | Autocomplete do recebimento + casamento por CNPJ + novo OCR local | Parcialmente resolvida em 2026-09-08: `tb_cliente` agora tem 38 clientes reais (razão social + CNPJ validados, coluna nova `razao_social_normalizada`), usados deliberadamente pelos 3 fluxos (autocomplete, chave de acesso antiga, OCR novo). Não resolvido: processo de manutenção para adicionar clientes novos no futuro (continua manual, via migration de dado) |
-| Paleta de cores oficial da UDLOG | Todo o front-end | Usando navy/branco como placeholder |
+| ~~Paleta de cores oficial da UDLOG~~ | Todo o front-end | RESOLVIDA em 2026-09-24/25 (demanda `tela-inicial-lgpd-totem`) — paleta oficial (`#0179AD`/`#3A3A3A`/`#878789`/`#9BA0A5`/`#B0B0B1`/`#FFFFFF`) aplicada a todo o front-end (27 estados), com tabela de mapeamento das cores antigas registrada no handoff da demanda |
 | ~~Origens CORS/PNA permitidas do servico local de impressao ainda vazias~~ | `servico-impressao-local/config/config.json` (real, gitignored) | **CORRIGIDO em 2026-09-16 (demanda `impressao-origens-permitidas`)**: desenvolvimento ativo com `origensPermitidas: ["http://localhost:8080"]` (comparacao exata, testado em 17 cenarios reais de CORS/PNA/auth, veredito APROVADO). Producao (`https://udlog.online`) esta CONFIRMADA e documentada em `servico-impressao-local/README.md`/`docs/deploy-checklist.md`, mas AINDA NAO ativada nem testada — sera ligada somente no deploy final no mini PC de producao, com reconfirmacao da origem na barra de enderecos apos o deploy. `http://udlog.online` (sem HTTPS) explicitamente NAO autorizado. Rollback seguro: `origensPermitidas: []`. Ver `docs/handoffs/2026-09-15-impressao-origens-permitidas.md` |
 | Ponto de acesso a tela de diagnostico de impressao (toque longo na tela inicial) | `public/totem/assets/app.js` (`#diagHotspot`) | Implementado em 2026-09-14 como escolha de implementacao, reaproveitando sugestao anterior — NAO e decisao de UX/produto formalmente confirmada pelo usuario |
 | Sucesso do spooler do Windows (`pdf-to-printer`) nao confirma fisicamente que a impressao ocorreu — e fire-and-forget por natureza da API do Windows | `servico-impressao-local/src/routes/imprimir.js`, `public/totem/assets/diagnostico-impressao.js` (tela "concluido") | Achado do `qa-testes` em 2026-09-14 — neste teste especifico houve confirmacao humana direta da impressao fisica, mas o mecanismo em si pode gerar falso positivo de UX se a impressora falhar silenciosamente apos o HTTP 200; decisao de mitigar (ou nao) pendente |
@@ -954,8 +961,10 @@ de código/commit/handoff, não por descrição textual.
 - Diversos campos do payload real do Talent sem fonte de captura no
   totem (reboque, exigePesagem, transportadora, telefones, paletes,
   etc.) — quais são realmente necessários.
-- Paleta de cores oficial da UDLOG — ainda usando navy/branco como
-  placeholder.
+- ~~Paleta de cores oficial da UDLOG — ainda usando navy/branco como
+  placeholder.~~ RESOLVIDA em 2026-09-24/25 (demanda
+  `tela-inicial-lgpd-totem`): paleta oficial confirmada e aplicada a
+  todo o front-end do totem (27 estados) — ver secao 4 e tabela acima.
 
 #### 3. AGUARDANDO CREDENCIAL/TERCEIRO
 
@@ -5463,3 +5472,75 @@ A partir de 2026-09-16, TODA vez que o orquestrador for fazer
   `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md`, secao
   "`/03-revisao` INDEPENDENTE final (2026-09-25)". **Demanda liberada
   para `/04-commit-e-push`.**
+- 2026-09-25 -- Rebase da branch `tela-inicial-lgpd-totem` sobre a
+  `main` atualizada (commit `453f44b`, demanda
+  `sanitizacao-excecoes-lock-documentos` ja publicada), e resolucao de
+  3 pendencias documentais da demanda `tela-inicial-lgpd-totem`, sem
+  nenhuma alteracao de codigo.
+
+  **Rebase**: commit local `38a450b` (author/committer Bruno Santos)
+  rebasado com sucesso sobre `453f44b` -- novo hash `88c6a31`. Unico
+  conflito, em `ia_development_state.md` (ambas as demandas
+  adicionavam changelog no mesmo ponto de ancoragem, sem sobreposicao
+  de conteudo real) -- resolvido por concatenacao cronologica dos 2
+  blocos (bloco `sanitizacao-excecoes-lock-documentos`, que comeca em
+  2026-09-20, antes do bloco `tela-inicial-lgpd-totem`, que comeca em
+  2026-09-24), sem escolher "ours"/"theirs" as cegas, sem perda de
+  conteudo de nenhum lado (confirmado por leitura integral da juncao).
+  Confirmado por diff que os 17 arquivos proprios da demanda LGPD sao
+  BYTE-IDENTICOS entre o commit antigo e o novo -- a unica diferenca
+  veio da nova base (as correcoes ja publicadas de
+  `DocumentoController.php`/`NotaController.php`, nunca tocados pela
+  LGPD). Worktree principal confirmado intocado durante todo o
+  processo.
+
+  **Aprovacao do DPO -- registro factual**: Em 25/09/2026, Bruno
+  Santos confirmou ao projeto que o texto do termo LGPD foi aprovado
+  por Flavio Carvalho, Encarregado pelo Tratamento de Dados (DPO) da
+  UDLOG. O canal e a data original da manifestacao do DPO nao foram
+  fornecidos ao repositorio; portanto, nenhuma evidencia documental
+  adicional foi inventada ou versionada. Versao aprovada:
+  `2026-09-24-v1` (hash SHA-256 derivado do texto canonico em
+  `app/Content/TermoLgpd.php`, ver handoff). Se o texto canonico mudar
+  no futuro, devera receber nova versao e nova aprovacao formal --
+  aprovacao atual vale exclusivamente para o conteudo exato da versao
+  `2026-09-24-v1`. "Aprovacao formal do texto pelo DPO" REMOVIDA da
+  lista de pendencias desta demanda.
+
+  **Regra final de retencao de `tb_lgpd_aceite`**: `tb_lgpd_aceite`
+  nao possui prazo de retencao independente -- o registro acompanha o
+  ciclo de vida do atendimento e da auditoria relacionados. Enquanto o
+  atendimento for conservado por finalidade operacional, auditoria,
+  obrigacao legal ou exercicio regular de direitos, o aceite tambem
+  sera conservado. Quando o atendimento for eliminado ou anonimizado
+  conforme a politica corporativa da UDLOG, o aceite relacionado
+  devera receber tratamento equivalente. Nenhuma rotina automatica de
+  exclusao foi criada nesta demanda. A definicao de um prazo absoluto
+  para todos os atendimentos pertence a politica corporativa geral de
+  retencao da UDLOG, nao a implementacao da tela LGPD -- nenhum prazo
+  numerico foi inventado. "Decisao de produto sobre prazo de retencao
+  de `tb_lgpd_aceite`" REMOVIDA da lista de pendencias especificas
+  desta demanda (a politica corporativa geral de retencao, se/quando
+  definida, se aplicara automaticamente por este vinculo ao
+  atendimento, sem exigir nova implementacao).
+
+  **Paleta de cores**: corrigidas as 3 mencoes ativas restantes que
+  ainda tratavam navy/branco como placeholder provisorio (secao 4,
+  tabela da secao 5, secao 5.1 item "AGUARDANDO DECISAO DE PRODUTO")
+  -- a paleta oficial UDLOG (`#0179AD`/`#3A3A3A`/`#878789`/`#9BA0A5`/
+  `#B0B0B1`/`#FFFFFF`) esta confirmada e aplicada a todo o front-end
+  do totem desde a demanda `tela-inicial-lgpd-totem`. Mencoes
+  historicas no changelog (registros de estado no momento em que cada
+  demanda anterior foi executada) foram preservadas sem alteracao,
+  conforme convencao ja estabelecida do projeto.
+
+  Pendencias nao bloqueantes remanescentes da demanda
+  `tela-inicial-lgpd-totem` (nao resolvidas nesta rodada, aguardando
+  validacao fisica): validacao fisica em monitor vertical real
+  (21,5"); higiene dos arquivos auxiliares de teste pre-existentes
+  ausentes (nao relacionados a esta demanda). Zero codigo alterado
+  nesta rodada -- so rebase + documentacao. Ver
+  `docs/handoffs/2026-09-24-tela-inicial-lgpd-totem.md`, secao
+  "Rebase sobre main atualizada e resolucao de pendencias documentais
+  (2026-09-25)". **Demanda `tela-inicial-lgpd-totem`:
+  AGUARDANDO_VALIDACAO_FISICA.**

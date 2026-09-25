@@ -1948,3 +1948,124 @@ producao; decisao de produto sobre o prazo exato de retencao de
 pre-existentes ausentes (nao relacionados a esta demanda).
 
 **Demanda `tela-inicial-lgpd-totem` liberada para `/04-commit-e-push`.**
+
+## Rebase sobre main atualizada e resolucao de pendencias documentais (2026-09-25)
+
+### Rebase
+
+Commit local `38a450bd385a2d25c1c259a56a0699a8b4b230ff` (author/
+committer Bruno Santos, sem push, feito sobre a base antiga `ac7fc1b`)
+rebasado com sucesso sobre `main` atualizada
+(`453f44bfd041df5730f73daa0ac699c526659d85`, commit da demanda
+`sanitizacao-excecoes-lock-documentos` ja publicado em `origin/main`).
+
+Preflight: `main` local, `origin/main` (apos `git fetch origin`) e
+`453f44b` confirmados exatamente identicos antes do rebase -- sem
+nenhuma divergencia inesperada. Worktree principal confirmado na
+branch `main`, sem nenhuma alteracao da demanda LGPD nele.
+
+Unico conflito: `ia_development_state.md` -- ambas as demandas
+adicionavam changelog no mesmo ponto de ancoragem (fim do arquivo),
+sem sobreposicao de conteudo real (a demanda `sanitizacao` tambem
+editava trechos ja existentes nas linhas 788-993, area nunca tocada
+pela LGPD). Resolvido por CONCATENACAO CRONOLOGICA dos 2 blocos: o
+bloco da demanda `sanitizacao-excecoes-lock-documentos` (que comeca em
+2026-09-20) mantido ANTES do bloco da demanda `tela-inicial-lgpd-totem`
+(que comeca em 2026-09-24) -- exatamente a ordem em que os 2 blocos ja
+apareciam nos marcadores de conflito (HEAD = sanitizacao, "theirs" =
+LGPD), entao a resolucao foi remover so os 3 marcadores de conflito,
+preservando os 2 blocos INTEGRALMENTE, sem escolher "ours"/"theirs" as
+cegas e sem apagar historico.
+
+Novo hash do commit funcional: `88c6a31f062cbdb172c9efb5d1dfb3a98f625a79`.
+
+Confirmacao de integridade (por diff, nao presuncao): os 17 arquivos
+proprios da demanda LGPD (`TermoLgpd.php`, `LgpdController.php`,
+`AceiteLgpdDao.php`, `LgpdRn.php`, `AtendimentoController.php`,
+`AtendimentoDao.php`, `AtendimentoRn.php`, `atendimento.php`,
+`lgpd.php`, `app.css`, `app.js`, `index.php`, migration 014,
+`_caso_iniciar_expedicao.php`, `teste_consulta_ordem_coleta.php`, e os
+2 testes LGPD novos) sao BYTE-IDENTICOS entre o commit antigo
+(`38a450b`) e o novo (`88c6a31`) -- `git diff 38a450b 88c6a31 -- <arquivo>`
+vazio para todos os 17. A UNICA diferenca fora do conflito documental
+esta em `DocumentoController.php`/`NotaController.php`, e confirmado
+que essa diferenca vem EXCLUSIVAMENTE da nova base (`git diff 453f44b
+88c6a31 -- app/Controller/DocumentoController.php
+app/Controller/NotaController.php` vazio) -- ou seja, a demanda LGPD
+nunca tocou esses 2 arquivos, em nenhum momento, confirmando que
+nenhum comportamento da demanda `sanitizacao-excecoes-lock-documentos`
+foi perdido ou alterado pelo rebase.
+
+Worktree principal reconfirmado intocado apos o rebase (mesmo
+`git status --short`/HEAD `453f44b` de antes).
+
+### Aprovacao do DPO -- registro factual
+
+Em 25/09/2026, Bruno Santos confirmou ao projeto que o texto do termo
+LGPD foi aprovado por Flavio Carvalho, Encarregado pelo Tratamento de
+Dados (DPO) da UDLOG. O canal e a data original da manifestacao do DPO
+nao foram fornecidos ao repositorio; portanto, nenhuma evidencia
+documental adicional foi inventada ou versionada.
+
+Versao aprovada: `2026-09-24-v1` (hash SHA-256 derivado do texto
+canonico em `app/Content/TermoLgpd.php` -- ver `TermoLgpd::hash()`).
+Se o texto canonico mudar no futuro, devera receber NOVA versao e NOVA
+aprovacao formal -- esta aprovacao vale exclusivamente para o
+conteudo exato da versao `2026-09-24-v1`.
+
+"Aprovacao formal do texto pelo DPO antes de ativacao em producao"
+REMOVIDA da lista de pendencias desta demanda.
+
+Observacao registrada (nao corrigida nesta rodada documental, fora do
+escopo explicito desta atualizacao que era restrita ao handoff e
+`ia_development_state.md`): o comentario de cabecalho de
+`app/Content/TermoLgpd.php` (linhas 11-21) ainda descreve o texto como
+"VERSAO INICIAL PARA DESENVOLVIMENTO, NAO APROVADA PELO DPO" -- esse
+comentario ficou tecnicamente desatualizado apos este registro, mas
+nao foi alterado porque o pedido desta rodada era restrito a
+"handoff e ia_development_state.md" e o commit documental
+subsequente inclui somente esses 2 arquivos. Atualizar o comentario do
+codigo fica registrado como ajuste pontual para uma proxima rodada,
+se desejado.
+
+### Regra final de retencao de `tb_lgpd_aceite`
+
+`tb_lgpd_aceite` nao possui prazo de retencao independente -- o
+registro acompanha o ciclo de vida do atendimento e da auditoria
+relacionados. Enquanto o atendimento for conservado por finalidade
+operacional, auditoria, obrigacao legal ou exercicio regular de
+direitos, o aceite tambem sera conservado. Quando o atendimento for
+eliminado ou anonimizado conforme a politica corporativa da UDLOG, o
+aceite relacionado devera receber tratamento equivalente. Nenhuma
+rotina automatica de exclusao foi criada nesta demanda. A definicao de
+um prazo absoluto para todos os atendimentos pertence a politica
+corporativa geral de retencao da UDLOG, nao a implementacao da tela
+LGPD -- nenhum prazo numerico foi inventado.
+
+"Decisao de produto sobre prazo de retencao de `tb_lgpd_aceite`"
+REMOVIDA da lista de pendencias especificas desta demanda -- a
+politica corporativa geral de retencao, quando definida, se aplicara
+automaticamente por este vinculo ao atendimento, sem exigir nova
+implementacao de codigo.
+
+### Correcao da referencia antiga a paleta
+
+Corrigidas em `ia_development_state.md` as 3 mencoes ATIVAS que ainda
+tratavam navy (`#0b2a45`)/branco como paleta provisoria (secao 4
+"Decisoes ja tomadas", tabela da secao 5 "Pendencias reais", secao 5.1
+item 2 "AGUARDANDO DECISAO DE PRODUTO") -- todas agora registram que a
+paleta oficial UDLOG (`#0179AD`, `#3A3A3A`, `#878789`, `#9BA0A5`,
+`#B0B0B1`, `#FFFFFF`) esta CONFIRMADA e aplicada a todo o front-end do
+totem (27 estados) desde esta demanda. Mencoes HISTORICAS no changelog
+(registros de estado no momento em que cada demanda anterior foi
+executada, ex. planejamento original de 2026-09-24 descrevendo o
+navy como placeholder na epoca) foram preservadas sem alteracao,
+conforme convencao ja estabelecida do projeto de nunca apagar
+historico.
+
+### Pendencias nao bloqueantes remanescentes
+
+Apos esta rodada, restam apenas: validacao fisica em monitor vertical
+real (21,5"); higiene dos arquivos auxiliares de teste pre-existentes
+ausentes (nao relacionados a esta demanda, ja registrado em rodadas
+anteriores).
