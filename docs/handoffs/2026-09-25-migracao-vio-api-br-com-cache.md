@@ -1746,3 +1746,19 @@ arquivos de outras rodadas, sem conflito real).
 
 Zero chamada real, zero credencial real, zero migration em banco real (só
 `qa_` descartável), zero commit/push, zero Trello nesta rodada.
+
+
+## Commit funcional registrado (2026-09-26)
+
+Hash do commit funcional desta demanda: `d56c035d4c55694c932965e38f453c52cacfb36a`
+Mensagem: "feat(vio): substitui integracao direta Serpro pela vio.api.br com cache seguro"
+Autor/committer: Bruno Santos <brunossaantos@gmail.com>
+Branch: main. Sem force push. Sem atribuicao de IA.
+
+Arquivos versionados neste commit: VioApiBrClient.php, VioApiBrCacheDao.php,
+migrations 015/016, ajustes em DocumentoController/DocumentoRn/AtendimentoDao/
+AtendimentoRn/AtendimentoController, app.js, .env.example, deploy-checklist.md,
+handoff desta demanda, ia_development_state.md, e as suites de teste novas/
+corrigidas (tests/manual/). Arquivos deliberadamente EXCLUIDOS deste commit
+(fora do escopo desta demanda, higiene separada pendente): .claude/skills/,
+docs/indexTotem.html, tests/nf_teste/.
