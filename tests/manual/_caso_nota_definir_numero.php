@@ -21,6 +21,14 @@ use App\Dao\RateLimitOcrDao;
 use App\Rn\NotaFiscalRn;
 use App\Controller\NotaController;
 
+// Ponte DB_NAME herdado via putenv() do processo pai (banco `qa_`
+// descartavel, quando aplicavel) para $_ENV -- ver
+// qaDbTrechoPonteEnvSubprocesso() em tests/manual/qa_db_bootstrap.php.
+// No-op quando nenhum processo pai fez putenv('DB_NAME=...').
+if (getenv('DB_NAME') !== false) {
+    $_ENV['DB_NAME'] = getenv('DB_NAME');
+}
+
 $dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
 $dotenv->load();
 

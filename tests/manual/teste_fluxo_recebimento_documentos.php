@@ -1,14 +1,27 @@
 <?php
 
 /**
- * Teste manual do fluxo NOVO de Recebimento (demanda expedicao-vio-cnh-crlv,
- * REPLANEJAMENTO 2026-09-09: VIO Decode passa a valer tambem em
- * Recebimento): rec_cnh_frente -> rec_cnh_verso -> rec_crlv ->
- * rec_aguarde_documentos -> rec_confirmacao.
+ * Teste manual do fluxo de Recebimento (demanda expedicao-vio-cnh-crlv,
+ * REPLANEJAMENTO 2026-09-09; REESCRITO na rodada corretiva de QA de
+ * migracao-vio-api-br-com-cache, 2026-09-26, apos a unificacao da etapa de
+ * CNH): rec_cnh -> rec_crlv -> rec_aguarde_documentos -> rec_confirmacao.
+ *
+ * A etapa 'rec_cnh_frente'/'rec_cnh_verso' (2 etapas distintas do backend,
+ * com uma transicao de etapa entre o upload da frente e do verso) NAO EXISTE
+ * MAIS — 'rec_cnh' e uma unica etapa (mesmo padrao ja usado por exp_cnh na
+ * Expedicao), com 2 uploads separados (cnh_frente/cnh_verso, cada um sua
+ * propria chamada a DocumentoController::upload) MAS sem troca de etapa
+ * entre eles. O gate 'upload_cnh' (AtendimentoController::
+ * gateDeTransicaoLiberado) so libera rec_cnh -> rec_crlv quando AMBOS os
+ * arquivos (cnh_frente.jpg E cnh_verso.jpg) ja estao salvos em disco.
  *
  * Cobre:
- * - upload separado de frente/verso da CNH (etapas distintas, ao contrario
- *   da Expedicao que usa uma unica etapa exp_cnh);
+ * - upload da frente da CNH sozinho NAO libera a transicao de etapa (gate
+ *   'upload_cnh' bloqueia com "documentos pendentes" enquanto faltar o
+ *   verso) — comportamento NOVO desta rodada, antes (2 etapas separadas) o
+ *   upload da frente sozinho ja liberava a transicao para a etapa do verso;
+ * - upload do verso completa o par e libera rec_cnh -> rec_crlv numa UNICA
+ *   transicao de etapa (nunca mais 2 transicoes separadas para a CNH);
  * - avancarEtapaDocumentos() generalizado funciona para tipo='recebimento';
  * - gate de upload libera a etapa seguinte mesmo com CNH ainda NAO aprovada
  *   pelo VIO (processamento assincrono em segundo plano);
@@ -29,14 +42,44 @@ $dotenv->load();
 
 $pdo = Conexao::obter();
 
-$pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_REC_DOC', 'Totem Teste Recebimento Doc', 'token_" . bin2hex(random_bytes(8)) . "', 1)");
+// Sufixo aleatorio no codigo sintetico (mesmo padrao ja usado no projeto para
+// token_api) + teardown via register_shutdown_function — roda mesmo se o
+// script terminar com excecao/erro fatal no meio, evitando residuo em
+// udlog_totem mesmo em caso de falha do teste.
+$sufixoAleatorio = bin2hex(random_bytes(4));
+$idTotemGlobal = null;
+$idAtendimentoGlobal = null;
+$pastaTesteGlobal = null;
+
+register_shutdown_function(function () use ($pdo, &$idTotemGlobal, &$idAtendimentoGlobal, &$pastaTesteGlobal) {
+    if ($idAtendimentoGlobal !== null) {
+        $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $idAtendimentoGlobal]);
+    }
+    if ($idTotemGlobal !== null) {
+        $pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotemGlobal]);
+    }
+    if ($pastaTesteGlobal !== null) {
+        $storagePath = rtrim($_ENV['STORAGE_PATH'] ?? '', '/') . '/' . $pastaTesteGlobal;
+        if (is_dir($storagePath)) {
+            foreach (glob($storagePath . '/*') as $arquivo) {
+                @unlink($arquivo);
+            }
+            @rmdir($storagePath);
+        }
+    }
+});
+
+$pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_REC_DOC_{$sufixoAleatorio}', 'Totem Teste Recebimento Doc', 'token_" . bin2hex(random_bytes(8)) . "', 1)");
 $idTotem = (int) $pdo->lastInsertId();
+$idTotemGlobal = $idTotem;
 
 $atendimentoDao = new AtendimentoDao($pdo);
 $idAtendimento = $atendimentoDao->criar($idTotem, 'recebimento', 'FFF4444');
-$atendimentoDao->atualizarEtapa($idAtendimento, 'rec_cnh_frente');
+$idAtendimentoGlobal = $idAtendimento;
+$atendimentoDao->atualizarEtapa($idAtendimento, 'rec_cnh');
 
 $pastaTeste = 'teste_rec_doc_' . bin2hex(random_bytes(4));
+$pastaTesteGlobal = $pastaTeste;
 $atendimentoDao->definirPasta($idAtendimento, $pastaTeste);
 
 $totalTestes = 0;
@@ -66,19 +109,25 @@ $imagemJpegBase64 = 'data:image/jpeg;base64,' . base64_encode(
     base64_decode('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=')
 );
 
-// --- Etapa 1: upload frente da CNH (rec_cnh_frente) ---
+// --- Etapa unica rec_cnh: upload da FRENTE sozinho NAO libera a transicao ---
 $r1 = rodarSubprocesso(__DIR__ . '/_caso_upload_documento.php', [$idTotem, $idAtendimento, 'cnh_frente', $imagemJpegBase64]);
-afirmar('Upload da frente da CNH aceito em rec_cnh_frente', str_contains($r1['saida'], '"sucesso":true'));
+afirmar('Upload da frente da CNH aceito em rec_cnh', str_contains($r1['saida'], '"sucesso":true'));
+
+$atendimentoAposFrente = $atendimentoDao->buscarPorId($idAtendimento);
+afirmar('etapa_atual permanece rec_cnh apos upload SO da frente (nunca existiu rec_cnh_verso)', $atendimentoAposFrente['etapa_atual'] === 'rec_cnh');
 
 $r1b = rodarSubprocesso(__DIR__ . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtendimento]);
-afirmar('rec_cnh_frente -> rec_cnh_verso permitido apos upload da frente', str_contains($r1b['saida'], '"etapa":"rec_cnh_verso"'));
+afirmar('rec_cnh -> rec_crlv BLOQUEADO com so a frente da CNH salva (gate upload_cnh exige os 2 arquivos)', str_contains($r1b['saida'], 'documentos pendentes'));
 
-// --- Etapa 2: upload verso da CNH (rec_cnh_verso) ---
+$atendimentoAposGateBloqueado = $atendimentoDao->buscarPorId($idAtendimento);
+afirmar('etapa_atual continua rec_cnh apos a tentativa bloqueada (nenhuma transicao parcial)', $atendimentoAposGateBloqueado['etapa_atual'] === 'rec_cnh');
+
+// --- Etapa unica rec_cnh: upload do VERSO completa o par e libera a transicao ---
 $r2 = rodarSubprocesso(__DIR__ . '/_caso_upload_documento.php', [$idTotem, $idAtendimento, 'cnh_verso', $imagemJpegBase64]);
-afirmar('Upload do verso da CNH aceito em rec_cnh_verso', str_contains($r2['saida'], '"sucesso":true'));
+afirmar('Upload do verso da CNH aceito em rec_cnh (mesma etapa da frente)', str_contains($r2['saida'], '"sucesso":true'));
 
 $r2b = rodarSubprocesso(__DIR__ . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtendimento]);
-afirmar('rec_cnh_verso -> rec_crlv permitido so com upload (CNH ainda NAO aprovada pelo VIO)', str_contains($r2b['saida'], '"etapa":"rec_crlv"'));
+afirmar('rec_cnh -> rec_crlv permitido com os 2 lados salvos (CNH ainda NAO aprovada pelo VIO — processamento assincrono)', str_contains($r2b['saida'], '"etapa":"rec_crlv"'));
 
 // --- Etapa 3: upload do CRLV (rec_crlv) ---
 $r3 = rodarSubprocesso(__DIR__ . '/_caso_upload_documento.php', [$idTotem, $idAtendimento, 'crlv', $imagemJpegBase64]);

@@ -54,6 +54,25 @@ $pdo = Conexao::obter();
 $totalTestes = 0;
 $totalFalhas = 0;
 
+// Sufixo aleatorio no codigo sintetico (mesmo padrao ja usado no projeto para
+// token_api) + teardown via register_shutdown_function — roda mesmo se o
+// script terminar com excecao/erro fatal no meio, evitando residuo em
+// udlog_totem mesmo em caso de falha do teste.
+$sufixoAleatorio = bin2hex(random_bytes(4));
+$idTotemGlobal = null;
+$idsAtendimentoGlobal = [];
+
+register_shutdown_function(function () use ($pdo, &$idTotemGlobal, &$idsAtendimentoGlobal) {
+    $pdo->exec('DELETE FROM tb_vio_cache_cnh');
+    $pdo->exec('DELETE FROM tb_vio_cache_crlv');
+    foreach ($idsAtendimentoGlobal as $idAt) {
+        $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $idAt]);
+    }
+    if ($idTotemGlobal !== null) {
+        $pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotemGlobal]);
+    }
+});
+
 function afirmar(string $descricao, bool $condicao): void
 {
     global $totalTestes, $totalFalhas;
@@ -89,11 +108,13 @@ class VioDecodeClientFalso extends VioDecodeClient
 // ============================================================
 // Setup: totem e atendimento de teste
 // ============================================================
-$pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_REBAIXA', 'Totem Teste Rebaixa', 'token_teste_rebaixa_" . bin2hex(random_bytes(8)) . "', 1)");
+$pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_REBAIXA_{$sufixoAleatorio}', 'Totem Teste Rebaixa', 'token_teste_rebaixa_" . bin2hex(random_bytes(8)) . "', 1)");
 $idTotem = (int) $pdo->lastInsertId();
+$idTotemGlobal = $idTotem;
 
 $atendimentoDao = new AtendimentoDao($pdo);
 $idAtendimento = $atendimentoDao->criar($idTotem, 'expedicao', 'ABC1234');
+$idsAtendimentoGlobal[] = $idAtendimento;
 $atendimentoDao->atualizarEtapa($idAtendimento, 'exp_cnh');
 
 $vioCacheDao = new VioCacheDao($pdo);

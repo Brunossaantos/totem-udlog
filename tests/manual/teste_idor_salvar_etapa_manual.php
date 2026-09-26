@@ -134,7 +134,7 @@ afirmar(
     $atendimentoAposInvasorCliente['cliente_nome'] !== 'CLIENTE FORJADO PELO INVASOR'
 );
 afirmar(
-    "IDOR 'cliente': etapa_atual do atendimento da vitima NAO foi forcada para rec_cnh_frente pelo invasor",
+    "IDOR 'cliente': etapa_atual do atendimento da vitima NAO foi forcada para rec_cnh pelo invasor",
     $atendimentoAposInvasorCliente['etapa_atual'] === 'cliente'
 );
 
@@ -144,7 +144,7 @@ $rDonoCliente = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotemV
 afirmar("'cliente' (dono legitimo, etapa correta) continua respondendo sucesso", str_contains($rDonoCliente['saida'], '"sucesso":true'));
 $atendimentoAposDonoCliente = $atendimentoDao->buscarPorId($idAtCliente);
 afirmar("'cliente' (dono legitimo) grava cliente_nome corretamente", $atendimentoAposDonoCliente['cliente_nome'] === 'CLIENTE LEGITIMO LTDA');
-afirmar("'cliente' (dono legitimo) avanca etapa_atual para rec_cnh_frente", $atendimentoAposDonoCliente['etapa_atual'] === 'rec_cnh_frente');
+afirmar("'cliente' (dono legitimo) avanca etapa_atual para rec_cnh (etapa unica desde a rodada corretiva de 2026-09-26)", $atendimentoAposDonoCliente['etapa_atual'] === 'rec_cnh');
 
 // ============================================================
 // Caso 3: 'ajudante' — recebimento, etapa rec_confirmacao

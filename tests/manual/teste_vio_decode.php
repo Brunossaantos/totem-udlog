@@ -35,6 +35,29 @@ $pdo = Conexao::obter();
 $totalTestes = 0;
 $totalFalhas = 0;
 
+// Sufixo aleatorio no codigo sintetico (mesmo padrao ja usado no projeto para
+// token_api) + teardown via register_shutdown_function — roda mesmo se o
+// script terminar com excecao/erro fatal no meio, evitando residuo em
+// udlog_totem mesmo em caso de falha do teste.
+$sufixoAleatorio = bin2hex(random_bytes(4));
+$idTotemGlobal = null;
+$idTotemInvasorGlobal = null;
+$idsAtendimentoGlobal = [];
+
+register_shutdown_function(function () use ($pdo, &$idTotemGlobal, &$idTotemInvasorGlobal, &$idsAtendimentoGlobal) {
+    $pdo->exec('DELETE FROM tb_vio_cache_cnh');
+    $pdo->exec('DELETE FROM tb_vio_cache_crlv');
+    foreach ($idsAtendimentoGlobal as $idAt) {
+        $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $idAt]);
+    }
+    if ($idTotemGlobal !== null) {
+        $pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotemGlobal]);
+    }
+    if ($idTotemInvasorGlobal !== null) {
+        $pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotemInvasorGlobal]);
+    }
+});
+
 function afirmar(string $descricao, bool $condicao): void
 {
     global $totalTestes, $totalFalhas;
@@ -100,11 +123,13 @@ afirmar('Descriptografar dado corrompido lanca excecao (tag GCM invalida)', $fal
 // ============================================================
 // Setup: totem e atendimento de teste (limpos ao final)
 // ============================================================
-$pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_VIO', 'Totem Teste VIO', 'token_teste_vio_" . bin2hex(random_bytes(8)) . "', 1)");
+$pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_VIO_{$sufixoAleatorio}', 'Totem Teste VIO', 'token_teste_vio_" . bin2hex(random_bytes(8)) . "', 1)");
 $idTotem = (int) $pdo->lastInsertId();
+$idTotemGlobal = $idTotem;
 
 $atendimentoDao = new AtendimentoDao($pdo);
 $idAtendimento = $atendimentoDao->criar($idTotem, 'expedicao', 'ABC1234');
+$idsAtendimentoGlobal[] = $idAtendimento;
 $atendimentoDao->atualizarEtapa($idAtendimento, 'exp_cnh');
 
 $vioCacheDao = new VioCacheDao($pdo);
@@ -207,6 +232,7 @@ afirmar('CRLV aprovado quando placa bate com o atendimento', $rCrlv1['pode_avanc
 
 // Simula outro atendimento com placa DIFERENTE usando o MESMO QR (cache hit)
 $idOutroAtendimento = $atendimentoDao->criar($idTotem, 'expedicao', 'XYZ9999');
+$idsAtendimentoGlobal[] = $idOutroAtendimento;
 $atendimentoDao->atualizarEtapa($idOutroAtendimento, 'exp_crlv');
 $outroAtendimento = $atendimentoDao->buscarPorId($idOutroAtendimento);
 
@@ -235,8 +261,9 @@ afirmar('Preenchimento manual grava status_revisao PENDENTE_REVISAO', $atendimen
 // ============================================================
 // 8. IDOR bloqueado nos endpoints novos (chamada direta ao Controller)
 // ============================================================
-$pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_VIO_OUTRO', 'Totem Teste VIO Outro', 'token_teste_vio_outro_" . bin2hex(random_bytes(8)) . "', 1)");
+$pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_VIO_OUTRO_{$sufixoAleatorio}', 'Totem Teste VIO Outro', 'token_teste_vio_outro_" . bin2hex(random_bytes(8)) . "', 1)");
 $idTotemInvasor = (int) $pdo->lastInsertId();
+$idTotemInvasorGlobal = $idTotemInvasor;
 
 $controller = new DocumentoController($atendimentoDao, $documentoRn, $pdo);
 

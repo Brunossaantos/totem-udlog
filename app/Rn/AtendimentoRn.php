@@ -44,6 +44,18 @@ class AtendimentoRn
         $this->atendimentoDao->definirPasta($idAtendimento, $pasta);
     }
 
+    /**
+     * Passthrough (Tarefa 3, rodada corretiva de 2026-09-26) — ver
+     * App\Dao\AtendimentoDao::reconciliarProcessamentoVioApiBrAbandonado()
+     * para o comportamento completo. Chamado por
+     * App\Controller\AtendimentoController::consumirAceiteECriarAtendimento()
+     * logo apos a criacao do novo atendimento, dentro da MESMA transacao.
+     */
+    public function reconciliarProcessamentoAbandonado(int $idTotem, int $idAtendimentoAtual): void
+    {
+        $this->atendimentoDao->reconciliarProcessamentoVioApiBrAbandonado($idTotem, $idAtendimentoAtual);
+    }
+
     public function atualizarEtapa(int $idAtendimento, string $etapa): void
     {
         $this->atendimentoDao->atualizarEtapa($idAtendimento, $etapa);
@@ -52,7 +64,11 @@ class AtendimentoRn
     /**
      * Grava os dados finais de motorista/CNH/CRLV confirmados na tela
      * exp_confirma da Expedicao. Se o documento (CNH e/ou CRLV) foi
-     * validado pela VIO Decode (VIO_TRIAL/VIO_VALIDADO) e o atendente
+     * validado pela VIO Decode (VIO_TRIAL/VIO_VALIDADO) ou pela vio.api.br
+     * (VIO_API_BR, incluida na rodada corretiva de 2026-09-26 — sem isso,
+     * uma validacao real da vio.api.br NUNCA seria rebaixada para MANUAL
+     * mesmo com edicao divergente do snapshot, pois o bloco de comparacao
+     * abaixo simplesmente nao rodaria para essa origem) e o atendente
      * EDITAR qualquer campo desse documento em relacao ao snapshot gravado
      * no momento da validacao (cnh_snapshot_* / crlv_snapshot_*), a origem
      * daquele documento e rebaixada para MANUAL + status_revisao =
@@ -111,7 +127,7 @@ class AtendimentoRn
         $cnhOrigem = $atendimento['cnh_origem_validacao'] ?? 'NAO_VALIDADO';
         $cnhStatusRevisao = $atendimento['cnh_status_revisao'] ?? 'OK';
 
-        if (in_array($cnhOrigem, ['VIO_TRIAL', 'VIO_VALIDADO'], true)) {
+        if (in_array($cnhOrigem, ['VIO_TRIAL', 'VIO_VALIDADO', 'VIO_API_BR'], true)) {
             $snapshotNome = trim((string) ($atendimento['cnh_snapshot_nome'] ?? ''));
             $snapshotCpf = (string) ($atendimento['cnh_snapshot_cpf'] ?? '');
             $snapshotValidade = (string) ($atendimento['cnh_snapshot_validade'] ?? '');
@@ -129,7 +145,7 @@ class AtendimentoRn
         $crlvOrigem = $atendimento['crlv_origem_validacao'] ?? 'NAO_VALIDADO';
         $crlvStatusRevisao = $atendimento['crlv_status_revisao'] ?? 'OK';
 
-        if (in_array($crlvOrigem, ['VIO_TRIAL', 'VIO_VALIDADO'], true)) {
+        if (in_array($crlvOrigem, ['VIO_TRIAL', 'VIO_VALIDADO', 'VIO_API_BR'], true)) {
             $snapshotPlaca = (string) ($atendimento['crlv_snapshot_placa'] ?? '');
             $snapshotExercicio = $atendimento['crlv_snapshot_exercicio'] !== null ? (int) $atendimento['crlv_snapshot_exercicio'] : null;
             $snapshotUf = $atendimento['crlv_snapshot_uf'] !== null ? (string) $atendimento['crlv_snapshot_uf'] : null;

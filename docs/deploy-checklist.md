@@ -32,6 +32,56 @@ como pendência, nunca suposto.
       sincronização automática entre os dois ambientes — ver
       `servico-impressao-local/README.md`, seção 2.5.1).
 
+### 1.Z Migração vio.api.br + cache seguro (demanda migracao-vio-api-br-com-cache, 2026-09-25)
+
+Implementado em `/01-implementacao`, ainda **sem nenhuma chamada real/paga**
+autorizada — as variáveis abaixo continuam vazias no `.env` de produção até
+nova autorização explícita do usuário:
+
+- [ ] `sql/migrations/015_vio_api_br_estados_e_id_externo.sql` e
+      `sql/migrations/016_vio_api_br_cache.sql` aplicadas (nesta ordem,
+      depois de todas as anteriores) — aditivas, idempotentes, sem
+      `DROP`/`TRUNCATE`. `App\Rn\VioDecodeClient`/`tb_vio_cache_cnh`/
+      `tb_vio_cache_crlv` (fluxo antigo Serpro) permanecem intactos.
+- [ ] `VIO_API_BR_BASE_URL` preenchido (HTTPS obrigatório — o cliente falha
+      fail-closed se não for `https://`).
+- [ ] `VIO_API_BR_API_KEY` preenchido **somente quando o usuário autorizar
+      explicitamente a primeira chamada real/paga** — nunca antes disso.
+- [ ] `VIO_API_BR_CACHE_TTL_DIAS` confirmado (padrão `7`, decisão explícita
+      do usuário — sensivelmente menor que os 30 dias de retenção do
+      fornecedor).
+- [ ] `VIO_API_BR_CACHE_HMAC_KEY_V1` gerado com
+      `php -r "echo bin2hex(random_bytes(32));"` — chave NOVA e SEPARADA de
+      `DOCUMENTO_QR_HMAC_KEY`/`DOCUMENTO_DATA_KEY`, nunca reaproveitar valor.
+- [ ] `VIO_API_BR_CACHE_HMAC_VERSION` confirmado como `1` (rotação futura:
+      criar `_V2`, só então mudar esta variável para `2`).
+- [ ] Confirmar que o plano de hospedagem permite HTTPS de saída (`curl`)
+      para `vio.api.br` a partir do servidor Hostgator (mesma checagem já
+      feita para o Talent — histórico de bloqueio de rede/DNS/firewall de
+      saída já documentado em `ia_development_state.md`).
+- [ ] Front-end (`frontend-especialista`, rodada separada) ainda precisa:
+      unificar captura CNH frente+verso no Recebimento, inverter a ordem do
+      CRLV (ler QR local antes do upload), e implementar a tela de estados
+      intermediários (`ENVIANDO`/`PROCESSANDO_LEITURA`/
+      `PROCESSANDO_COMPARACAO`/`INDETERMINADO`) — nada disso foi tocado
+      nesta rodada de backend.
+- [ ] Antes de qualquer teste real controlado: confirmar com o usuário
+      exatamente 1 documento/QR autorizado, mesmo protocolo já usado para o
+      teste controlado do Talent (nunca decisão unilateral do agente).
+- [ ] `display_errors=Off` (e `display_startup_errors=Off`) confirmado no
+      `php.ini` efetivo de produção (cPanel → "Select PHP Version" →
+      Options, ou `.htaccess`/`php.ini` local, conforme o plano) — achado da
+      `/03-revisao` independente de 2026-09-26 (security-especialista):
+      **DEFESA COMPLEMENTAR, nunca dependência única de segurança**. O
+      código de `DocumentoController::iniciarProcessamento()` já foi
+      corrigido (rodada de 2026-09-26) para nunca expor mensagem/stack
+      trace/payload/credencial em resposta HTTP nem em log mesmo com
+      `display_errors=On` (`catch (\Throwable)` dedicado, resposta genérica
+      sanitizada, estado gravado como `INDETERMINADO`) — este item do
+      checklist é uma camada adicional de proteção contra qualquer ponto do
+      código (presente ou futuro) que não trate uma exceção corretamente,
+      nunca o único mecanismo pelo qual dado sensível deixa de vazar.
+
 ### 1.Y Validação de JPEG segura (`util/UploadHelper.php`) — demanda validacao-jpeg-segura (2026-09-17)
 
 A partir desta demanda, `salvarImagemBase64()` exige decodificação

@@ -7,11 +7,16 @@
  *
  * Ate esta correcao, esse case gravava o cliente mas NUNCA chamava
  * atualizarEtapa(), deixando etapa_atual travada em 'cliente'. Isso quebrava
- * o primeiro upload de rec_cnh_frente em DocumentoController::upload(), que
- * exige a etapa EXATA 'rec_cnh_frente' (ver ETAPAS_UPLOAD).
+ * o primeiro upload de rec_cnh em DocumentoController::upload(), que
+ * exige a etapa EXATA 'rec_cnh' (ver ETAPAS_UPLOAD).
+ *
+ * Atualizado na rodada corretiva de migracao-vio-api-br-com-cache
+ * (2026-09-26): a etapa de destino era 'rec_cnh_frente' (2 etapas separadas
+ * de CNH no Recebimento); agora e 'rec_cnh' (etapa unica, mesmo padrao de
+ * exp_cnh na Expedicao, com 2 uploads client-side dentro da mesma etapa).
  *
  * Cobre:
- * - apos salvar-etapa 'cliente', etapa_atual passa a ser 'rec_cnh_frente'
+ * - apos salvar-etapa 'cliente', etapa_atual passa a ser 'rec_cnh'
  *   (mesma proxima etapa usada pelo fluxo automatico via OCR, ver
  *   AtendimentoController::concluirDigitalizacao());
  * - o primeiro upload de cnh_frente funciona sem erro de etapa logo em
@@ -88,14 +93,14 @@ $rSalvarEtapa = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotem,
 afirmar('salvar-etapa cliente (manual) responde sucesso', str_contains($rSalvarEtapa['saida'], '"sucesso":true'));
 
 $atendimentoAposCliente = $atendimentoDao->buscarPorId($idAtendimento);
-afirmar('Apos salvar-etapa cliente (manual), etapa_atual avanca para rec_cnh_frente', $atendimentoAposCliente['etapa_atual'] === 'rec_cnh_frente');
+afirmar('Apos salvar-etapa cliente (manual), etapa_atual avanca para rec_cnh', $atendimentoAposCliente['etapa_atual'] === 'rec_cnh');
 
 $imagemJpegBase64 = 'data:image/jpeg;base64,' . base64_encode(
     base64_decode('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=')
 );
 
 $rUpload = rodarSubprocesso(__DIR__ . '/_caso_upload_documento.php', [$idTotem, $idAtendimento, 'cnh_frente', $imagemJpegBase64]);
-afirmar('Primeiro upload de rec_cnh_frente funciona sem erro de etapa apos identificacao manual do cliente', str_contains($rUpload['saida'], '"sucesso":true'));
+afirmar('Primeiro upload de cnh_frente (etapa rec_cnh) funciona sem erro de etapa apos identificacao manual do cliente', str_contains($rUpload['saida'], '"sucesso":true'));
 
 // Limpeza
 $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $idAtendimento]);

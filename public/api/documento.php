@@ -7,6 +7,7 @@ use Util\Auth;
 use Util\Resposta;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
+use App\Dao\VioApiBrCacheDao;
 use App\Dao\RateLimitVioStatusDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
@@ -22,7 +23,7 @@ try {
 }
 $totem = Auth::validarTotem($pdo);
 
-$documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo));
+$documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo), new VioApiBrCacheDao($pdo));
 $controller = new DocumentoController(new AtendimentoDao($pdo), $documentoRn, $pdo, new RateLimitVioStatusDao($pdo));
 $entrada = json_decode(file_get_contents('php://input'), true) ?? [];
 $idTotem = (int) $totem['id_totem'];

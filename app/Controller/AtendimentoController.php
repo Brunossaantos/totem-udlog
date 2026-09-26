@@ -145,6 +145,14 @@ class AtendimentoController
 
             $idAtendimento = $this->atendimentoRn->iniciar($idTotem, $tipo, $placa, $idAceite);
 
+            // Reconciliacao de kiosk (Tarefa 3, rodada corretiva de
+            // 2026-09-26) — ver App\Dao\AtendimentoDao::
+            // reconciliarProcessamentoVioApiBrAbandonado() para o
+            // comportamento completo. So UPDATE local (nenhuma chamada de
+            // rede/Talent/VIO dentro desta transacao, mesma garantia ja
+            // documentada acima para o restante deste metodo).
+            $this->atendimentoRn->reconciliarProcessamentoAbandonado($idTotem, $idAtendimento);
+
             $this->pdo->commit();
 
             return $idAtendimento;
@@ -260,19 +268,22 @@ class AtendimentoController
                 break;
             case 'cliente':
                 // Identificacao MANUAL do cliente no Recebimento (atendente confirma
-                // nome/cnpj). Deve avancar etapa_atual para 'rec_cnh_frente', a mesma
+                // nome/cnpj). Deve avancar etapa_atual para 'rec_cnh', a mesma
                 // proxima etapa usada pelo fluxo AUTOMATICO via OCR em
                 // concluirDigitalizacao() (expedicao-vio-cnh-crlv, 2026-09-09) —
                 // mantendo as duas fontes de identificacao de cliente consistentes
                 // entre si. Sem isso, etapa_atual ficava presa em 'cliente' e o
-                // primeiro upload de rec_cnh_frente falhava na checagem de etapa em
-                // DocumentoController::upload().
+                // primeiro upload de rec_cnh falhava na checagem de etapa em
+                // DocumentoController::upload(). Nome da etapa unificado (rec_cnh,
+                // em vez de rec_cnh_frente/rec_cnh_verso separadas) na rodada
+                // corretiva de 2026-09-26 — revogou a assimetria anterior em
+                // relacao a Expedicao (exp_cnh), decisao explicita do usuario.
                 //
                 // Corrigido IDOR critico (achado do security-especialista,
                 // 2026-09-09): antes nao validava posse/tipo/status/etapa,
                 // permitindo sobrescrever cliente_nome/cliente_cnpj de
                 // atendimento alheio e forcar a transicao para
-                // 'rec_cnh_frente'. So existe na etapa 'cliente' (gravada por
+                // 'rec_cnh'. So existe na etapa 'cliente' (gravada por
                 // concluirDigitalizacao() quando nenhuma nota identifica o
                 // cliente automaticamente), e so no Recebimento.
                 $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
@@ -288,7 +299,7 @@ class AtendimentoController
                 }
 
                 $this->atendimentoRn->salvarCliente($idAtendimento, $dados['nome'] ?? '', $dados['cnpj'] ?? null);
-                $this->atendimentoRn->atualizarEtapa($idAtendimento, 'rec_cnh_frente');
+                $this->atendimentoRn->atualizarEtapa($idAtendimento, 'rec_cnh');
                 break;
             case 'ajudante':
                 // Corrigido IDOR critico (achado do security-especialista,
@@ -387,7 +398,7 @@ class AtendimentoController
             // caia direto neste erro 400 generico, violando a exigencia do
             // handoff de que so ha conflito real se o estado nao corresponde
             // nem a origem nem ao destino. Antes de falhar, confere se
-            // etapa_atual ja e 'rec_cnh_frente'/'cliente' (destino possivel
+            // etapa_atual ja e 'rec_cnh'/'cliente' (destino possivel
             // desta chamada) ou uma etapa legitima posterior do fluxo de
             // Recebimento — reaproveitando a MESMA lista/logica usada
             // abaixo para o caso "CAS perdeu a corrida" — e, se for,
@@ -396,11 +407,11 @@ class AtendimentoController
             // atual nao e nem a origem, nem nenhum destino/etapa posterior
             // plausivel (situacao genuinamente anomala).
             $etapaDestinoPossivel = $this->notaDao->algumaNotaComStatusIdentificada($idAtendimento) || $this->notaDao->algumaIdentificada($idAtendimento)
-                ? 'rec_cnh_frente'
+                ? 'rec_cnh'
                 : 'cliente';
 
             if ($this->etapaEhAlvoOuPosterior((string) $atendimento['etapa_atual'], $etapaDestinoPossivel)) {
-                $proximaTelaIdempotente = $etapaDestinoPossivel === 'rec_cnh_frente' ? 'rec_cnh_frente' : 'rec_cliente';
+                $proximaTelaIdempotente = $etapaDestinoPossivel === 'rec_cnh' ? 'rec_cnh' : 'rec_cliente';
                 Resposta::sucesso(['proxima_tela' => $proximaTelaIdempotente, 'etapa' => $etapaDestinoPossivel]);
                 return;
             }
@@ -417,11 +428,11 @@ class AtendimentoController
             Resposta::erro('Limite de 5 notas fiscais excedido para esse atendimento');
         }
 
-        // ATENCAO: a etapa/tela quando um cliente e identificado mudou de
-        // 'cnh'/'rec_cnh' para 'rec_cnh_frente' nesta demanda
-        // (expedicao-vio-cnh-crlv, REPLANEJAMENTO 2026-09-09) — Recebimento
-        // agora tambem valida CNH/CRLV via VIO Decode, com a mesma maquina de
-        // estados assincrona da Expedicao (rec_cnh_frente -> rec_cnh_verso ->
+        // ATENCAO: a etapa/tela quando um cliente e identificado passou por
+        // 'cnh' -> 'rec_cnh_frente' (expedicao-vio-cnh-crlv, REPLANEJAMENTO
+        // 2026-09-09) e foi unificada para 'rec_cnh' na rodada corretiva de
+        // 2026-09-26 — Recebimento valida CNH/CRLV via vio.api.br, com a
+        // mesma maquina de estados assincrona da Expedicao (rec_cnh ->
         // rec_crlv -> rec_aguarde_documentos -> rec_confirmacao), ver
         // avancarEtapaDocumentos() abaixo.
         //
@@ -440,8 +451,8 @@ class AtendimentoController
         $identificadoViaChaveAntiga = $this->notaDao->algumaIdentificada($idAtendimento);
 
         if ($identificadoViaOcr || $identificadoViaChaveAntiga) {
-            $etapa = 'rec_cnh_frente';
-            $proximaTela = 'rec_cnh_frente';
+            $etapa = 'rec_cnh';
+            $proximaTela = 'rec_cnh';
         } else {
             $etapa = 'cliente';
             $proximaTela = 'rec_cliente';
@@ -484,11 +495,13 @@ class AtendimentoController
      * idempotente: a etapa atual do banco precisa ser a etapa-alvo desta
      * chamada, ou qualquer etapa posterior legitima ja alcancada por quem
      * venceu a corrida (ambos os ramos, com ou sem identificacao automatica
-     * de cliente, convergem para 'rec_cnh_frente' e seguem a mesma
-     * sequencia dai em diante).
+     * de cliente, convergem para 'rec_cnh' e seguem a mesma
+     * sequencia dai em diante). Etapa 'rec_cnh' unificada (antes
+     * 'rec_cnh_frente'/'rec_cnh_verso' separadas) na rodada corretiva de
+     * 2026-09-26.
      */
     private const SEQUENCIA_POS_DIGITALIZACAO_RECEBIMENTO = [
-        'cliente', 'rec_cnh_frente', 'rec_cnh_verso', 'rec_crlv', 'rec_aguarde_documentos', 'rec_confirmacao', 'impressao',
+        'cliente', 'rec_cnh', 'rec_crlv', 'rec_aguarde_documentos', 'rec_confirmacao', 'impressao',
     ];
 
     private function etapaEhAlvoOuPosterior(string $etapaAtual, string $etapaAlvo): bool
@@ -526,15 +539,25 @@ class AtendimentoController
 
     /**
      * Mesma logica para Recebimento (mesma demanda, escopo expandido no
-     * REPLANEJAMENTO 2026-09-09): rec_cnh_frente -> rec_cnh_verso ->
-     * rec_crlv -> rec_aguarde_documentos -> rec_confirmacao. Diferenca
-     * intencional em relacao a Expedicao: CNH frente/verso sao etapas
-     * SEPARADAS (2 uploads), nao uma unica etapa exp_cnh — especificado
-     * explicitamente, nao e divergencia a corrigir.
+     * REPLANEJAMENTO 2026-09-09): rec_cnh -> rec_crlv ->
+     * rec_aguarde_documentos -> rec_confirmacao.
+     *
+     * Unificado na rodada corretiva de 2026-09-26: a etapa de CNH do
+     * Recebimento existia como DUAS etapas separadas (rec_cnh_frente/
+     * rec_cnh_verso), assimetria em relacao a Expedicao (exp_cnh, unica
+     * etapa) que uma decisao de produto ANTERIOR classificava como
+     * intencional. O usuario revogou essa decisao explicitamente nesta
+     * demanda (frente e verso da CNH devem permanecer em memoria no
+     * front-end ate o envio conjunto, sem gate de etapa entre um upload e
+     * outro) — agora 'rec_cnh' e uma etapa unica, mesmo padrao de exp_cnh:
+     * os 2 uploads (cnh_frente/cnh_verso, ver
+     * DocumentoController::ETAPAS_UPLOAD) acontecem na MESMA etapa, e o
+     * gate de saida ('upload_cnh') so libera a transicao para rec_crlv
+     * quando AMBOS os arquivos ja estao salvos em disco — nunca no meio do
+     * caminho, entre a captura da frente e a do verso.
      */
     private const SEQUENCIA_RECEBIMENTO_DOCUMENTOS = [
-        'rec_cnh_frente'         => ['proxima_etapa' => 'rec_cnh_verso', 'proxima_tela' => 'rec_cnh_verso', 'gate' => 'upload_cnh_frente'],
-        'rec_cnh_verso'          => ['proxima_etapa' => 'rec_crlv', 'proxima_tela' => 'rec_crlv', 'gate' => 'upload_cnh_verso'],
+        'rec_cnh'                => ['proxima_etapa' => 'rec_crlv', 'proxima_tela' => 'rec_crlv', 'gate' => 'upload_cnh'],
         'rec_crlv'               => ['proxima_etapa' => 'rec_aguarde_documentos', 'proxima_tela' => 'rec_aguarde_documentos', 'gate' => 'upload_crlv'],
         'rec_aguarde_documentos' => ['proxima_etapa' => 'rec_confirmacao', 'proxima_tela' => 'rec_confirma', 'gate' => 'ambos_aprovados'],
     ];
@@ -611,10 +634,13 @@ class AtendimentoController
     {
         return match ($gate) {
             null => true,
+            // Usado por exp_cnh (Expedicao, upload frente+verso na mesma
+            // chamada) E por rec_cnh (Recebimento, upload frente/verso em
+            // chamadas separadas mas na mesma etapa desde a rodada
+            // corretiva de 2026-09-26) — em ambos os casos so libera a
+            // transicao quando os 2 arquivos ja estao salvos em disco.
             'upload_cnh' => $this->arquivoDoDocumentoExiste($atendimento, 'cnh_frente.jpg')
                 && $this->arquivoDoDocumentoExiste($atendimento, 'cnh_verso.jpg'),
-            'upload_cnh_frente' => $this->arquivoDoDocumentoExiste($atendimento, 'cnh_frente.jpg'),
-            'upload_cnh_verso' => $this->arquivoDoDocumentoExiste($atendimento, 'cnh_verso.jpg'),
             'upload_crlv' => $this->arquivoDoDocumentoExiste($atendimento, 'crlv.jpg'),
             'ambos_aprovados' => $this->documentoRn->cnhAprovada($atendimento) && $this->documentoRn->crlvAprovado($atendimento),
             default => false,

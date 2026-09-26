@@ -3,12 +3,16 @@
 /**
  * Subprocesso auxiliar de tests/manual/teste_status_processamento.php —
  * chama DocumentoController::statusProcessamento diretamente (sem HTTP
- * real). Note que este caso NAO instancia VioDecodeClient em nenhum
- * momento — se DocumentoController::statusProcessamento algum dia passar a
- * chamar a VIO por engano, o unico jeito de o teste pai perceber e via
- * latencia/erro de rede real (statusProcessamento nao deve ter NENHUM
- * caminho de codigo que referencie VioDecodeClient — confirmado por
- * inspecao do codigo-fonte, ver App\Controller\DocumentoController).
+ * real). Reescrito na rodada corretiva de migracao-vio-api-br-com-cache
+ * (2026-09-26): o fluxo real de statusProcessamento() hoje e via
+ * App\Rn\VioApiBrClient, nunca mais App\Rn\VioDecodeClient. Quando o
+ * atendimento tem uma tentativa PENDENTE de consulta
+ * (PROCESSANDO_LEITURA/PROCESSANDO_COMPARACAO com ID externo), este
+ * subprocesso FAZ, de proposito, exatamente 1 GET real (controlado pelo
+ * teste pai via VIO_API_BR_BASE_URL/API_KEY, sempre apontando para uma
+ * porta local fechada — nunca rede real/externa) — o teste pai
+ * (teste_status_processamento.php) e quem decide, cenario a cenario, se o
+ * ambiente tera essas envs presentes ou nao.
  *
  * Uso: php _caso_status_processamento.php <id_totem> <id_atendimento> <tipo>
  */
@@ -22,6 +26,19 @@ use App\Dao\RateLimitVioStatusDao;
 use App\Rn\DocumentoRn;
 use App\Dao\VioCacheDao;
 use App\Controller\DocumentoController;
+
+// Ponte DB_NAME/VIO_API_BR_* herdados via putenv() do processo pai (banco
+// `qa_` descartavel da rodada corretiva de migracao-vio-api-br-com-cache,
+// 2026-09-26) para $_ENV -- ver qaDbTrechoPonteEnvSubprocesso() em
+// tests/manual/qa_db_bootstrap.php para a explicacao completa do porque isso
+// e necessario (Dotenv imutavel nunca promove sozinho um valor so-getenv()
+// para $_ENV).
+foreach (['DB_NAME', 'VIO_API_BR_BASE_URL', 'VIO_API_BR_API_KEY'] as $qaChaveHerdada) {
+    $qaValorHerdado = getenv($qaChaveHerdada);
+    if ($qaValorHerdado !== false) {
+        $_ENV[$qaChaveHerdada] = $qaValorHerdado;
+    }
+}
 
 $dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
 $dotenv->load();

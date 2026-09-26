@@ -81,19 +81,22 @@ class AtendimentoDao
 
     /**
      * Persiste o resultado aprovado da validacao de CNH (VIO_TRIAL/
-     * VIO_VALIDADO/MANUAL) — chamado somente quando App\Rn\DocumentoRn ja
-     * confirmou que a CNH passou em todas as regras de aprovacao.
+     * VIO_VALIDADO/VIO_API_BR/MANUAL) — chamado somente quando
+     * App\Rn\DocumentoRn ja confirmou que a CNH passou em todas as regras
+     * de aprovacao.
      *
      * Grava tambem o SNAPSHOT (cnh_snapshot_*) do valor exato quando a
-     * origem e VIO_TRIAL/VIO_VALIDADO — essa e a "verdade original" usada
+     * origem e VIO_TRIAL/VIO_VALIDADO/VIO_API_BR (rodada corretiva de
+     * 2026-09-26: VIO_API_BR incluida aqui — sem isso, uma validacao real
+     * pela vio.api.br deixaria de preservar a "verdade VIO original", usada
      * depois por App\Rn\AtendimentoRn::salvarDadosMotorista para decidir o
-     * rebaixamento para MANUAL na tela exp_confirma. Quando a origem e
+     * rebaixamento para MANUAL na tela exp_confirma). Quando a origem e
      * MANUAL, o snapshot e gravado como NULL (nao ha "verdade VIO" a
      * preservar neste momento).
      */
     public function atualizarValidacaoCnh(int $id, string $nome, string $cpf, string $dataValidade, string $origem, string $statusRevisao): void
     {
-        $ehOrigemVio = in_array($origem, ['VIO_TRIAL', 'VIO_VALIDADO'], true);
+        $ehOrigemVio = in_array($origem, ['VIO_TRIAL', 'VIO_VALIDADO', 'VIO_API_BR'], true);
 
         $stmt = $this->pdo->prepare('
             UPDATE tb_atendimento
@@ -121,11 +124,12 @@ class AtendimentoDao
      * regravada em tb_atendimento.placa aqui (ja existe e e a fonte de
      * comparacao, nunca sobrescrita pelo CRLV lido) — mas E gravada no
      * SNAPSHOT (crlv_snapshot_placa) quando a origem e VIO_TRIAL/
-     * VIO_VALIDADO, mesmo raciocinio de atualizarValidacaoCnh() acima.
+     * VIO_VALIDADO/VIO_API_BR, mesmo raciocinio de atualizarValidacaoCnh()
+     * acima (VIO_API_BR incluida na rodada corretiva de 2026-09-26).
      */
     public function atualizarValidacaoCrlv(int $id, string $placa, int $exercicio, string $uf, string $rntc, string $tipoVeiculo, string $origem, string $statusRevisao): void
     {
-        $ehOrigemVio = in_array($origem, ['VIO_TRIAL', 'VIO_VALIDADO'], true);
+        $ehOrigemVio = in_array($origem, ['VIO_TRIAL', 'VIO_VALIDADO', 'VIO_API_BR'], true);
 
         $stmt = $this->pdo->prepare('
             UPDATE tb_atendimento
@@ -303,6 +307,255 @@ class AtendimentoDao
         $stmt->execute(['id' => $id, 'timeout' => $timeoutSegundos]);
 
         return $stmt->rowCount() > 0;
+    }
+
+    // ============================================================
+    // Fluxo assincrono vio.api.br (demanda migracao-vio-api-br-com-cache,
+    // 2026-09-25) — metodos NOVOS e ADITIVOS, nunca reaproveitam/alteram os
+    // metodos acima (iniciarProcessamento/gravarResultadoProcessamento/
+    // marcarProcessamentoObsoletoComoErro), que permanecem intocados para
+    // suportar rollback manual do fluxo antigo via App\Rn\VioDecodeClient.
+    //
+    // Conceitos distintos: *_tentativa_id (CAS local, ja existente) decide
+    // exclusividade de tentativa; *_vio_api_id (novo) e o ID EXTERNO opaco
+    // da vio.api.br, persistido so DEPOIS que o POST responde com sucesso.
+    // ============================================================
+
+    /**
+     * Mapa FECHADO de colunas por documento (cnh|crlv) para o fluxo
+     * vio.api.br — mesmo espirito de colunasStatusProcessamento() acima,
+     * nomes de coluna nunca vem de entrada do usuario.
+     */
+    private const COLUNAS_VIO_API_BR = [
+        'cnh' => [
+            'status' => 'cnh_status_processamento',
+            'tentativa' => 'cnh_tentativa_id',
+            'iniciado_em' => 'cnh_processamento_iniciado_em',
+            'vio_api_id' => 'cnh_vio_api_id',
+            'enviado_em' => 'cnh_vio_api_enviado_em',
+            'fingerprint' => 'cnh_vio_api_fingerprint',
+            'fingerprint_versao' => 'cnh_vio_api_fingerprint_versao',
+        ],
+        'crlv' => [
+            'status' => 'crlv_status_processamento',
+            'tentativa' => 'crlv_tentativa_id',
+            'iniciado_em' => 'crlv_processamento_iniciado_em',
+            'vio_api_id' => 'crlv_vio_api_id',
+            'enviado_em' => 'crlv_vio_api_enviado_em',
+            'fingerprint' => 'crlv_vio_api_fingerprint',
+            'fingerprint_versao' => 'crlv_vio_api_fingerprint_versao',
+        ],
+    ];
+
+    private function colunasVioApiBr(string $documento): array
+    {
+        return self::COLUNAS_VIO_API_BR[$documento]
+            ?? throw new \InvalidArgumentException("Documento invalido para fluxo vio.api.br: {$documento}");
+    }
+
+    /**
+     * CAS: adquire o direito de ENVIAR (POST /api/qrcode/read) — so tem
+     * efeito se o status atual for PENDENTE ou ERRO (nunca reabre
+     * ENVIANDO/PROCESSANDO_LEITURA/PROCESSANDO_COMPARACAO/INDETERMINADO
+     * automaticamente; ver marcarProcessamentoVioApiBrExpiradoComoIndeterminado
+     * para o unico caminho de saida desses estados). So o vencedor deste CAS
+     * pode chamar App\Rn\VioApiBrClient::enviarParaLeitura() — concorrencia
+     * nunca gera 2 POSTs. Grava tambem o fingerprint/versao do HMAC do
+     * cache (calculados a partir do QR, nunca o QR em si), necessarios mais
+     * tarde para o cache-write assincrono quando a comparacao responder
+     * (o QR bruto nunca sobrevive alem do calculo do fingerprint).
+     */
+    public function iniciarEnvioVioApiBr(int $id, string $documento, string $tentativaId, string $fingerprint, int $hmacVersao): bool
+    {
+        $c = $this->colunasVioApiBr($documento);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET {$c['status']} = 'ENVIANDO', {$c['tentativa']} = :tentativa, {$c['iniciado_em']} = NOW(),
+                {$c['vio_api_id']} = NULL, {$c['enviado_em']} = NULL,
+                {$c['fingerprint']} = :fingerprint, {$c['fingerprint_versao']} = :fp_versao
+            WHERE id_atendimento = :id AND {$c['status']} IN ('PENDENTE', 'ERRO')
+        ");
+        $stmt->execute(['tentativa' => $tentativaId, 'fingerprint' => $fingerprint, 'fp_versao' => $hmacVersao, 'id' => $id]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Persiste o ID EXTERNO imediatamente apos o POST responder com
+     * sucesso, ANTES de qualquer polling, e avanca para PROCESSANDO_LEITURA
+     * — so tem efeito se :tentativa ainda for a vigente E o status ainda for
+     * ENVIANDO (protege contra tentativa obsoleta/zumbi).
+     */
+    public function gravarIdExternoVioApiBr(int $id, string $documento, string $tentativaId, string $idExterno): bool
+    {
+        $c = $this->colunasVioApiBr($documento);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET {$c['status']} = 'PROCESSANDO_LEITURA', {$c['vio_api_id']} = :vio_api_id, {$c['enviado_em']} = NOW()
+            WHERE id_atendimento = :id AND {$c['tentativa']} = :tentativa AND {$c['status']} = 'ENVIANDO'
+        ");
+        $stmt->execute(['vio_api_id' => $idExterno, 'id' => $id, 'tentativa' => $tentativaId]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Falha TECNICA no envio, SEM ambiguidade (nunca chegou a persistir ID
+     * externo, nunca ha risco de cobranca duplicada) — permite nova
+     * tentativa explicita (CAS acima aceita ERRO). So tem efeito se ainda
+     * estiver ENVIANDO com a mesma tentativa.
+     */
+    public function marcarEnvioComoErro(int $id, string $documento, string $tentativaId): bool
+    {
+        $c = $this->colunasVioApiBr($documento);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET {$c['status']} = 'ERRO'
+            WHERE id_atendimento = :id AND {$c['tentativa']} = :tentativa AND {$c['status']} = 'ENVIANDO'
+        ");
+        $stmt->execute(['id' => $id, 'tentativa' => $tentativaId]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Falha AMBIGUA no envio (nao se sabe se o fornecedor recebeu/processou
+     * a chamada) — NUNCA permite nova tentativa automatica (CAS acima nao
+     * aceita INDETERMINADO). Fallback manual continua sempre disponivel via
+     * preencher-manual, independente deste estado.
+     */
+    public function marcarEnvioComoIndeterminado(int $id, string $documento, string $tentativaId): bool
+    {
+        $c = $this->colunasVioApiBr($documento);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET {$c['status']} = 'INDETERMINADO'
+            WHERE id_atendimento = :id AND {$c['tentativa']} = :tentativa AND {$c['status']} = 'ENVIANDO'
+        ");
+        $stmt->execute(['id' => $id, 'tentativa' => $tentativaId]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Leitura completed, comparacao ainda pending/processing — avanca de
+     * PROCESSANDO_LEITURA para PROCESSANDO_COMPARACAO. Idempotente: se ja
+     * nao estiver mais em PROCESSANDO_LEITURA, nao tem efeito.
+     */
+    public function avancarParaProcessandoComparacao(int $id, string $documento): bool
+    {
+        $c = $this->colunasVioApiBr($documento);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET {$c['status']} = 'PROCESSANDO_COMPARACAO'
+            WHERE id_atendimento = :id AND {$c['status']} = 'PROCESSANDO_LEITURA'
+        ");
+        $stmt->execute(['id' => $id]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Grava o resultado FINAL (CONCLUIDO/ERRO/INDETERMINADO) de uma consulta
+     * de status — DUPLA checagem no WHERE (achado do security-especialista
+     * no handoff): :tentativa ainda vigente (protege contra resultado
+     * tardio de uma tentativa ja obsoleta/substituida) E o atendimento ainda
+     * `em_andamento` (protege contra um resultado tardio alterar um
+     * atendimento ja cancelado/concluido/substituido por outro caminho).
+     */
+    public function gravarResultadoFinalVioApiBr(int $id, string $documento, ?string $tentativaId, string $statusFinal): bool
+    {
+        if ($tentativaId === null || $tentativaId === '') {
+            return false;
+        }
+
+        $c = $this->colunasVioApiBr($documento);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET {$c['status']} = :status_final
+            WHERE id_atendimento = :id AND {$c['tentativa']} = :tentativa AND status = 'em_andamento'
+        ");
+        $stmt->execute(['status_final' => $statusFinal, 'id' => $id, 'tentativa' => $tentativaId]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Limite de DURACAO maxima de processamento apos o envio ja ter sido
+     * confirmado — cobre tanto ENVIANDO preso (ex.: crash do processo PHP
+     * entre o POST e a persistencia do ID externo, usando
+     * *_processamento_iniciado_em) quanto PROCESSANDO_LEITURA/
+     * PROCESSANDO_COMPARACAO presos ha tempo demais sem resolucao (usando
+     * *_vio_api_enviado_em). NUNCA volta a PENDENTE — so avanca para
+     * INDETERMINADO, nunca dispara novo POST automatico. Atomica e
+     * idempotente (sem efeito se ja tiver saido desses estados).
+     */
+    public function marcarProcessamentoVioApiBrExpiradoComoIndeterminado(int $id, string $documento, int $duracaoMaximaSegundos): bool
+    {
+        $c = $this->colunasVioApiBr($documento);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET {$c['status']} = 'INDETERMINADO'
+            WHERE id_atendimento = :id
+              AND {$c['status']} IN ('ENVIANDO', 'PROCESSANDO_LEITURA', 'PROCESSANDO_COMPARACAO')
+              AND (
+                    {$c['iniciado_em']} < DATE_SUB(NOW(), INTERVAL :duracao1 SECOND)
+                    OR ({$c['enviado_em']} IS NOT NULL AND {$c['enviado_em']} < DATE_SUB(NOW(), INTERVAL :duracao2 SECOND))
+                  )
+        ");
+        $stmt->execute(['id' => $id, 'duracao1' => $duracaoMaximaSegundos, 'duracao2' => $duracaoMaximaSegundos]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Reconciliacao de kiosk (Tarefa 3, rodada corretiva de 2026-09-26):
+     * quando um NOVO atendimento e criado para o MESMO totem (novo aceite
+     * LGPD apos reinicio excepcional/abandono do totem), qualquer
+     * atendimento ANTERIOR do mesmo id_totem que ainda esteja 'em_andamento'
+     * com uma tentativa vio.api.br ATIVA (ENVIANDO/PROCESSANDO_LEITURA/
+     * PROCESSANDO_COMPARACAO) nunca mais sera consultado pelo front-end — o
+     * estado do totem sempre reinicia na tela LGPD, nunca retoma um
+     * id_atendimento antigo (design ja existente, nao alterado aqui). Sem
+     * esta reconciliacao essas colunas ficariam PRESAS PARA SEMPRE nesses
+     * estados: o unico mecanismo que as move para fora deles
+     * (marcarProcessamentoVioApiBrExpiradoComoIndeterminado()) so roda
+     * quando o front chama status-processamento, o que nunca mais acontece
+     * para um atendimento abandonado.
+     *
+     * Transiciona DIRETAMENTE para INDETERMINADO (nunca PENDENTE — nunca
+     * reabre a possibilidade de um novo POST automatico para uma tentativa
+     * antiga). NENHUMA chamada de rede acontece aqui, so UPDATE local — por
+     * construcao NUNCA gera um segundo POST/tentativa externa. Escopo
+     * restrito por id_totem + status = 'em_andamento' + id_atendimento
+     * DIFERENTE do recem-criado: nunca toca no atendimento novo, nunca toca
+     * em atendimento ja cancelado/concluido (mesma dupla checagem de escopo
+     * ja usada por gravarResultadoFinalVioApiBr()). NUNCA altera o status
+     * geral do atendimento antigo (fora de escopo desta demanda — limpeza
+     * mais ampla de residuo de atendimento fica para o qa-testes, com
+     * protocolo proprio).
+     */
+    public function reconciliarProcessamentoVioApiBrAbandonado(int $idTotem, int $idAtendimentoAtual): void
+    {
+        foreach (['cnh', 'crlv'] as $documento) {
+            $c = $this->colunasVioApiBr($documento);
+
+            $stmt = $this->pdo->prepare("
+                UPDATE tb_atendimento
+                SET {$c['status']} = 'INDETERMINADO'
+                WHERE id_totem = :id_totem AND id_atendimento != :id_atual
+                  AND status = 'em_andamento'
+                  AND {$c['status']} IN ('ENVIANDO', 'PROCESSANDO_LEITURA', 'PROCESSANDO_COMPARACAO')
+            ");
+            $stmt->execute(['id_totem' => $idTotem, 'id_atual' => $idAtendimentoAtual]);
+        }
     }
 
     public function salvarCliente(int $id, string $nome, ?string $cnpj): void

@@ -54,20 +54,26 @@ const state = {
     // ciclo assincrono) — perdida ao recarregar a pagina (limitacao aceita,
     // ver docs/handoffs/2026-09-08-expedicao-vio-cnh-crlv.md), nesse caso a
     // tela de espera recorre a polling (ver aguardarDocumentos()).
-    exp: { previewImg: null, previewCanvas: null, cnhFrenteImg: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null },
+    // cnhUltimoStatus/crlvUltimoStatus (raw, resposta bruta ALLOWLIST de
+    // documento.php — nunca inferido) e cnhAoAtualizar/crlvAoAtualizar
+    // (callback da tela ATUALMENTE visivel, redirecionado conforme o
+    // motorista navega entre a captura do CRLV e a tela de espera) — demanda
+    // migracao-vio-api-br-com-cache, 2026-09-25, ver
+    // atualizarStatusDocumento()/rotuloStatusProcessamento().
+    exp: { previewImg: null, previewCanvas: null, cnhFrenteImg: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
     // mesmo padrao para Recebimento (REPLANEJAMENTO 2026-09-09 estendeu a
     // validacao VIO Decode tambem para o Recebimento) — telas/estado NOVOS E
     // DEDICADOS, nao compartilhados com a Expedicao nem com o fluxo antigo
     // de rec_cnh/rec_crlv (semantica diferente, sem QR).
-    rec: { previewImg: null, previewCanvas: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null },
+    rec: { previewImg: null, previewCanvas: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
 };
 
 function estadoExpVazio() {
-    return { previewImg: null, previewCanvas: null, cnhFrenteImg: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null };
+    return { previewImg: null, previewCanvas: null, cnhFrenteImg: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
 }
 
 function estadoRecVazio() {
-    return { previewImg: null, previewCanvas: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null };
+    return { previewImg: null, previewCanvas: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
 }
 
 // -------------------- comunicacao com a API --------------------
@@ -300,19 +306,23 @@ function renderTela() {
         case 'rec_bloqueado': tela.innerHTML = telaBloqueado(); break;
         case 'rec_digitaliza': tela.innerHTML = telaDigitaliza(); iniciarCameraScanner(); break;
         case 'rec_cliente': tela.innerHTML = telaCliente(); habilitarAutocompleteCliente(); break;
-        case 'rec_cnh': tela.innerHTML = telaCaptura('Posicione a CNH no leitor'); iniciarCamera(); habilitarLeitorScanner(); break;
-        // NOTA (demanda expedicao-vio-cnh-crlv, REPLANEJAMENTO 2026-09-09): o
-        // backend agora usa a etapa/tela 'rec_crlv' para a NOVA captura via QR
-        // (mesmo nome literal que a tela ANTIGA acima usava para o leitor
-        // HID sem QR). Como o backend ja emite esse nome (AtendimentoController::
-        // SEQUENCIA_RECEBIMENTO_DOCUMENTOS, ja implementado nesta mesma rodada)
-        // e nada mais no front chama mais ir('rec_cnh')/ir('rec_crlv') no fluxo
-        // antigo (concluirDigitalizacao ja emite 'rec_cnh_frente' desde o
-        // replanejamento), o case abaixo SUBSTITUI o antigo (rota inalcancavel
-        // por qualquer chamada real hoje) em vez de duplicar o rotulo — JS so
-        // executaria o primeiro 'case' de qualquer forma. Telas/funcoes
-        // NOVAS E DEDICADAS (recCam*), a antiga telaCaptura/iniciarCamera/
-        // habilitarLeitorScanner continuam intocadas e exclusivas de 'rec_cnh'.
+        // O backend so conhece a etapa UNICA 'rec_cnh' (unificacao da rodada
+        // corretiva de 2026-09-26, mesmo padrao ja usado por 'exp_cnh' na
+        // Expedicao — ver AtendimentoController::SEQUENCIA_RECEBIMENTO_
+        // DOCUMENTOS/ETAPAS_UPLOAD). O front-end, porem, precisa distinguir
+        // localmente a captura da frente da captura do verso (2 fotos, 2
+        // chamadas de upload SEPARADAS — cnh_frente/cnh_verso — mas dentro da
+        // MESMA etapa do backend), entao continua usando 2 sub-telas
+        // client-side dedicadas (rec_cnh_frente/rec_cnh_verso). Nenhum ponto
+        // do front chama mais ir('rec_cnh') com esse literal — todo lugar que
+        // recebe 'rec_cnh' do backend (proxima_tela/etapa) traduz para
+        // 'rec_cnh_frente' antes de chamar ir() (ver finalizarDigitalizacao()/
+        // confirmarCliente()), entao NAO existe mais 'case rec_cnh:' aqui — a
+        // antiga tela do leitor HID sem QR (telaCaptura/iniciarCamera/
+        // habilitarLeitorScanner) fica sem nenhum 'case' que a alcance,
+        // removida nesta rodada por ser justamente a origem do bug corrigido
+        // (o literal 'rec_cnh' virou de novo alcancavel quando o backend
+        // unificou a etapa, e essa tela antiga NAO tem leitura de QR).
         case 'rec_cnh_frente': tela.innerHTML = telaRecCnhFrente(); iniciarCameraRec(); break;
         case 'rec_cnh_verso': tela.innerHTML = telaRecCnhVerso(); iniciarCameraRec(); break;
         case 'rec_cnh_manual': tela.innerHTML = telaRecCnhManual(); break;
@@ -326,6 +336,13 @@ function renderTela() {
 }
 
 function novoAtendimento() {
+    // Encerra qualquer polling de status-processamento em andamento (ver
+    // pollGeracao/pollarAteTerminal) — cobre tanto "novo atendimento" quanto
+    // cancelamento (cancelarESair() sempre chama esta funcao ao final),
+    // garantindo que nenhuma chamada de status-processamento (que pode
+    // custar um GET real contra a vio.api.br) continue "solta" depois que o
+    // atendimento deixou de existir/estar em andamento.
+    pollGeracao++;
     Object.assign(state, {
         // Reseta o gate LGPD junto com o restante do estado — cancelar,
         // encerrar ou iniciar um novo atendimento sempre exige nova ciencia
@@ -878,11 +895,28 @@ function telaExpCrlv() { return telaExpCaptura('Fotografe o CRLV completo'); }
 function exibirIndicadorProcessamentoCnh() {
     const el = document.getElementById('expBgStatus');
     if (!el || !state.exp.cnhPromise) return;
-    el.textContent = 'Validando CNH em segundo plano...';
-    el.style.display = 'block';
+    // A partir da demanda migracao-vio-api-br-com-cache (2026-09-25), o texto
+    // exibido aqui vem do status_processamento EXPLICITO do backend (nunca
+    // inferido) via atualizarStatusDocumento()/rotuloStatusProcessamento() —
+    // redireciona o callback ja associado a este documento (ver
+    // expProcessarCnhVerso) para esta tela enquanto ela estiver visivel.
+    state.exp.cnhAoAtualizar = (status) => {
+        const alvo = document.getElementById('expBgStatus');
+        if (!alvo) return;
+        alvo.style.display = 'block';
+        alvo.textContent = rotuloStatusProcessamento(status.status_processamento);
+    };
+    if (state.exp.cnhUltimoStatus) {
+        state.exp.cnhAoAtualizar(state.exp.cnhUltimoStatus);
+    } else {
+        el.textContent = 'Enviando documento...';
+        el.style.display = 'block';
+    }
     state.exp.cnhPromise.then(resultado => {
-        if (!el.isConnected) return; // a tela ja pode ter mudado
-        el.textContent = resultado.pode_avancar
+        state.exp.cnhAoAtualizar = null;
+        const alvo = document.getElementById('expBgStatus');
+        if (!alvo) return; // a tela ja pode ter mudado
+        alvo.textContent = resultado.pode_avancar
             ? 'CNH validada'
             : 'CNH ainda pendente — será solicitado preenchimento manual se necessário';
     });
@@ -890,17 +924,38 @@ function exibirIndicadorProcessamentoCnh() {
 
 // -------------------- expedicao: tela de espera apos CRLV confirmado --------------------
 // So existe DEPOIS do CRLV (nunca entre CNH e CRLV) — texto fixo pedido no
-// escopo, sem loading intermediario nenhum antes disso.
+// escopo original. Os dois status abaixo (id dedicado por documento) exibem
+// os estados intermediarios EXPLICITOS do backend (ENVIANDO/PROCESSANDO_
+// LEITURA/PROCESSANDO_COMPARACAO) — demanda migracao-vio-api-br-com-cache,
+// 2026-09-25, item 4 do escopo (nunca inferidos no front).
 function telaExpAguardeDocumentos() {
-    return `<div class="titulo">Estamos validando seus documentos. Aguarde.</div>`;
+    return `<div class="titulo">Estamos validando seus documentos. Aguarde.</div>
+        <div class="status-leitura" id="expAguardeCnhStatus"></div>
+        <div class="status-leitura" id="expAguardeCrlvStatus"></div>`;
 }
 
 async function processarAguardeDocumentosExp() {
+    state.exp.cnhAoAtualizar = (status) => {
+        const el = document.getElementById('expAguardeCnhStatus');
+        if (el) el.textContent = 'CNH: ' + rotuloStatusProcessamento(status.status_processamento);
+    };
+    state.exp.crlvAoAtualizar = (status) => {
+        const el = document.getElementById('expAguardeCrlvStatus');
+        if (el) el.textContent = 'CRLV: ' + rotuloStatusProcessamento(status.status_processamento);
+    };
+    if (state.exp.cnhUltimoStatus) state.exp.cnhAoAtualizar(state.exp.cnhUltimoStatus);
+    if (state.exp.crlvUltimoStatus) state.exp.crlvAoAtualizar(state.exp.crlvUltimoStatus);
+
     const resultado = await aguardarDocumentos(state.idAtendimento, state.exp.cnhPromise, state.exp.crlvPromise);
+    state.exp.cnhAoAtualizar = null;
+    state.exp.crlvAoAtualizar = null;
     state.exp.cnhPromise = null;
     state.exp.crlvPromise = null;
-    if (resultado.cnh.pode_avancar) state.exp.cnhOrigem = resultado.cnh.aviso_trial ? 'VIO_TRIAL' : 'VIO_VALIDADO';
-    if (resultado.crlv.pode_avancar) state.exp.crlvOrigem = resultado.crlv.aviso_trial ? 'VIO_TRIAL' : 'VIO_VALIDADO';
+    // Origem SEMPRE vinda explicitamente do backend (nunca inferida a partir
+    // de aviso_trial — a vio.api.br nao tem esse conceito e ja podia vir
+    // VIO_CACHE, achado corrigido nesta demanda).
+    if (resultado.cnh.pode_avancar) state.exp.cnhOrigem = resultado.cnh.origem || 'VIO_VALIDADO';
+    if (resultado.crlv.pode_avancar) state.exp.crlvOrigem = resultado.crlv.origem || 'VIO_VALIDADO';
     if (state.tela !== 'exp_aguarde_documentos') return; // usuario ja saiu da tela (ex.: cancelou)
     await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
 }
@@ -998,8 +1053,21 @@ async function expConfirmarFoto() {
     }
 }
 
+// ORDEM INVERTIDA (demanda migracao-vio-api-br-com-cache, 2026-09-25, decisao
+// explicita do usuario): o QR do verso e lido/validado LOCALMENTE (jsQR, sem
+// nenhuma chamada de rede) ANTES do upload — nunca mais faz upload de um
+// documento cujo QR ja se sabe ilegivel, evitando envio desperdicado. So
+// depois de confirmado o QR e que a CNH (frente+verso, mesmo par de imagens
+// ja capturado) e enviada ao backend numa unica chamada.
 async function expProcessarCnhVerso() {
     const versoImg = state.exp.previewImg;
+    expCamMostrarStatus('Lendo QR code...');
+    const qr = await expLerQrDaImagemCapturada();
+    if (!qr.ok) {
+        expOferecerFallback('cnh');
+        return;
+    }
+
     expCamMostrarStatus('Enviando documento...');
     try {
         await api('documento.php', 'upload', {
@@ -1014,25 +1082,33 @@ async function expProcessarCnhVerso() {
         return;
     }
 
-    expCamMostrarStatus('Lendo QR code...');
-    const qr = await expLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        expOferecerFallback('cnh');
-        return;
-    }
-
-    // ASSINCRONO (REPLANEJAMENTO 2026-09-09, item 1 do escopo): dispara a
-    // validacao em segundo plano SEM aguardar (fire-and-forget) e libera a
-    // captura do CRLV imediatamente — a Promise fica guardada para a tela de
-    // espera (exp_aguarde_documentos) usar depois via Promise.all.
-    state.exp.cnhPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'cnh', qr.binaryData);
+    // ASSINCRONO (REPLANEJAMENTO 2026-09-09, item 1 do escopo original):
+    // dispara a validacao em segundo plano SEM aguardar (fire-and-forget) e
+    // libera a captura do CRLV imediatamente — a Promise fica guardada para a
+    // tela de espera (exp_aguarde_documentos) usar depois via Promise.all.
+    // ATUALIZADO nesta demanda: a Promise so resolve apos o backend chegar a
+    // um estado TERMINAL (ver iniciarProcessamentoDocumento/pollarAteTerminal),
+    // nunca mais so a confirmacao do envio inicial. O callback repassa cada
+    // estado intermediario explicito do backend para quem estiver "escutando"
+    // no momento (indicador discreto aqui ou a tela de espera depois).
+    state.exp.cnhPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'cnh', qr.binaryData, (status) => atualizarStatusDocumento('exp', 'cnh', status));
     expCamMostrarStatus('CNH enviada para validação');
 
     await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
 }
 
+// Mesma inversao de ordem do CRLV (QR local ANTES do upload) — decisao
+// explicita do usuario nesta demanda, corrigindo o achado do proprio plano
+// anterior (upload acontecia antes da leitura do QR).
 async function expProcessarCrlv() {
     const crlvImg = state.exp.previewImg;
+    expCamMostrarStatus('Lendo QR code...');
+    const qr = await expLerQrDaImagemCapturada();
+    if (!qr.ok) {
+        expOferecerFallback('crlv');
+        return;
+    }
+
     expCamMostrarStatus('Enviando documento...');
     try {
         await api('documento.php', 'upload', {
@@ -1046,17 +1122,10 @@ async function expProcessarCrlv() {
         return;
     }
 
-    expCamMostrarStatus('Lendo QR code...');
-    const qr = await expLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        expOferecerFallback('crlv');
-        return;
-    }
-
     // ASSINCRONO — dispara a validacao do CRLV em segundo plano (fire-and-
     // -forget) e segue direto para a tela de espera (exp_aguarde_documentos
-    // so aparece a partir daqui, nunca entre CNH e CRLV — item 4 do escopo).
-    state.exp.crlvPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'crlv', qr.binaryData);
+    // so aparece a partir daqui, nunca entre CNH e CRLV).
+    state.exp.crlvPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'crlv', qr.binaryData, (status) => atualizarStatusDocumento('exp', 'crlv', status));
     expCamMostrarStatus('CRLV enviado para validação');
 
     await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
@@ -1252,27 +1321,85 @@ function bytesArrayParaBase64(bytesArray) {
 const PROCESSAMENTO_TIMEOUT_MS = 45000;
 const PROCESSAMENTO_POLL_INTERVAL_MS = 2000;
 
+// Geracao de polling (demanda migracao-vio-api-br-com-cache, 2026-09-25) —
+// incrementada em novoAtendimento() (cobre tambem o caminho de cancelar,
+// ver cancelarESair()). Todo loop de polling em andamento (pollarAteTerminal)
+// guarda a geracao vigente no momento em que foi disparado e para de fazer
+// QUALQUER nova chamada de rede assim que ela mudar — necessario porque,
+// desde esta demanda, statusProcessamento() pode custar um GET real contra a
+// vio.api.br a cada chamada (nao e mais leitura pura do banco); sem isso um
+// cancelamento no meio do processamento deixaria o polling "solto" fazendo
+// chamadas pagas para um atendimento que ja nao existe mais (item 11 do
+// escopo desta rodada).
+let pollGeracao = 0;
+
+// Traduz o status_processamento EXPLICITO retornado por documento.php (nunca
+// inferido no front — mesma divida tecnica ja identificada e corrigida nesta
+// demanda para o campo `origem`) num texto SEMPRE generico para o motorista.
+// Nunca inclui detalhe tecnico/motivo de reprovacao (item 9 do escopo).
+function rotuloStatusProcessamento(status) {
+    switch (status) {
+        case 'ENVIANDO': return 'Enviando documento...';
+        case 'PROCESSANDO_LEITURA': return 'Lendo documento...';
+        case 'PROCESSANDO_COMPARACAO': return 'Conferindo dados...';
+        case 'CONCLUIDO': return 'Documento validado';
+        case 'ERRO':
+        case 'INDETERMINADO':
+            return 'Não foi possível concluir a validação automática';
+        default: return 'Aguardando envio...';
+    }
+}
+
+// Repassa o status bruto mais recente de um documento para quem estiver
+// "escutando" no momento (state.exp/rec.[cnh|crlv]AoAtualizar — redirecionado
+// pela tela atualmente visivel: indicador discreto na captura do CRLV ou a
+// tela de espera final) — evita qualquer polling duplicado so para exibicao
+// (item 4 do escopo: um UNICO polling real, cujo resultado alimenta a UI).
+function atualizarStatusDocumento(prefixo, doc, status) {
+    const alvo = state[prefixo];
+    if (!alvo) return;
+    alvo[doc + 'UltimoStatus'] = status;
+    const handler = alvo[doc + 'AoAtualizar'];
+    if (typeof handler === 'function') handler(status);
+}
+
 // Dispara iniciar-processamento SEM aguardar (fire-and-forget) — quem chama
 // guarda a Promise retornada (state.exp.cnhPromise/crlvPromise ou
 // state.rec.cnhPromise/crlvPromise) para usar depois via aguardarDocumentos(),
-// mas NUNCA usa await no ponto de disparo (item 1 do escopo: nenhum await
-// bloqueante entre confirmar a foto e liberar a proxima captura). Erros de
-// rede sao capturados aqui (nunca viram rejection nao tratada) e devolvidos
-// como resultado nao aprovado, para serem tratados como qualquer outra falha
-// de validacao pelo chamador.
-function iniciarProcessamentoDocumento(idAtendimento, tipo, qrBytesArray) {
+// mas NUNCA usa await no ponto de disparo (nenhum await bloqueante entre
+// confirmar a foto e liberar a proxima captura).
+//
+// ATUALIZADO na demanda migracao-vio-api-br-com-cache (2026-09-25): o
+// endpoint iniciar-processamento agora e so o INICIO do processamento
+// assincrono (ENVIANDO/PROCESSANDO_LEITURA) — so e terminal de imediato em
+// dois casos: documento ja aprovado antes, ou cache-hit (origem VIO_CACHE,
+// que nunca deve mostrar tela de progresso falsa, item 10 do escopo). Fora
+// isso, esta Promise so resolve de fato apos pollarAteTerminal(); a Promise
+// retornada aqui SEMPRE representa o resultado FINAL do documento, nunca so
+// a confirmacao de envio (correcao de uma suposicao antiga que nao valia
+// mais para o novo backend assincrono).
+function iniciarProcessamentoDocumento(idAtendimento, tipo, qrBytesArray, aoAtualizar) {
+    const minhaGeracao = pollGeracao;
     return api('documento.php', 'iniciar-processamento', {
         id_atendimento: idAtendimento,
         tipo,
         qr_bytes_base64: bytesArrayParaBase64(qrBytesArray),
-    }).catch(e => ({ ok: false, pode_avancar: false, motivo: e.message, terminal: true }));
+    }).then(resultado => {
+        if (typeof aoAtualizar === 'function') aoAtualizar(resultado);
+        if (resultado.terminal) return resultado;
+        return pollarAteTerminal(idAtendimento, tipo, minhaGeracao, aoAtualizar);
+    }).catch(() => ({ ok: false, pode_avancar: false, motivo: 'Não foi possível validar o documento agora', terminal: true }));
 }
 
 async function consultarStatusProcessamento(idAtendimento, tipo) {
     try {
         return await api('documento.php', 'status-processamento', { id_atendimento: idAtendimento, tipo });
     } catch (e) {
-        return { ok: false, pode_avancar: false, motivo: e.message, terminal: false };
+        // Mensagem SEMPRE generica aqui — nunca propaga e.message (detalhe
+        // tecnico do backend) para o motorista; caminho tratado separado do
+        // mostrarErroTela(e.message) genérico usado em outros pontos da SPA
+        // (item 9 do escopo desta demanda).
+        return { ok: false, pode_avancar: false, motivo: 'Não foi possível consultar o status agora', terminal: false };
     }
 }
 
@@ -1289,12 +1416,33 @@ function comTimeout(promise, ms) {
 
 // Faz polling em status-processamento a cada 2s (nunca dispara nova chamada
 // de iniciar-processamento) ate o documento chegar a estado terminal ou o
-// timeout de 45s esgotar — usado quando NAO ha Promise viva em memoria (ex.:
-// apos recarregar a pagina no meio do processo).
-async function pollarAteTerminal(idAtendimento, tipo) {
+// timeout de 45s esgotar. `geracao` e o valor de pollGeracao capturado no
+// INICIO da tentativa (ver iniciarProcessamentoDocumento) — se o atendimento
+// for cancelado/encerrado enquanto este loop roda (pollGeracao mudou), o
+// loop para IMEDIATAMENTE, sem nenhuma nova chamada de rede solta (item 11
+// do escopo). `aoAtualizar` (opcional): chamado a CADA resposta, mesmo nao
+// terminal, so para EXIBICAO do estado intermediario explicito do backend —
+// nunca usado para decidir aprovacao.
+//
+// CORRECAO DE COMENTARIO (demanda migracao-vio-api-br-com-cache, 2026-09-25):
+// a versao anterior deste comentario descrevia "apos recarregar a pagina no
+// meio do processo" como o cenario de uso — isso NUNCA acontece na pratica.
+// `state.idAtendimento` (e todo o `state` da SPA) e, por design deliberado,
+// NUNCA persistido em localStorage/sessionStorage/cookie — um F5 real
+// sempre reinicia a SPA do zero, de volta a tela de aceite LGPD, sem nenhum
+// `id_atendimento` conhecido para pollar. Este projeto NAO implementa
+// retomada visual da SPA apos reinicio do navegador/kiosk — isso e uma
+// decisao de produto explicita, nao uma lacuna tecnica. O ID EXTERNO da
+// vio.api.br (guardado so no backend) sobrevive a qualquer reinicio do
+// navegador; o que NAO sobrevive e a tela/estado visual do atendimento em
+// si, que sempre reinicia do zero.
+async function pollarAteTerminal(idAtendimento, tipo, geracao, aoAtualizar) {
     const inicio = Date.now();
     while (Date.now() - inicio < PROCESSAMENTO_TIMEOUT_MS) {
+        if (pollGeracao !== geracao) return resultadoTimeoutProcessamento();
         const status = await consultarStatusProcessamento(idAtendimento, tipo);
+        if (pollGeracao !== geracao) return resultadoTimeoutProcessamento();
+        if (typeof aoAtualizar === 'function') aoAtualizar(status);
         if (status.terminal) return status;
         await new Promise(resolve => setTimeout(resolve, PROCESSAMENTO_POLL_INTERVAL_MS));
     }
@@ -1310,10 +1458,10 @@ async function pollarAteTerminal(idAtendimento, tipo) {
 async function aguardarDocumentos(idAtendimento, cnhPromiseViva, crlvPromiseViva) {
     const resolverCnh = cnhPromiseViva
         ? comTimeout(cnhPromiseViva, PROCESSAMENTO_TIMEOUT_MS)
-        : pollarAteTerminal(idAtendimento, 'cnh');
+        : pollarAteTerminal(idAtendimento, 'cnh', pollGeracao);
     const resolverCrlv = crlvPromiseViva
         ? comTimeout(crlvPromiseViva, PROCESSAMENTO_TIMEOUT_MS)
-        : pollarAteTerminal(idAtendimento, 'crlv');
+        : pollarAteTerminal(idAtendimento, 'crlv', pollGeracao);
 
     const [cnh, crlv] = await Promise.all([resolverCnh, resolverCrlv]);
     return { cnh, crlv };
@@ -1355,6 +1503,17 @@ function linhaConfirma(rotulo, id, valor) {
 function expOrigemLabel(origem) {
     if (origem === 'VIO_TRIAL') return 'VIO_TRIAL';
     if (origem === 'VIO_VALIDADO') return 'VIO_VALIDADO';
+    // VIO_API_BR incluida (rodada corretiva de 2026-09-26 da demanda
+    // migracao-vio-api-br-com-cache) — origem da validacao em tempo real via
+    // vio.api.br, valor novo que substitui VIO_VALIDADO nas aprovacoes
+    // automaticas novas (VIO_VALIDADO passa a ser so historico do fluxo
+    // Serpro antigo). Mesmo padrao de texto literal ja usado para as demais
+    // origens, sem detalhe tecnico adicional.
+    if (origem === 'VIO_API_BR') return 'VIO_API_BR';
+    // VIO_CACHE incluida (demanda migracao-vio-api-br-com-cache, 2026-09-25)
+    // — sem isso, um documento aprovado via cache-hit apareceria aqui como
+    // "Não validado", incoerente com pode_avancar=true.
+    if (origem === 'VIO_CACHE') return 'VIO_CACHE';
     if (origem === 'MANUAL') return 'MANUAL — pendente de revisão';
     return 'Não validado';
 }
@@ -2072,7 +2231,12 @@ async function finalizarDigitalizacao() {
     if (btn) btn.disabled = true;
     try {
         const dados = await api('atendimento.php', 'concluir-digitalizacao', { id_atendimento: state.idAtendimento });
-        ir(dados.proxima_tela);
+        // o backend responde com o literal 'rec_cnh' (etapa unica) quando o
+        // cliente ja foi identificado automaticamente via nota — traduz para
+        // a sub-tela client-side da FRENTE (mesmo padrao ja usado por
+        // avancarDados() com 'exp_cnh'->'exp_cnh_frente' na Expedicao); o
+        // outro valor possivel aqui e 'rec_cliente', repassado direto.
+        ir(dados.proxima_tela === 'rec_cnh' ? 'rec_cnh_frente' : dados.proxima_tela);
     } catch (e) {
         const msg = e.message || 'Erro ao concluir a digitalização.';
         mostrarStatusScanner(msg, true);
@@ -2633,16 +2797,10 @@ async function confirmarCliente() {
     try {
         await api('atendimento.php', 'salvar-etapa', { id_atendimento: state.idAtendimento, etapa: 'cliente', dados: { nome, cnpj } });
         state.dados = Object.assign({}, state.dados, { cliente_nome: nome, cliente_cnpj: cnpj });
-        // ATENCAO (achado durante a implementacao desta demanda, registrado
-        // como pendencia no handoff): a etapa antiga 'rec_cnh' nao existe
-        // mais no backend (ETAPAS_UPLOAD/ETAPAS_PERMITIDAS_PROCESSAMENTO so
-        // conhecem 'rec_cnh_frente'/'rec_cnh_verso'/'rec_crlv') — apontar
-        // para 'rec_cnh_frente' e necessario para nao levar a uma tela morta,
-        // mas AtendimentoController::salvarEtapa (case 'cliente') NAO
-        // atualiza etapa_atual no banco: o proximo upload em
-        // documento.php?acao=upload vai falhar a checagem de etapa exata
-        // enquanto isso nao for corrigido no backend (fora do escopo deste
-        // sub-agente, so frontend).
+        // AtendimentoController::salvarEtapa (case 'cliente') ja atualiza
+        // etapa_atual para a etapa unica 'rec_cnh' no backend (rodada
+        // corretiva de 2026-09-26) — o front traduz direto para a sub-tela
+        // client-side da FRENTE, mesmo padrao usado em finalizarDigitalizacao().
         ir('rec_cnh_frente');
     } catch (e) { mostrarErroTela(e.message); }
 }
@@ -2654,13 +2812,21 @@ async function confirmarCliente() {
 // DEDICADAS (prefixo recCam/rec, mesmo padrao ja usado para expCam/exp) —
 // NAO reaproveitam telaCaptura/iniciarCamera/capturarFotoBase64/
 // capturarDocumento/habilitarLeitorScanner (leitor HID antigo, semantica
-// diferente sem QR, mantido intocado e exclusivo da etapa legada 'rec_cnh').
-// Diferenca intencional em relacao a Expedicao: aqui a CNH tem duas etapas
-// de UPLOAD separadas no backend (rec_cnh_frente / rec_cnh_verso), nao uma
-// unica etapa combinada — a leitura do QR e o disparo do processamento em
-// segundo plano so acontecem na etapa do VERSO (mesmo lugar onde o QR
-// costuma estar). Recebimento NAO tem ordem de coleta — nenhuma UI/logica
-// deste bloco pressupoe isso.
+// diferente sem QR — codigo morto desde a remocao do 'case rec_cnh:' em
+// renderTela(), nao alcancavel por nenhuma tela real).
+// Unificacao da rodada corretiva de 2026-09-26: a CNH do Recebimento agora
+// vive numa UNICA etapa no backend ('rec_cnh', mesmo padrao ja usado por
+// 'exp_cnh' na Expedicao — ver AtendimentoController::ETAPAS_UPLOAD/
+// SEQUENCIA_RECEBIMENTO_DOCUMENTOS). Diferenca que PERMANECE em relacao a
+// Expedicao (decisao explicita do usuario, nao uma limitacao do backend):
+// aqui a frente e o verso continuam em 2 CHAMADAS de upload separadas
+// (tipo 'cnh_frente' / 'cnh_verso'), em vez de uma unica chamada com
+// imagem_frente+imagem_verso — a leitura do QR e o disparo do
+// processamento em segundo plano so acontecem na etapa do VERSO (mesmo
+// lugar onde o QR costuma estar), e SO DEPOIS de ambos os uploads e que o
+// front chama avancar-etapa-documentos (o gate 'upload_cnh' do backend
+// exige os 2 arquivos em disco). Recebimento NAO tem ordem de coleta —
+// nenhuma UI/logica deste bloco pressupoe isso.
 // ===================================================================
 
 // -------------------- recebimento: camera dedicada (Netum, mesmo deviceId salvo do scanner de notas) --------------------
@@ -2846,11 +3012,26 @@ function telaRecCrlv() { return telaRecCaptura('Fotografe o CRLV completo'); }
 function exibirIndicadorProcessamentoCnhRec() {
     const el = document.getElementById('recBgStatus');
     if (!el || !state.rec.cnhPromise) return;
-    el.textContent = 'Validando CNH em segundo plano...';
-    el.style.display = 'block';
+    // Texto vindo do status_processamento EXPLICITO do backend (mesmo padrao
+    // de exibirIndicadorProcessamentoCnh() da Expedicao, ver comentario la —
+    // demanda migracao-vio-api-br-com-cache, 2026-09-25).
+    state.rec.cnhAoAtualizar = (status) => {
+        const alvo = document.getElementById('recBgStatus');
+        if (!alvo) return;
+        alvo.style.display = 'block';
+        alvo.textContent = rotuloStatusProcessamento(status.status_processamento);
+    };
+    if (state.rec.cnhUltimoStatus) {
+        state.rec.cnhAoAtualizar(state.rec.cnhUltimoStatus);
+    } else {
+        el.textContent = 'Enviando documento...';
+        el.style.display = 'block';
+    }
     state.rec.cnhPromise.then(resultado => {
-        if (!el.isConnected) return; // a tela ja pode ter mudado
-        el.textContent = resultado.pode_avancar
+        state.rec.cnhAoAtualizar = null;
+        const alvo = document.getElementById('recBgStatus');
+        if (!alvo) return; // a tela ja pode ter mudado
+        alvo.textContent = resultado.pode_avancar
             ? 'CNH validada'
             : 'CNH ainda pendente — será solicitado preenchimento manual se necessário';
     });
@@ -2944,9 +3125,18 @@ async function recConfirmarFoto() {
     }
 }
 
-// Diferenca intencional em relacao a Expedicao: a frente da CNH do
-// Recebimento e um UPLOAD/etapa PROPRIA (rec_cnh_frente), sem leitura de QR
-// (o QR normalmente esta no verso) — so envia a foto e avanca.
+// Diferenca intencional em relacao a Expedicao, MANTIDA nesta demanda: a
+// frente da CNH do Recebimento e enviada numa chamada de upload PROPRIA
+// (tipo 'cnh_frente'), sem leitura de QR (o QR normalmente esta no verso) —
+// so envia a foto e segue LOCALMENTE (sem chamada de rede alguma alem do
+// upload) para a captura do verso. Desde a unificacao da rodada corretiva de
+// 2026-09-26 a frente e o verso vivem na MESMA etapa 'rec_cnh' do backend —
+// isso corrigiu o bug real desta rodada: o front NAO chama mais
+// avancar-etapa-documentos nem iniciar-processamento aqui, so depois do
+// verso (ver recProcessarCnhVerso() abaixo). Chamar avancar-etapa-documentos
+// logo apos a frente falharia sempre o gate 'upload_cnh' (que exige os 2
+// arquivos em disco) e acabava desviando incorretamente para a tela de
+// preenchimento manual mesmo com o fluxo normal em andamento.
 async function recProcessarCnhFrente() {
     const frenteImg = state.rec.previewImg;
     recCamMostrarStatus('Enviando documento...');
@@ -2962,11 +3152,26 @@ async function recProcessarCnhFrente() {
         return;
     }
 
-    await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
+    ir('rec_cnh_verso');
 }
 
+// ORDEM INVERTIDA (demanda migracao-vio-api-br-com-cache, 2026-09-25,
+// decisao explicita do usuario): o QR do verso e lido/validado LOCALMENTE
+// (jsQR, sem chamada de rede) ANTES do upload do verso — evita subir uma foto
+// cujo QR ja se sabe ilegivel. A frente ja foi enviada por recProcessarCnhFrente()
+// (mesma etapa 'rec_cnh' do backend, so a sub-tela client-side mudou), entao
+// so o verso e enviado aqui. So DEPOIS deste upload e que
+// tentarAvancarEtapaDocumentos() e chamado (gate 'upload_cnh' so libera com
+// os 2 arquivos em disco) e o processamento externo (vio.api.br) e disparado.
 async function recProcessarCnhVerso() {
     const versoImg = state.rec.previewImg;
+    recCamMostrarStatus('Lendo QR code...');
+    const qr = await recLerQrDaImagemCapturada();
+    if (!qr.ok) {
+        recOferecerFallback('cnh');
+        return;
+    }
+
     recCamMostrarStatus('Enviando documento...');
     try {
         await api('documento.php', 'upload', {
@@ -2980,23 +3185,27 @@ async function recProcessarCnhVerso() {
         return;
     }
 
-    recCamMostrarStatus('Lendo QR code...');
-    const qr = await recLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        recOferecerFallback('cnh');
-        return;
-    }
-
-    // ASSINCRONO (mesmo padrao da Expedicao): dispara a validacao em segundo
-    // plano SEM aguardar e libera a captura do CRLV imediatamente.
-    state.rec.cnhPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'cnh', qr.binaryData);
+    // ASSINCRONO (mesmo padrao da Expedicao, ver comentario em
+    // expProcessarCnhVerso() sobre a Promise so resolver apos estado
+    // terminal): dispara a validacao em segundo plano SEM aguardar e libera a
+    // captura do CRLV imediatamente.
+    state.rec.cnhPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'cnh', qr.binaryData, (status) => atualizarStatusDocumento('rec', 'cnh', status));
     recCamMostrarStatus('CNH enviada para validação');
 
     await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
 }
 
+// Mesma inversao de ordem do CRLV (QR local ANTES do upload) da Expedicao —
+// decisao explicita do usuario nesta demanda.
 async function recProcessarCrlv() {
     const crlvImg = state.rec.previewImg;
+    recCamMostrarStatus('Lendo QR code...');
+    const qr = await recLerQrDaImagemCapturada();
+    if (!qr.ok) {
+        recOferecerFallback('crlv');
+        return;
+    }
+
     recCamMostrarStatus('Enviando documento...');
     try {
         await api('documento.php', 'upload', {
@@ -3010,17 +3219,10 @@ async function recProcessarCrlv() {
         return;
     }
 
-    recCamMostrarStatus('Lendo QR code...');
-    const qr = await recLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        recOferecerFallback('crlv');
-        return;
-    }
-
     // ASSINCRONO — dispara a validacao do CRLV em segundo plano e segue
     // direto para a tela de espera (rec_aguarde_documentos so aparece a
     // partir daqui, nunca entre CNH e CRLV).
-    state.rec.crlvPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'crlv', qr.binaryData);
+    state.rec.crlvPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'crlv', qr.binaryData, (status) => atualizarStatusDocumento('rec', 'crlv', status));
     recCamMostrarStatus('CRLV enviado para validação');
 
     await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
@@ -3150,16 +3352,37 @@ async function recConfirmarCrlvManual() {
 
 // -------------------- recebimento: tela de espera apos CRLV confirmado --------------------
 
+// Estados intermediarios EXPLICITOS do backend (ENVIANDO/PROCESSANDO_LEITURA/
+// PROCESSANDO_COMPARACAO) — demanda migracao-vio-api-br-com-cache,
+// 2026-09-25, item 4 do escopo (nunca inferidos no front), mesmo padrao ja
+// usado em telaExpAguardeDocumentos().
 function telaRecAguardeDocumentos() {
-    return `<div class="titulo">Estamos validando seus documentos. Aguarde.</div>`;
+    return `<div class="titulo">Estamos validando seus documentos. Aguarde.</div>
+        <div class="status-leitura" id="recAguardeCnhStatus"></div>
+        <div class="status-leitura" id="recAguardeCrlvStatus"></div>`;
 }
 
 async function processarAguardeDocumentosRec() {
+    state.rec.cnhAoAtualizar = (status) => {
+        const el = document.getElementById('recAguardeCnhStatus');
+        if (el) el.textContent = 'CNH: ' + rotuloStatusProcessamento(status.status_processamento);
+    };
+    state.rec.crlvAoAtualizar = (status) => {
+        const el = document.getElementById('recAguardeCrlvStatus');
+        if (el) el.textContent = 'CRLV: ' + rotuloStatusProcessamento(status.status_processamento);
+    };
+    if (state.rec.cnhUltimoStatus) state.rec.cnhAoAtualizar(state.rec.cnhUltimoStatus);
+    if (state.rec.crlvUltimoStatus) state.rec.crlvAoAtualizar(state.rec.crlvUltimoStatus);
+
     const resultado = await aguardarDocumentos(state.idAtendimento, state.rec.cnhPromise, state.rec.crlvPromise);
+    state.rec.cnhAoAtualizar = null;
+    state.rec.crlvAoAtualizar = null;
     state.rec.cnhPromise = null;
     state.rec.crlvPromise = null;
-    if (resultado.cnh.pode_avancar) state.rec.cnhOrigem = resultado.cnh.aviso_trial ? 'VIO_TRIAL' : 'VIO_VALIDADO';
-    if (resultado.crlv.pode_avancar) state.rec.crlvOrigem = resultado.crlv.aviso_trial ? 'VIO_TRIAL' : 'VIO_VALIDADO';
+    // Origem SEMPRE vinda explicitamente do backend (nunca inferida a partir
+    // de aviso_trial — ver mesma correcao em processarAguardeDocumentosExp()).
+    if (resultado.cnh.pode_avancar) state.rec.cnhOrigem = resultado.cnh.origem || 'VIO_VALIDADO';
+    if (resultado.crlv.pode_avancar) state.rec.crlvOrigem = resultado.crlv.origem || 'VIO_VALIDADO';
     if (state.tela !== 'rec_aguarde_documentos') return; // usuario ja saiu da tela (ex.: cancelou)
     await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
 }

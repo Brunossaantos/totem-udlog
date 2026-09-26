@@ -122,10 +122,12 @@ $rConcluir = rodar($dir . '/_caso_concluir_digitalizacao.php', [$idTotem, $idAtR
 afirmar('[Recebimento] concluirDigitalizacao aceita (1-5 notas, todas com numero)', str_contains($rConcluir['saida'], '"sucesso":true'));
 afirmar("[Recebimento] proxima etapa e 'cliente' (nenhuma nota identificou automaticamente)", str_contains($rConcluir['saida'], '"etapa":"cliente"'));
 
-// --- identificacao manual do cliente (etapa 'cliente' -> 'rec_cnh_frente') ---
+// --- identificacao manual do cliente (etapa 'cliente' -> 'rec_cnh', unica
+//     etapa desde a rodada corretiva de migracao-vio-api-br-com-cache de
+//     2026-09-26 -- antes 'rec_cnh_frente') ---
 $dadosCliente = base64_encode(json_encode(['nome' => 'CLIENTE E2E LTDA', 'cnpj' => '11222333000181']));
 $rCliente = rodar($dir . '/_caso_salvar_etapa.php', [$idTotem, $idAtRec, 'cliente', $dadosCliente]);
-afirmar('[Recebimento] cliente identificado manualmente, avanca para rec_cnh_frente', str_contains($rCliente['saida'], '"sucesso":true'));
+afirmar('[Recebimento] cliente identificado manualmente, avanca para rec_cnh', str_contains($rCliente['saida'], '"sucesso":true'));
 
 // --- upload CNH frente/verso + CRLV (mock) ---
 $imagemJpegBase64 = 'data:image/jpeg;base64,' . base64_encode(
@@ -133,13 +135,13 @@ $imagemJpegBase64 = 'data:image/jpeg;base64,' . base64_encode(
 );
 $rUploadCnhF = rodar($dir . '/_caso_upload_documento.php', [$idTotem, $idAtRec, 'cnh_frente', $imagemJpegBase64]);
 afirmar('[Recebimento] upload CNH frente (mock)', str_contains($rUploadCnhF['saida'], '"sucesso":true'));
-$rAvanca1 = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtRec]);
-afirmar('[Recebimento] rec_cnh_frente -> rec_cnh_verso', str_contains($rAvanca1['saida'], '"etapa":"rec_cnh_verso"'));
+$rAvancaBloqueado = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtRec]);
+afirmar('[Recebimento] rec_cnh -> rec_crlv BLOQUEADO so com a frente (gate upload_cnh exige os 2 arquivos, etapa unica desde 2026-09-26)', str_contains($rAvancaBloqueado['saida'], 'documentos pendentes'));
 
 $rUploadCnhV = rodar($dir . '/_caso_upload_documento.php', [$idTotem, $idAtRec, 'cnh_verso', $imagemJpegBase64]);
 afirmar('[Recebimento] upload CNH verso (mock)', str_contains($rUploadCnhV['saida'], '"sucesso":true'));
 $rAvanca2 = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtRec]);
-afirmar('[Recebimento] rec_cnh_verso -> rec_crlv', str_contains($rAvanca2['saida'], '"etapa":"rec_crlv"'));
+afirmar('[Recebimento] rec_cnh -> rec_crlv (apos os 2 lados salvos)', str_contains($rAvanca2['saida'], '"etapa":"rec_crlv"'));
 
 $rUploadCrlv = rodar($dir . '/_caso_upload_documento.php', [$idTotem, $idAtRec, 'crlv', $imagemJpegBase64]);
 afirmar('[Recebimento] upload CRLV (mock)', str_contains($rUploadCrlv['saida'], '"sucesso":true'));

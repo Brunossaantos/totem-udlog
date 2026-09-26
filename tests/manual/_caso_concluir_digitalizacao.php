@@ -22,6 +22,16 @@ use App\Rn\TalentRn;
 use App\Rn\TalentClient;
 use App\Controller\AtendimentoController;
 
+// Ponte DB_NAME herdado via putenv() do processo pai (banco `qa_`
+// descartavel, quando aplicavel) para $_ENV -- ver
+// qaDbTrechoPonteEnvSubprocesso() em tests/manual/qa_db_bootstrap.php. Sem
+// efeito (no-op) quando nenhum processo pai fez putenv('DB_NAME=...')
+// (ex.: teste_e2e_recebimento_expedicao_mock.php, que continua conectando
+// normalmente no banco configurado em .env).
+if (getenv('DB_NAME') !== false) {
+    $_ENV['DB_NAME'] = getenv('DB_NAME');
+}
+
 $dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
 $dotenv->load();
 

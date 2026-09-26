@@ -11,8 +11,15 @@
  *
  * Fixtures 100% sinteticas/descartaveis (banco de desenvolvimento real, sem
  * dado pessoal real — placas/CPF sao fixtures ja usadas por outras suites
- * deste projeto). NUNCA chama VIO/Talent/Serpro real. Marcador desta rodada:
- * MARCADOR_SANIT_0920_* (ver mocks inlinados abaixo).
+ * deste projeto). NUNCA chama VIO/Talent/Serpro/vio.api.br real. Marcador
+ * desta rodada: MARCADOR_SANIT_0920_* (ver mocks inlinados abaixo).
+ *
+ * Pontos 1/2 reescritos na rodada corretiva de migracao-vio-api-br-com-cache
+ * (2026-09-26) para refletir o fluxo NOVO (App\Rn\VioApiBrClient) — Ponto 1
+ * agora cobre o catch em torno de `new VioApiBrClient()` (era
+ * `VioDecodeClient`), Ponto 2 agora cobre o catch em torno de
+ * App\Rn\DocumentoRn::calcularFingerprintVioApiBr() (era validarCnh/
+ * validarCrlv, metodos que o fluxo novo nunca mais chama).
  *
  * IMPORTANTE (rodada curta de /01-implementacao de 2026-09-25, achado
  * bloqueante de reprodutibilidade de /02-testes de 24/09 e 25/09): este
@@ -37,20 +44,46 @@
  * `git ls-files`), nao fazem parte do achado de reprodutibilidade.
  *
  * Uso: php tests/manual/teste_sanitizacao_logs_documento_nota.php
+ *
+ * IMPORTANTE (rodada corretiva de migracao-vio-api-br-com-cache, 2026-09-26):
+ * este arquivo rodava antes contra o banco de DEV compartilhado
+ * `udlog_totem`, que NUNCA recebeu as migrations 015/016 desta demanda --
+ * batia em "Column not found". Passa a rodar contra um banco
+ * `qa_`-prefixado DESCARTAVEL PROPRIO (mesmo helper
+ * tests/manual/qa_db_bootstrap.php ja usado pelas 3 suites novas), criado
+ * do zero e dropado ao final. Os subprocessos gerados abaixo (proc_open)
+ * recebem DB_NAME/demais envs herdados via putenv() do processo pai atraves
+ * de qaDbTrechoPonteEnvSubprocesso() (ver qa_db_bootstrap.php).
  */
 
-require_once __DIR__ . '/../../vendor/autoload.php';
+require_once __DIR__ . '/qa_db_bootstrap.php';
 require_once __DIR__ . '/_fixtures_talent.php';
 require_once __DIR__ . '/_fixtures_identificar_cliente.php';
 
-use Dotenv\Dotenv;
-use Util\Conexao;
 use App\Dao\AtendimentoDao;
 
-$dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
-$dotenv->load();
-
 $raizProjeto = dirname(__DIR__, 2);
+
+$nomeBancoSanit0920 = null;
+[$pdo, $nomeBancoSanit0920] = qaDbCriar('sanitizacao_logs_documento_nota');
+qaDbCorrigirEnumsMigration015($pdo);
+// $_ENV (usado neste processo diretamente, ex.: $pdo/$atendimentoDaoGlobal
+// abaixo) + putenv() (herdado pelos subprocessos via proc_open()).
+$_ENV['DB_NAME'] = $nomeBancoSanit0920;
+putenv('DB_NAME=' . $nomeBancoSanit0920);
+register_shutdown_function(function () use (&$nomeBancoSanit0920) {
+    if ($nomeBancoSanit0920 !== null) {
+        qaDbDropar($nomeBancoSanit0920);
+        echo "\n(banco de teste {$nomeBancoSanit0920} dropado)\n";
+        $nomeBancoSanit0920 = null;
+    }
+});
+
+// tb_empresa nao vem semeada em schema.sql (as seeds de
+// sql/migrations/008_tb_empresa_totem_vinculo.sql sao aplicadas so no banco
+// de dev real) -- fixture sintetica propria deste banco `qa_` descartavel.
+$pdo->exec("INSERT INTO tb_empresa (nome, cnpj) VALUES ('Empresa QA Sanitizacao', '00000000000272')");
+$idEmpresaQaSanit0920 = (int) $pdo->lastInsertId();
 
 // ============================================================
 // Mocks inlinados (conteudo antes em _mocks_sanitizacao_logs.php) — codigo-
@@ -102,8 +135,15 @@ function todosOsMarcadores(): array
 }
 
 // ---------------------------------------------------------------------
-// Catch 2 (DocumentoController::iniciarProcessamento, validarCnh/validarCrlv)
-// e Catch 3 (DocumentoController::preencherManual) — subclasse de DocumentoRn.
+// Catch 2 (DocumentoController::iniciarProcessamento, catch em torno de
+// App\Rn\DocumentoRn::calcularFingerprintVioApiBr() — reescrito na rodada
+// corretiva de migracao-vio-api-br-com-cache, 2026-09-26: o fluxo novo
+// NUNCA mais chama validarCnh()/validarCrlv() dentro de iniciarProcessamento
+// — esses metodos permanecem intocados so para o fluxo antigo/rollback do
+// Serpro, nunca mais exercitados por este caminho) e Catch 3
+// (DocumentoController::preencherManual, INALTERADO — preencherManualCnh/
+// Crlv continuam sendo os mesmos metodos de sempre) — subclasse de
+// DocumentoRn.
 // ---------------------------------------------------------------------
 final class DocumentoRnMarcadorThrow extends \App\Rn\DocumentoRn
 {
@@ -117,14 +157,9 @@ final class DocumentoRnMarcadorThrow extends \App\Rn\DocumentoRn
         return false;
     }
 
-    public function validarCnh(array $atendimento, \App\Rn\VioDecodeClient $vio, string $bytesQrBrutos): array
+    public function calcularFingerprintVioApiBr(string $bytesQrBrutos): array
     {
-        throw new \RuntimeException(mensagemMarcadaCompleta('validarCnh'));
-    }
-
-    public function validarCrlv(array $atendimento, \App\Rn\VioDecodeClient $vio, string $bytesQrBrutos): array
-    {
-        throw new \RuntimeException(mensagemMarcadaCompleta('validarCrlv'));
+        throw new \RuntimeException(mensagemMarcadaCompleta('calcularFingerprintVioApiBr'));
     }
 
     public function preencherManualCnh(array $atendimento, string $nome, string $cpfBruto, string $dataValidadeBruta): array
@@ -199,31 +234,46 @@ function gerarScriptTemporario(string $corpo, string $raizProjeto, string $prefi
     return $arquivo;
 }
 
-// Corpo antes em _caso_iniciar_processamento_vio_indisponivel.php.
+// Corpo antes em _caso_iniciar_processamento_vio_indisponivel.php. Reescrito
+// na rodada corretiva de migracao-vio-api-br-com-cache (2026-09-26): forca
+// App\Rn\VioApiBrClient (NUNCA mais App\Rn\VioDecodeClient) a falhar no
+// construtor. Usa tipo='crlv' fixo (dispensa JPEG estruturalmente valido —
+// ver docblock de _caso_iniciar_processamento_vio_indisponivel.php para o
+// mesmo raciocinio) com um crlv.jpg de fixture ja presente em disco (criado
+// pelo teste pai) e HMAC do fingerprint configurado via putenv() herdado.
 $corpoVioIndisponivel = <<<'CORPOVIO'
 use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
+use App\Dao\VioApiBrCacheDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
+
+foreach (getenv() as $qaChaveHerdada => $qaValorHerdado) {
+    if (!array_key_exists($qaChaveHerdada, $_ENV)) {
+        $_ENV[$qaChaveHerdada] = $qaValorHerdado;
+    }
+}
 
 $dotenv = Dotenv::createImmutable(%%RAIZ%%);
 $dotenv->load();
 
-// Forca VioDecodeClient() a lancar RuntimeException no construtor (ver
-// App\Rn\VioDecodeClient::__construct) — nenhuma chamada de rede acontece.
-unset($_ENV['VIO_AMBIENTE']);
-putenv('VIO_AMBIENTE');
+// Fail-closed do NOVO cliente: ausencia de VIO_API_BR_BASE_URL/API_KEY forca
+// `new VioApiBrClient()` a lancar RuntimeException no construtor — nenhuma
+// chamada de rede acontece.
+unset($_ENV['VIO_API_BR_BASE_URL'], $_ENV['VIO_API_BR_API_KEY']);
+putenv('VIO_API_BR_BASE_URL');
+putenv('VIO_API_BR_API_KEY');
 
 $pdo = Conexao::obter();
 
 $idTotem = (int) ($argv[1] ?? 0);
 $idAtendimento = (int) ($argv[2] ?? 0);
-$tipo = $argv[3] ?? 'cnh';
+$tipo = 'crlv';
 
 $atendimentoDao = new AtendimentoDao($pdo);
-$documentoRn = new DocumentoRn(new VioCacheDao($pdo), $atendimentoDao);
+$documentoRn = new DocumentoRn(new VioCacheDao($pdo), $atendimentoDao, new VioApiBrCacheDao($pdo));
 $controller = new DocumentoController($atendimentoDao, $documentoRn, $pdo);
 
 $bytesGarbage = random_bytes(40);
@@ -239,7 +289,14 @@ $controller->iniciarProcessamento([
 ], $idTotem);
 CORPOVIO;
 
-// Corpo antes em _caso_iniciar_processamento_marcador.php.
+// Corpo antes em _caso_iniciar_processamento_marcador.php. Reescrito na
+// rodada corretiva de migracao-vio-api-br-com-cache (2026-09-26): o alvo
+// agora e o catch em torno de
+// App\Rn\DocumentoRn::calcularFingerprintVioApiBr() (ponto MAIS CEDO do
+// fluxo novo que ainda delega a DocumentoRn — nunca mais
+// validarCnh()/validarCrlv(), que o fluxo novo nao chama). Nenhuma env de
+// VIO e necessaria aqui (a excecao acontece antes de qualquer uso real
+// delas).
 $corpoMarcadorValidar = <<<'CORPOMARCADOR'
 use Dotenv\Dotenv;
 use Util\Conexao;
@@ -247,15 +304,14 @@ use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
 use App\Controller\DocumentoController;
 
+foreach (getenv() as $qaChaveHerdada => $qaValorHerdado) {
+    if (!array_key_exists($qaChaveHerdada, $_ENV)) {
+        $_ENV[$qaChaveHerdada] = $qaValorHerdado;
+    }
+}
+
 $dotenv = Dotenv::createImmutable(%%RAIZ%%);
 $dotenv->load();
-
-// VioDecodeClient precisa inicializar com sucesso (nao e o alvo deste catch)
-// -- valores fake bastam, pois validarCnh()/validarCrlv() e quem lanca a
-// excecao ANTES de qualquer chamada real ao VIO.
-$_ENV['VIO_AMBIENTE'] = 'trial';
-$_ENV['VIO_TRIAL_BEARER'] = 'bearer-fake-teste';
-$_ENV['VIO_TRIAL_DECODE_URL'] = 'http://127.0.0.1:0/inexistente';
 
 $pdo = Conexao::obter();
 
@@ -287,6 +343,12 @@ use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
 use App\Controller\DocumentoController;
+
+foreach (getenv() as $qaChaveHerdada => $qaValorHerdado) {
+    if (!array_key_exists($qaChaveHerdada, $_ENV)) {
+        $_ENV[$qaChaveHerdada] = $qaValorHerdado;
+    }
+}
 
 $dotenv = Dotenv::createImmutable(%%RAIZ%%);
 $dotenv->load();
@@ -336,6 +398,12 @@ use App\Dao\ClienteDao;
 use App\Dao\RateLimitOcrDao;
 use App\Controller\NotaController;
 
+foreach (getenv() as $qaChaveHerdada => $qaValorHerdado) {
+    if (!array_key_exists($qaChaveHerdada, $_ENV)) {
+        $_ENV[$qaChaveHerdada] = $qaValorHerdado;
+    }
+}
+
 $dotenv = Dotenv::createImmutable(%%RAIZ%%);
 $dotenv->load();
 
@@ -371,6 +439,12 @@ use App\Dao\ClienteDao;
 use App\Dao\RateLimitOcrDao;
 use App\Controller\NotaController;
 
+foreach (getenv() as $qaChaveHerdada => $qaValorHerdado) {
+    if (!array_key_exists($qaChaveHerdada, $_ENV)) {
+        $_ENV[$qaChaveHerdada] = $qaValorHerdado;
+    }
+}
+
 $dotenv = Dotenv::createImmutable(%%RAIZ%%);
 $dotenv->load();
 
@@ -401,7 +475,6 @@ $arquivosTemporariosLimpar[] = $scriptPreencherManual = gerarScriptTemporario($c
 $arquivosTemporariosLimpar[] = $scriptIdentificarCliente = gerarScriptTemporario($codigoMocksSanitizacao . "\n" . $corpoIdentificarCliente, $raizProjeto, 'identificar_cliente');
 $arquivosTemporariosLimpar[] = $scriptDefinirNumero = gerarScriptTemporario($codigoMocksSanitizacao . "\n" . $corpoDefinirNumero, $raizProjeto, 'definir_numero');
 
-$pdo = Conexao::obter();
 $atendimentoDaoGlobal = new AtendimentoDao($pdo);
 
 /**
@@ -508,45 +581,62 @@ function verificarPontoSanitizado(
 $idsAtendimentoLimpar = [];
 $idsTotemLimpar = [];
 
+// HMAC do fingerprint do cache vio.api.br — precisa estar presente no
+// ambiente dos subprocessos que exercitam o fluxo NOVO de
+// iniciarProcessamento() ate o ponto do CAS/montagem (Ponto 1), herdado via
+// proc_open() a partir deste processo pai (chave FIXA/sintetica, nunca a
+// chave real).
+putenv('VIO_API_BR_CACHE_HMAC_VERSION=1');
+putenv('VIO_API_BR_CACHE_HMAC_KEY_V1=' . str_repeat('ab', 32));
+$storagePathSanit0920 = rtrim($_ENV['STORAGE_PATH'] ?? '', '/');
+
 // ============================================================
 // Ponto 1 — DocumentoController::iniciarProcessamento, catch em torno de
-// `new VioDecodeClient()` (script gerado em tempo de execucao, reaproveitado
-// sem alteracao de comportamento -- mensagem naturalmente fixa/nao sensivel,
-// usada aqui como "marcador" dela mesma: confirma que o texto cru NUNCA
-// aparece no log, so a classe).
+// `new VioApiBrClient()` (reescrito na rodada corretiva de
+// migracao-vio-api-br-com-cache, 2026-09-26 — NUNCA mais
+// App\Rn\VioDecodeClient). Usa tipo='crlv' fixo (ver docblock de
+// $corpoVioIndisponivel acima) com um crlv.jpg de fixture real em disco.
 // ============================================================
-echo "\n=== Ponto 1: DocumentoController::iniciarProcessamento (init VioDecodeClient) ===\n";
-$idTotemP1 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P1_' . bin2hex(random_bytes(3)), 1);
+echo "\n=== Ponto 1: DocumentoController::iniciarProcessamento (init VioApiBrClient) ===\n";
+$idTotemP1 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P1_' . bin2hex(random_bytes(3)), $idEmpresaQaSanit0920);
 $idsTotemLimpar[] = $idTotemP1;
-$idP1 = talentCriarAtendimentoExpedicaoEtapa($atendimentoDaoGlobal, $idTotemP1, 'exp_cnh');
+$idP1 = talentCriarAtendimentoExpedicaoEtapa($atendimentoDaoGlobal, $idTotemP1, 'exp_crlv');
 $idsAtendimentoLimpar[] = $idP1;
+$pastaP1 = 'sanit0920_p1_' . bin2hex(random_bytes(4));
+$atendimentoDaoGlobal->definirPasta($idP1, $pastaP1);
+@mkdir("{$storagePathSanit0920}/{$pastaP1}", 0750, true);
+file_put_contents("{$storagePathSanit0920}/{$pastaP1}/crlv.jpg", 'FIXTURE_NAO_E_JPEG_REAL_SEM_VALIDACAO_DE_FORMATO');
 
-$mensagemCruaP1 = 'VIO_AMBIENTE ausente ou invalido (esperado "trial" ou "production")';
+$mensagemCruaP1 = 'VIO_API_BR_BASE_URL/VIO_API_BR_API_KEY ausentes';
 $resP1 = verificarPontoSanitizado(
     'Ponto1-iniciarProcessamento-initVio',
     $scriptVioIndisponivel,
-    [(string) $idTotemP1, (string) $idP1, 'cnh'],
-    "iniciar-processamento (inicializar VioDecodeClient) id_atendimento={$idP1} tipo=cnh",
+    [(string) $idTotemP1, (string) $idP1, 'crlv'],
+    "iniciar-processamento (inicializar VioApiBrClient) id_atendimento={$idP1} tipo=crlv",
     'RuntimeException',
     [$mensagemCruaP1]
 );
 afirmar('Ponto1: HTTP 503 preservado', str_contains($resP1['stdout'], 'HTTP_CODE:503'));
+@unlink("{$storagePathSanit0920}/{$pastaP1}/crlv.jpg");
+@rmdir("{$storagePathSanit0920}/{$pastaP1}");
 
 // ============================================================
 // Ponto 2 — DocumentoController::iniciarProcessamento, catch em torno de
-// validarCnh()/validarCrlv() (DocumentoRnMarcadorThrow injetado).
+// App\Rn\DocumentoRn::calcularFingerprintVioApiBr() (DocumentoRnMarcadorThrow
+// injetado) — reescrito na rodada corretiva de migracao-vio-api-br-com-cache
+// (2026-09-26): o fluxo novo nunca mais chama validarCnh()/validarCrlv().
 // ============================================================
-echo "\n=== Ponto 2: DocumentoController::iniciarProcessamento (validarCnh/validarCrlv) ===\n";
-$idTotemP2 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P2_' . bin2hex(random_bytes(3)), 1);
+echo "\n=== Ponto 2: DocumentoController::iniciarProcessamento (calcularFingerprintVioApiBr) ===\n";
+$idTotemP2 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P2_' . bin2hex(random_bytes(3)), $idEmpresaQaSanit0920);
 $idsTotemLimpar[] = $idTotemP2;
 $idP2 = talentCriarAtendimentoExpedicaoEtapa($atendimentoDaoGlobal, $idTotemP2, 'exp_cnh');
 $idsAtendimentoLimpar[] = $idP2;
 
 $resP2 = verificarPontoSanitizado(
-    'Ponto2-iniciarProcessamento-validarCnh',
+    'Ponto2-iniciarProcessamento-fingerprint',
     $scriptMarcadorValidar,
     [(string) $idTotemP2, (string) $idP2, 'cnh'],
-    "iniciar-processamento id_atendimento={$idP2} tipo=cnh",
+    "iniciar-processamento (fingerprint) id_atendimento={$idP2} tipo=cnh",
     'RuntimeException',
     todosOsMarcadores()
 );
@@ -556,7 +646,7 @@ afirmar('Ponto2: HTTP 500 preservado', str_contains($resP2['stdout'], 'HTTP_CODE
 // Ponto 3 — DocumentoController::preencherManual (DocumentoRnMarcadorThrow).
 // ============================================================
 echo "\n=== Ponto 3: DocumentoController::preencherManual ===\n";
-$idTotemP3 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P3_' . bin2hex(random_bytes(3)), 1);
+$idTotemP3 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P3_' . bin2hex(random_bytes(3)), $idEmpresaQaSanit0920);
 $idsTotemLimpar[] = $idTotemP3;
 $idP3 = talentCriarAtendimentoExpedicaoEtapa($atendimentoDaoGlobal, $idTotemP3, 'exp_cnh');
 $idsAtendimentoLimpar[] = $idP3;
@@ -575,7 +665,7 @@ afirmar('Ponto3: HTTP 500 preservado', str_contains($resP3['stdout'], 'HTTP_CODE
 // Ponto 4 — NotaController::identificarCliente (NotaFiscalRnMarcadorThrow).
 // ============================================================
 echo "\n=== Ponto 4: NotaController::identificarCliente ===\n";
-$idTotemP4 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P4_' . bin2hex(random_bytes(3)), 1);
+$idTotemP4 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P4_' . bin2hex(random_bytes(3)), $idEmpresaQaSanit0920);
 $idsTotemLimpar[] = $idTotemP4;
 $idP4 = criarAtendimentoTeste($pdo, $idTotemP4);
 $idsAtendimentoLimpar[] = $idP4;
@@ -596,7 +686,7 @@ afirmar('Ponto4: HTTP 500 preservado', str_contains($resP4['stdout'], 'HTTP_CODE
 // (NotaFiscalRnMarcadorThrow).
 // ============================================================
 echo "\n=== Ponto 5: NotaController::definirNumero (ramo else) ===\n";
-$idTotemP5 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P5_' . bin2hex(random_bytes(3)), 1);
+$idTotemP5 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P5_' . bin2hex(random_bytes(3)), $idEmpresaQaSanit0920);
 $idsTotemLimpar[] = $idTotemP5;
 $idP5 = criarAtendimentoTeste($pdo, $idTotemP5);
 $idsAtendimentoLimpar[] = $idP5;
@@ -623,8 +713,12 @@ $arquivoDocumentoController = __DIR__ . '/../../app/Controller/DocumentoControll
 $conteudoOriginal = file_get_contents($arquivoDocumentoController);
 $md5Original = md5($conteudoOriginal);
 
-$trechoSanitizado = '$this->logFalhaTecnica("iniciar-processamento id_atendimento={$idAtendimento} tipo={$tipo}", $e);';
-$trechoCru = "error_log('iniciar-processamento: falha nao prevista: ' . \$e->getMessage());";
+// Alvo atualizado na rodada corretiva de migracao-vio-api-br-com-cache
+// (2026-09-26) — a linha sanitizada original (catch de validarCnh/
+// validarCrlv) nao existe mais no fluxo novo; o equivalente hoje e o catch
+// em torno de calcularFingerprintVioApiBr() (mesmo Ponto 2 acima).
+$trechoSanitizado = '$this->logFalhaTecnica("iniciar-processamento (fingerprint) id_atendimento={$idAtendimento} tipo={$tipo}", $e);';
+$trechoCru = "error_log('iniciar-processamento (fingerprint): falha nao prevista: ' . \$e->getMessage());";
 
 if (!str_contains($conteudoOriginal, $trechoSanitizado)) {
     afirmar('Prova negativa: trecho sanitizado esperado encontrado no arquivo original (pre-condicao)', false);
@@ -659,7 +753,7 @@ if (!str_contains($conteudoOriginal, $trechoSanitizado)) {
 // direto para nota_nao_encontrada via ordem sem nota associada.
 // ============================================================
 echo "\n=== Regressao pontual: comparacoes seguras getMessage() em definirNumero ===\n";
-$idTotemP6 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P6_' . bin2hex(random_bytes(3)), 1);
+$idTotemP6 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P6_' . bin2hex(random_bytes(3)), $idEmpresaQaSanit0920);
 $idsTotemLimpar[] = $idTotemP6;
 $idP6 = criarAtendimentoTeste($pdo, $idTotemP6);
 $idsAtendimentoLimpar[] = $idP6;
