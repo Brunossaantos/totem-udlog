@@ -1707,3 +1707,20 @@ leiam este handoff.
 ### VEREDITO FINAL
 
 **APROVADO.** Pronta para `/04-commit-e-push`.
+
+
+## Commit funcional registrado (2026-09-28)
+
+Hash do commit funcional desta demanda: `9da251678d153f86987931857fa2e5b7e267ad77`
+Mensagem: "refactor(vio): remove legado Serpro e reforca processamento de documentos"
+Autor/committer: Bruno Santos <brunossaantos@gmail.com>
+Branch: main. Sem force push. Sem atribuicao de IA.
+
+27 arquivos no commit: 10 modificados, 13 removidos (legado Serpro/Prodesp,
+5 suites de teste exclusivas do Serpro, teste de rede real e seu helper,
+3 testes de regra de negocio ja substituidos, 3 metodos mortos do DAO), 4
+novos (handoff desta demanda + 2 suites de teste novas). Itens de higiene
+ja autorizados (.claude/skills/, docs/indexTotem.html, tests/nf_teste/,
+docs/CNH-e.pdf.pdf, docs/HMY-1J20.pdf) removidos do disco em rodada
+anterior, nunca versionados -- nao aparecem no diff deste commit por nao
+terem sido rastreados em nenhum momento.
