@@ -508,7 +508,7 @@ function voltarParaLgpdPorAceiteExpirado(mensagem) {
 // -------------------- tela: inicio --------------------
 
 function telaHome() {
-    return `<div class="titulo">Selecione o tipo de atendimento</div>
+    return `<div class="titulo titulo-home">Selecione o tipo de atendimento</div>
         <div class="grupo-botoes">
             <button class="tile tile-principal" onclick="selecionarTipo('expedicao')">Expedição</button>
             <button class="tile tile-secundaria" onclick="selecionarTipo('recebimento')">Recebimento</button>

@@ -32,15 +32,19 @@ body {
     padding: 16px 20px 0;
     flex-shrink: 0;
 }
+/* Botao SOLIDO vermelho (pedido explicito do usuario, 2026-09-28)
+   mesmo tom semantico ja usado/aprovado em .btn-alerta (#a32d2d, ja
+   confirmado acessivel), agora com fundo solido + texto branco em vez
+   de outline, para se destacar como acao de cancelamento em todas as
+   telas do fluxo (exceto a tela inicial, onde nao aparece). */
 .btn-cancelar {
-    background: none;
+    background: #a32d2d;
     border: none;
-    /* --text-secondary (#878789) reprovaria AA neste tamanho de fonte
-       (15px, abaixo do limiar de ~18-24px recomendado pela skill de
-       paleta para uso de texto secundario) — mantido --text-primary por
-       legibilidade, conforme regra de contraste da propria skill. */
-    color: var(--text-primary);
+    border-radius: 10px;
+    color: #FFFFFF;
     font-size: 15px;
+    font-weight: 600;
+    padding: 10px 18px;
     cursor: pointer;
 }
 .tela {
@@ -53,6 +57,7 @@ body {
     gap: 18px;
 }
 .titulo { font-size: 22px; font-weight: 600; text-align: center; color: var(--text-primary); }
+.titulo-home { font-size: 34px; font-weight: 800; color: #000000; }
 /* mesma ressalva de contraste do .btn-cancelar acima — 15px fica abaixo do
    limiar seguro para --text-secondary, mantido --text-primary. */
 .subtitulo { font-size: 15px; color: var(--text-primary); text-align: center; }
@@ -71,10 +76,10 @@ body {
 .btn-alerta { background: var(--surface); color: #a32d2d; border: 2px solid #a32d2d; }
 .btn-primario:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.grupo-botoes { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 340px; margin: 0 auto; }
+.grupo-botoes { display: flex; flex-direction: column; gap: 20px; width: 100%; max-width: min(90%, 600px); margin: 0 auto; }
 .grupo-botoes-linha { display: flex; gap: 12px; justify-content: center; }
 
-.tile { width: 100%; height: 140px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 20px; font-weight: 600; cursor: pointer; }
+.tile { width: 100%; height: 200px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 27px; font-weight: 600; cursor: pointer; }
 .tile-principal { background: var(--action-primary); color: var(--action-primary-text); border: 2px solid var(--action-primary); }
 .tile-secundaria { background: var(--surface); color: var(--brand-primary); border: 2px solid var(--brand-primary); }
 
@@ -144,6 +149,12 @@ input.campo-texto {
 .caixa-scanner video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .guia-scanner { position: absolute; inset: 8%; border: 2px dashed rgba(255,255,255,0.85); border-radius: 8px; pointer-events: none; }
 .previa-nota { width: 100%; max-width: 360px; margin: 0 auto; display: block; border-radius: 12px; object-fit: contain; background: #000; flex-shrink: 0; }
+/* Caixa de digitalizacao de notas (Recebimento) ampliada a pedido do usuario —
+   seletor por ID (maior especificidade que a classe) atinge so essas 2
+   instancias, sem afetar #expCamCaixa/#expCamPreview (CNH/CRLV da Expedicao,
+   que continuam em 360px via .caixa-scanner/.previa-nota). .guia-scanner usa
+   inset em % e escala junto automaticamente. */
+#caixaScanner, #previaNota { max-width: min(92%, 900px); }
 .status-scanner { font-size: 13px; color: var(--text-primary); text-align: center; }
 /* excecoes semanticas mantidas (sucesso/erro), texto proprio ja indica o
    estado (nunca so cor). */
@@ -156,11 +167,11 @@ input.campo-texto {
 
 .teclado { display: none; flex-shrink: 0; border-top: 1px solid var(--border); background: #eef1f4; padding: 8px; }
 .teclado.aberto { display: block; }
-.linha-teclas { display: flex; gap: 4px; margin-bottom: 4px; justify-content: center; }
-.tecla { flex: 1; max-width: 46px; height: 40px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 14px; color: var(--text-primary); cursor: pointer; }
-.tecla-apagar { max-width: 60px; background: #dbe4ea; }
-.tecla-espaco { flex: 3; max-width: 260px; font-size: 12px; }
-.tecla-ok { max-width: 80px; background: var(--action-primary); color: var(--action-primary-text); }
+.linha-teclas { display: flex; gap: 8px; margin-bottom: 4px; justify-content: center; }
+.tecla { flex: 1; max-width: 57px; height: 64px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 19px; color: var(--text-primary); cursor: pointer; }
+.tecla-apagar { max-width: 73px; background: #dbe4ea; }
+.tecla-espaco { flex: 3; max-width: 322px; font-size: 16px; }
+.tecla-ok { max-width: 99px; background: var(--action-primary); color: var(--action-primary-text); }
 
 /* scrim neutro (baseado em --text-primary, rgb(58,58,58)) — evita
    reintroduzir o navy antigo (#0b2a45) so como cor de fundo semi-
