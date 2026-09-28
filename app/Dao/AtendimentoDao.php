@@ -223,56 +223,6 @@ class AtendimentoDao
     }
 
     /**
-     * Transicao ATOMICA para PROCESSANDO: so tem efeito se o status atual for
-     * PENDENTE/ERRO, OU se estiver PROCESSANDO ha mais de $timeoutSegundos
-     * (tentativa obsoleta/zumbi, tratada como se fosse ERRO). Grava um novo
-     * tentativa_id junto — a escrita do resultado final (ver
-     * gravarResultadoProcessamento) so tem efeito se esse mesmo tentativa_id
-     * ainda estiver gravado no momento da escrita (controle de versao
-     * otimista, impede que uma resposta antiga sobrescreva uma tentativa mais
-     * nova). Retorna true se ESTA chamada adquiriu o direito de processar.
-     */
-    public function iniciarProcessamento(int $id, string $documento, string $tentativaId, int $timeoutSegundos): bool
-    {
-        $c = $this->colunasStatusProcessamento($documento);
-
-        $stmt = $this->pdo->prepare("
-            UPDATE tb_atendimento
-            SET {$c['status']} = 'PROCESSANDO', {$c['tentativa']} = :tentativa, {$c['iniciado_em']} = NOW()
-            WHERE id_atendimento = :id
-              AND (
-                    {$c['status']} IN ('PENDENTE', 'ERRO')
-                    OR ({$c['status']} = 'PROCESSANDO' AND {$c['iniciado_em']} < DATE_SUB(NOW(), INTERVAL :timeout SECOND))
-                  )
-        ");
-        $stmt->execute(['tentativa' => $tentativaId, 'id' => $id, 'timeout' => $timeoutSegundos]);
-
-        return $stmt->rowCount() > 0;
-    }
-
-    /**
-     * Grava o resultado final (CONCLUIDO ou ERRO) de UMA tentativa especifica
-     * — so tem efeito se :tentativa ainda for o tentativa_id gravado no
-     * banco. Se uma tentativa mais nova ja sobrescreveu o tentativa_id
-     * (ex.: esta chamada e uma resposta "zumbi" atrasada), o UPDATE afeta 0
-     * linhas e o resultado e descartado silenciosamente do ponto de vista do
-     * banco (o chamador pode logar para debug, nunca reprocessar).
-     */
-    public function gravarResultadoProcessamento(int $id, string $documento, string $tentativaId, string $statusFinal): bool
-    {
-        $c = $this->colunasStatusProcessamento($documento);
-
-        $stmt = $this->pdo->prepare("
-            UPDATE tb_atendimento
-            SET {$c['status']} = :status
-            WHERE id_atendimento = :id AND {$c['tentativa']} = :tentativa
-        ");
-        $stmt->execute(['status' => $statusFinal, 'id' => $id, 'tentativa' => $tentativaId]);
-
-        return $stmt->rowCount() > 0;
-    }
-
-    /**
      * Marca status_processamento = CONCLUIDO diretamente, sem checagem de
      * tentativa_id — usado so pelo preenchimento MANUAL (App\Rn\DocumentoRn::
      * preencherManualCnh/Crlv), que e uma escrita sincrona e direta do
@@ -301,35 +251,15 @@ class AtendimentoDao
         $stmt->execute(['modo' => $modo, 'id' => $id]);
     }
 
-    /**
-     * Deteccao de PROCESSANDO obsoleto (mais de $timeoutSegundos sem
-     * resolver) — usada pelo endpoint de status (leitura barata, NUNCA chama
-     * o VIO) para marcar ERRO e permitir nova tentativa/fallback manual.
-     * Atomica e idempotente: se ja nao estiver mais PROCESSANDO (outra
-     * chamada ja tratou), nao tem efeito.
-     */
-    public function marcarProcessamentoObsoletoComoErro(int $id, string $documento, int $timeoutSegundos): bool
-    {
-        $c = $this->colunasStatusProcessamento($documento);
-
-        $stmt = $this->pdo->prepare("
-            UPDATE tb_atendimento
-            SET {$c['status']} = 'ERRO'
-            WHERE id_atendimento = :id
-              AND {$c['status']} = 'PROCESSANDO'
-              AND {$c['iniciado_em']} < DATE_SUB(NOW(), INTERVAL :timeout SECOND)
-        ");
-        $stmt->execute(['id' => $id, 'timeout' => $timeoutSegundos]);
-
-        return $stmt->rowCount() > 0;
-    }
-
     // ============================================================
     // Fluxo assincrono vio.api.br (demanda migracao-vio-api-br-com-cache,
-    // 2026-09-25) — metodos NOVOS e ADITIVOS, nunca reaproveitam/alteram os
-    // metodos acima (iniciarProcessamento/gravarResultadoProcessamento/
-    // marcarProcessamentoObsoletoComoErro), que permanecem intocados para
-    // suportar rollback manual do fluxo antigo via App\Rn\VioDecodeClient.
+    // 2026-09-25) — unico fluxo de processamento assincrono de CNH/CRLV
+    // neste DAO. O fluxo sincrono antigo (iniciarProcessamento()/
+    // gravarResultadoProcessamento()/marcarProcessamentoObsoletoComoErro(),
+    // usado so pelo rollback manual do fluxo Serpro/App\Rn\VioDecodeClient)
+    // foi removido nesta demanda (remocao-legado-serpro-e-hardening-
+    // documentos, 2026-09-28) — era codigo morto ha varias rodadas, sem
+    // nenhum chamador real fora de testes manuais ja tambem removidos.
     //
     // Conceitos distintos: *_tentativa_id (CAS local, ja existente) decide
     // exclusividade de tentativa; *_vio_api_id (novo) e o ID EXTERNO opaco

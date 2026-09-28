@@ -41,8 +41,12 @@ nova autorização explícita do usuário:
 - [ ] `sql/migrations/015_vio_api_br_estados_e_id_externo.sql` e
       `sql/migrations/016_vio_api_br_cache.sql` aplicadas (nesta ordem,
       depois de todas as anteriores) — aditivas, idempotentes, sem
-      `DROP`/`TRUNCATE`. `App\Rn\VioDecodeClient`/`tb_vio_cache_cnh`/
-      `tb_vio_cache_crlv` (fluxo antigo Serpro) permanecem intactos.
+      `DROP`/`TRUNCATE`. `tb_vio_cache_cnh`/`tb_vio_cache_crlv` (tabelas do
+      fluxo antigo Serpro) permanecem intactas por preservação de dado
+      histórico — `App\Rn\VioDecodeClient` (código, não dado) foi removido
+      do repositório na demanda
+      `remocao-legado-serpro-e-hardening-documentos` (2026-09-28), era
+      código morto há várias rodadas.
 - [ ] `VIO_API_BR_BASE_URL` preenchido (HTTPS obrigatório — o cliente falha
       fail-closed se não for `https://`).
 - [ ] `VIO_API_BR_API_KEY` preenchido **somente quando o usuário autorizar

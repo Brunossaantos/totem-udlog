@@ -89,12 +89,15 @@ class AtendimentoRn
      * campo ja manual continua manual, nunca "promove" a origem sozinha).
      *
      * Design escolhido para reversao: uma vez rebaixado para MANUAL, o
-     * atendimento SO volta a VIO_TRIAL/VIO_VALIDADO atraves de uma nova
-     * validacao de QR bem-sucedida (App\Rn\DocumentoRn::validarCnh/
-     * validarCrlv) — nao ha "auto-restauracao" so por o atendente digitar
-     * de volta o valor original na tela de confirmacao, porque o snapshot
-     * so e reescrito quando uma validacao VIO nova acontece, e a origem
-     * so e recolocada em VIO_TRIAL/VIO_VALIDADO por essa mesma validacao.
+     * atendimento SO volta a VIO_API_BR atraves de uma nova validacao
+     * automatica bem-sucedida (App\Rn\DocumentoRn::avaliarResultadoVioApiBrCnh/
+     * Crlv) — nao ha "auto-restauracao" so por o atendente digitar de volta
+     * o valor original na tela de confirmacao, porque o snapshot so e
+     * reescrito quando uma validacao automatica nova acontece, e a origem
+     * so e recolocada em VIO_API_BR por essa mesma validacao. VIO_TRIAL/
+     * VIO_VALIDADO permanecem so por compatibilidade historica (fluxo
+     * antigo Serpro, removido em remocao-legado-serpro-e-hardening-
+     * documentos, 2026-09-28) — nenhum codigo novo os grava mais.
      */
     public function salvarDadosMotorista(int $idAtendimento, array $dados): void
     {

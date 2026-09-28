@@ -386,7 +386,16 @@ try {
     $avalCrlvOk = $documentoRn->avaliarResultadoVioApiBrCrlv($atCrlvOkAtual, resultadoCrlvBase());
     afirmar('CRLV com placa batendo + reliable=true/mismatched=0 + campos ok: APROVADO (sem exigencia de paginas)', $avalCrlvOk['pode_avancar'] === true);
 
-    // 1b.4 not_found em campo CRITICO (CNH: data_validade) -> NUNCA aprova, mesmo com reliable=true
+    // 1b.4 not_found em campo `comparacao.campos` (CNH: data_validade) --
+    // ATUALIZADO na demanda remocao-legado-serpro-e-hardening-documentos
+    // (2026-09-28): a checagem por campo critico individual via
+    // `comparacao.campos` foi REMOVIDA de respostaVioApiBrAprovavel()
+    // (risco residual aceito e documentado -- 3 respostas reais/pagas
+    // confirmaram esse namespace sempre vazio na pratica). A decisao de
+    // aprovacao passa a depender SO de reliable=true/mismatched=0 (resumo
+    // GERAL) + presenca/tipo valido dos campos dentro de dados_leitura --
+    // `not_found` em `comparacao.campos` NAO bloqueia mais nada, mesmo para
+    // um campo antes considerado "critico".
     $atCritico = novoAtendimento($pdo, $atendimentoDao, $idTotem, 'CNH0003');
     $fpCritico = bin2hex(random_bytes(32));
     $tentCritico = bin2hex(random_bytes(16));
@@ -396,14 +405,14 @@ try {
     $avalCritico = $documentoRn->avaliarResultadoVioApiBrCnh($atCriticoAtual, resultadoCnhBase([
         'comparacao' => ['summary' => ['reliable' => true, 'mismatched' => 0], 'campos' => ['nome' => 'match', 'cpf' => 'match', 'data_validade' => 'not_found']],
     ]));
-    afirmar('not_found em campo CRITICO (data_validade) NUNCA aprova, mesmo com summary.reliable=true/mismatched=0', $avalCritico['pode_avancar'] === false);
+    afirmar('not_found em comparacao.campos (data_validade) NAO bloqueia mais a aprovacao (checagem removida, risco residual aceito) -- decide so por reliable/mismatched globais + dados_leitura validos', $avalCritico['pode_avancar'] === true);
 
-    // 1b.5 not_found em campo SECUNDARIO (fora de CAMPOS_CRITICOS_CNH) com
-    // reliable=true global -- comportamento IMPLEMENTADO: DocumentoRn so
-    // checa mismatch/not_found nos campos da allowlist CRITICA; um campo
-    // secundario desconhecido (fora de nome/cpf/data_validade) com
-    // not_found NAO bloqueia a aprovacao (decisao ja tomada pelo summary
-    // global do fornecedor, refletido em reliable/mismatched).
+    // 1b.5 not_found em campo SECUNDARIO (fora da antiga allowlist critica)
+    // com reliable=true global -- MESMO comportamento de 1b.4 acima desde
+    // sempre: o campo `comparacao.campos` nunca influenciou a decisao para
+    // campos secundarios, e agora (pos-remocao) tambem nao influencia mais
+    // para os campos antes considerados criticos (decisao ja tomada pelo
+    // summary global do fornecedor, refletido em reliable/mismatched).
     $atSecundario = novoAtendimento($pdo, $atendimentoDao, $idTotem, 'CNH0004');
     $fpSecundario = bin2hex(random_bytes(32));
     $tentSecundario = bin2hex(random_bytes(16));

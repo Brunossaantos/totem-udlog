@@ -11,11 +11,11 @@ use App\Dao\RateLimitVioStatusDao;
 use App\Rn\DocumentoRn;
 use App\Rn\VioApiBrClient;
 
-// App\Rn\VioDecodeClient (Serpro/VIO Decode direto) NAO e mais importado nem
-// instanciado por este Controller (demanda migracao-vio-api-br-com-cache,
-// 2026-09-25) — o arquivo permanece fisicamente intocado no repositorio so
-// para rollback manual/controlado por configuracao (nunca automatico). Ver
-// docs/handoffs/2026-09-25-migracao-vio-api-br-com-cache.md.
+// App\Rn\VioDecodeClient (integracao direta antiga com o Serpro/VIO Decode)
+// foi REMOVIDO do repositorio (demanda remocao-legado-serpro-e-hardening-
+// documentos, 2026-09-28) — era codigo morto ha varias rodadas, sem nenhum
+// chamador real fora de testes manuais ja tambem removidos. Ver
+// docs/handoffs/2026-09-28-remocao-legado-serpro-e-hardening-documentos.md.
 
 /**
  * Documentos de CNH/CRLV — Expedicao E Recebimento (demanda
@@ -33,14 +33,6 @@ class DocumentoController
         private ?PDO $pdo = null,
         private ?RateLimitVioStatusDao $rateLimitVioStatusDao = null
     ) {}
-
-    /**
-     * Timeout de PROCESSANDO obsoleto do fluxo ANTIGO (backend) — 30s,
-     * mantido intocado, usado so pelos metodos legados de
-     * App\Dao\AtendimentoDao (rollback manual do fluxo Serpro), nunca mais
-     * referenciado pelo fluxo novo abaixo.
-     */
-    private const TIMEOUT_PROCESSAMENTO_SEGUNDOS = 30;
 
     /**
      * Limite de DURACAO MAXIMA de processamento assincrono via vio.api.br,
@@ -238,6 +230,13 @@ class DocumentoController
                 UploadHelper::salvarImagemBase64($imagem, $atendimento['pasta_documentos'], 'crlv.jpg');
             }
         } catch (\RuntimeException $e) {
+            // Gap corrigido nesta demanda (remocao-legado-serpro-e-hardening-
+            // documentos, 2026-09-28): unico catch do Controller sem log,
+            // achado do security-especialista. Mensagem/codigo HTTP ja
+            // devolvidos ao cliente permanecem inalterados -- so o log
+            // sanitizado (mesmo padrao de logFalhaTecnica(), nunca
+            // getMessage()/trace) foi adicionado.
+            $this->logFalhaTecnica("upload id_atendimento={$idAtendimento} tipo={$tipo}", $e);
             Resposta::erro('Nao foi possivel salvar a imagem do documento');
         }
 
@@ -650,7 +649,26 @@ class DocumentoController
 
         // estado_leitura === 'completed' daqui em diante.
         if (in_array($resultado['estado_comparacao'], [null, 'pending', 'processing'], true)) {
-            $this->atendimentoDao->avancarParaProcessandoComparacao($idAtendimento, $tipo);
+            // Catch dedicado (Padrao B -- swallow-into-safe-state, mesmo
+            // padrao ja usado nos demais pontos de escrita critica deste
+            // metodo/Controller) -- achado do /02-testes independente de
+            // 2026-09-28 (rodada corretiva remocao-legado-serpro-e-
+            // hardening-documentos): este UPDATE nao tinha catch proprio,
+            // dependia so da fronteira global do entrypoint
+            // (public/api/documento.php). avancarParaProcessandoComparacao()
+            // e um UPDATE atomico e IDEMPOTENTE (WHERE status =
+            // 'PROCESSANDO_LEITURA') -- uma falha aqui nunca deixa escrita
+            // parcial, nunca dispara um novo POST/GET automatico, e o
+            // proximo poll do front-end (status-processamento) naturalmente
+            // repete a mesma tentativa com seguranca (o GET ja feito acima
+            // nao gera cobranca duplicada no fornecedor). Nao rebaixa para
+            // ERRO/INDETERMINADO -- o estado permanece exatamente o mesmo
+            // (PROCESSANDO_LEITURA), sem ambiguidade a preservar.
+            try {
+                $this->atendimentoDao->avancarParaProcessandoComparacao($idAtendimento, $tipo);
+            } catch (\PDOException $e) {
+                $this->logFalhaTecnica("status-processamento (avancar comparacao) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
+            }
             return;
         }
 

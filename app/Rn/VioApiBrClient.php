@@ -4,9 +4,9 @@ namespace App\Rn;
 
 /**
  * Cliente da API contratada `vio.api.br` — SUBSTITUI o USO direto do Serpro
- * (App\Rn\VioDecodeClient, mantido fisicamente intocado no repositorio so
- * para rollback manual/controlado por configuracao, NUNCA instanciado
- * automaticamente como fallback).
+ * (App\Rn\VioDecodeClient, removido do repositorio na demanda
+ * remocao-legado-serpro-e-hardening-documentos, 2026-09-28 — era codigo
+ * morto ha varias rodadas, nunca instanciado automaticamente).
  *
  * Duas responsabilidades SEPARADAS, cada uma com no maximo 1 chamada HTTP
  * por invocacao — nenhum dos dois metodos faz polling/loop/sleep interno

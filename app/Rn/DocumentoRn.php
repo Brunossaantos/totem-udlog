@@ -8,23 +8,18 @@ use App\Dao\VioApiBrCacheDao;
 use Util\CpfValidador;
 
 /**
- * Orquestra a validacao de CNH/CRLV da Expedicao via VIO Decode (Serpro):
- * HMAC do QR bruto (nunca persiste o QR em si), cache local
- * (tb_vio_cache_cnh/tb_vio_cache_crlv, separado por ambiente), chamada a
- * VioDecodeClient em caso de cache miss/vencido, e as regras de aprovacao
- * de negocio (ver docs/handoffs/2026-09-08-expedicao-vio-cnh-crlv.md).
+ * Orquestra a validacao de CNH/CRLV (Expedicao e Recebimento) via
+ * vio.api.br (App\Rn\VioApiBrClient) — cache local seguro (tb_vio_api_cache_*,
+ * HMAC do QR bruto, nunca persiste o QR em si) e as regras de aprovacao de
+ * negocio. Fluxo antigo (integracao direta com o Serpro/App\Rn\VioDecodeClient,
+ * validarCnh()/validarCrlv()) removido nesta demanda (remocao-legado-serpro-
+ * e-hardening-documentos, 2026-09-28) — era codigo morto ha varias rodadas,
+ * sem nenhum chamador real fora de testes manuais ja tambem removidos. Ver
+ * docs/handoffs/2026-09-28-remocao-legado-serpro-e-hardening-documentos.md.
  *
  * NUNCA recebe/mantem o QR bruto alem do escopo de uma unica chamada de
  * metodo — o parametro $bytesQrBrutos so existe em memoria durante o
- * calculo do HMAC e (se cache miss) a montagem da chamada ao VIO.
- *
- * PENDENCIA registrada (nao inventado): o formato exato de codificacao do
- * "raw value" dentro do corpo JSON enviado a VIO Decode nao foi validado
- * na pratica (item 4 do handoff — confirmacao de jsQR.binaryData). Este
- * codigo assume que os bytes brutos, ja em ISO-8859-1 conforme o manual,
- * podem ser transportados como string PHP diretamente; se a API exigir
- * outro transporte (ex: base64 dentro do JSON), ajustar em
- * VioDecodeClient::chamarDecode sem alterar o restante deste fluxo.
+ * calculo do fingerprint/HMAC.
  */
 class DocumentoRn
 {
@@ -53,15 +48,12 @@ class DocumentoRn
     private const VERSAO_MAPEAMENTO_CRLV = 1;
 
     /**
-     * Campos CRITICOS exigidos pela aprovacao automatica via vio.api.br
-     * (decisao do usuario nesta demanda) — `mismatch`/`not_found` em
-     * qualquer um destes SEMPRE rebaixa para manual, mesmo com
-     * `summary.reliable=true`. Renavam e campo critico do CRLV mas NAO e
-     * persistido em tb_atendimento (sem consumidor hoje — Talent usa so
-     * placa/uf/rntc/tipo — usado apenas para a decisao de aprovacao/cache).
+     * CAMPOS_CRITICOS_CNH/CAMPOS_CRITICOS_CRLV (checagem de `mismatch`/
+     * `not_found` por campo individual via `comparacao.campos`) REMOVIDAS
+     * nesta demanda (remocao-legado-serpro-e-hardening-documentos,
+     * 2026-09-28) — ver respostaVioApiBrAprovavel() para o registro
+     * completo do risco residual aceito.
      */
-    private const CAMPOS_CRITICOS_CNH = ['nome', 'cpf', 'data_validade'];
-    private const CAMPOS_CRITICOS_CRLV = ['placa', 'renavam', 'exercicio', 'uf'];
 
     /**
      * Chaves REAIS confirmadas (2026-09-28, teste real pago/autorizado/unico
@@ -250,109 +242,6 @@ class DocumentoRn
         'SP', 'SE', 'TO',
     ];
 
-    /**
-     * @return array{ok:bool, pode_avancar:bool, motivo:string, aviso_trial:bool, origem:string, status_revisao:string}
-     */
-    public function validarCnh(array $atendimento, VioDecodeClient $vio, string $bytesQrBrutos): array
-    {
-        $ttlDias = $this->cacheTtlDias();
-        $identificadorQr = $this->calcularIdentificador($bytesQrBrutos);
-        $ambiente = $vio->ambiente();
-
-        $cache = $this->cacheDao->buscarCnhValido($identificadorQr, $ambiente);
-
-        // CNH vencida nunca aproveita cache, mesmo com valido_ate no futuro —
-        // forca nova consulta ao VIO (decisao adotada: nao simplifica direto
-        // para MANUAL, da mais uma chance real de revalidar antes disso).
-        if ($cache !== null && $this->dataVencida($cache['data_validade'])) {
-            $cache = null;
-        }
-
-        if ($cache !== null) {
-            return $this->avaliarCnh($atendimento, $cache['nome'], $cache['cpf'], $cache['data_validade'], $cache['origem']);
-        }
-
-        $resultadoVio = $vio->decodificar($bytesQrBrutos);
-
-        if (!$resultadoVio['ok']) {
-            return [
-                'ok' => false,
-                'pode_avancar' => false,
-                'motivo' => 'Falha ao validar CNH: ' . ($resultadoVio['erro']['mensagem'] ?? 'erro desconhecido'),
-                'aviso_trial' => $ambiente === 'trial',
-                'origem' => $atendimento['cnh_origem_validacao'] ?? 'NAO_VALIDADO',
-                'status_revisao' => $atendimento['cnh_status_revisao'] ?? 'OK',
-            ];
-        }
-
-        // Resposta real da VIO Decode envelopa os campos do documento em
-        // "data" (junto de "template"/"image"), confirmado por teste real
-        // em 2026-09-08 (nao documentado assim em docs/manual_vio_decode.md
-        // ate entao). Mantido fallback para o corpo "achatado" (sem
-        // wrapper) para nao quebrar os mocks ja existentes em
-        // tests/manual/teste_vio_decode.php.
-        //
-        // Descarte ativo: so os campos da allowlist (CAMPOS_PERMITIDOS_CNH)
-        // sao extraidos para variaveis que sobrevivem alem deste bloco —
-        // $resultadoVio/$dadosBrutos (que podem conter `image.base64`,
-        // `template`, ou qualquer outro campo nao autorizado) saem de
-        // escopo (unset explicito) logo em seguida, nunca persistidos, logados
-        // ou retornados ao chamador.
-        // Fronteira de tipo/esquema (ver ESQUEMA_TIPOS_CNH): `dados` e
-        // `dados.data` precisam ser sequer um array antes de qualquer
-        // acesso por chave -- caso contrario (ex.: stdClass), o acesso
-        // `$x['data']`/`$x['nome']` lancaria um Error fatal real (achado
-        // MODERADO do /02-testes de 2026-09-19). Resposta inteira e
-        // rejeitada (fallback manual), nunca so o campo.
-        $dadosBrutos = $resultadoVio['dados'];
-        if (!is_array($dadosBrutos)) {
-            unset($resultadoVio, $dadosBrutos);
-            return $this->falhaEstruturaInvalidaCnh($atendimento, $ambiente);
-        }
-        $dadosBrutos = $dadosBrutos['data'] ?? $dadosBrutos;
-        if (!is_array($dadosBrutos)) {
-            unset($resultadoVio, $dadosBrutos);
-            return $this->falhaEstruturaInvalidaCnh($atendimento, $ambiente);
-        }
-
-        try {
-            $nome = trim($this->extrairCampoTexto($dadosBrutos, 'cnh', self::CAMPOS_PERMITIDOS_CNH[0]) ?? '');
-            $cpf = CpfValidador::normalizarEValidar($this->extrairCampoTexto($dadosBrutos, 'cnh', self::CAMPOS_PERMITIDOS_CNH[1]));
-            $dataValidade = $this->normalizarData($this->extrairCampoTexto($dadosBrutos, 'cnh', self::CAMPOS_PERMITIDOS_CNH[2]));
-        } catch (DocumentoVioTipoInvalidoException $e) {
-            // So o marcador categorizado (documento/campo/tipo PHP) vai ao
-            // log -- nunca o valor recebido, nunca stack trace de payload.
-            error_log($e->getMessage());
-            unset($resultadoVio, $dadosBrutos);
-            return $this->falhaEstruturaInvalidaCnh($atendimento, $ambiente);
-        }
-        unset($resultadoVio, $dadosBrutos);
-
-        $origem = $ambiente === 'trial' ? 'VIO_TRIAL' : 'VIO_VALIDADO';
-
-        $avaliacao = $this->avaliarCnh($atendimento, $nome, (string) $cpf, (string) $dataValidade, $origem);
-
-        // So grava cache se aprovado E nao vencida (CNH vencida nunca deveria
-        // ser reaproveitada de cache — decisao: nem grava, evita cache morto).
-        if ($avaliacao['pode_avancar'] && $dataValidade !== null && !$this->dataVencida($dataValidade)) {
-            $agora = new \DateTimeImmutable('now');
-            $this->cacheDao->salvarCnh(
-                $identificadorQr,
-                $ambiente,
-                $nome,
-                (string) $cpf,
-                $dataValidade,
-                $origem,
-                $agora->format('Y-m-d H:i:s'),
-                $agora->modify("+{$ttlDias} days")->format('Y-m-d H:i:s')
-            );
-        }
-
-        $avaliacao['aviso_trial'] = $ambiente === 'trial';
-
-        return $avaliacao;
-    }
-
     public function preencherManualCnh(array $atendimento, string $nome, string $cpfBruto, string $dataValidadeBruta): array
     {
         $nome = trim($nome);
@@ -364,117 +253,6 @@ class DocumentoRn
 
         // Preenchimento manual NUNCA e gravado em cache (nao alimenta o VIO,
         // nao impede consulta futura ao VIO para o mesmo QR).
-        return $avaliacao;
-    }
-
-    /**
-     * @return array{ok:bool, pode_avancar:bool, motivo:string, aviso_trial:bool, origem:string, status_revisao:string}
-     */
-    public function validarCrlv(array $atendimento, VioDecodeClient $vio, string $bytesQrBrutos): array
-    {
-        $ttlDias = $this->cacheTtlDias();
-        $identificadorQr = $this->calcularIdentificador($bytesQrBrutos);
-        $ambiente = $vio->ambiente();
-
-        $cache = $this->cacheDao->buscarCrlvValido($identificadorQr, $ambiente);
-
-        if ($cache !== null) {
-            // SEMPRE recompara a placa do cache contra a placa ATUAL do
-            // atendimento — o cache pode ter sido gerado por outro atendimento.
-            // (VioCacheDao::buscarCrlvValido ja garante uf/rntc/tipo_veiculo
-            // IS NOT NULL/NOT VAZIO — cache incompleto de antes desta demanda
-            // nunca chega aqui.)
-            return $this->avaliarCrlv($atendimento, $cache['placa'], (int) $cache['exercicio'], (string) $cache['uf'], (string) $cache['rntc'], (string) $cache['tipo_veiculo'], $cache['origem']);
-        }
-
-        $resultadoVio = $vio->decodificar($bytesQrBrutos);
-
-        if (!$resultadoVio['ok']) {
-            return [
-                'ok' => false,
-                'pode_avancar' => false,
-                'motivo' => 'Falha ao validar CRLV: ' . ($resultadoVio['erro']['mensagem'] ?? 'erro desconhecido'),
-                'aviso_trial' => $ambiente === 'trial',
-                'origem' => $atendimento['crlv_origem_validacao'] ?? 'NAO_VALIDADO',
-                'status_revisao' => $atendimento['crlv_status_revisao'] ?? 'OK',
-            ];
-        }
-
-        // Mesmo wrapper "data" da resposta real da VIO Decode — ver
-        // comentario equivalente em validarCnh(). Descarte ativo: so os
-        // campos da allowlist (CAMPOS_PERMITIDOS_CRLV) sao extraidos para
-        // variaveis que sobrevivem alem deste bloco — $resultadoVio/
-        // $dadosBrutos saem de escopo (unset explicito) logo em seguida.
-        // Fronteira de tipo/esquema (ver ESQUEMA_TIPOS_CRLV) -- mesmo
-        // raciocinio de validarCnh() acima.
-        $dadosBrutos = $resultadoVio['dados'];
-        if (!is_array($dadosBrutos)) {
-            unset($resultadoVio, $dadosBrutos);
-            return $this->falhaEstruturaInvalidaCrlv($atendimento, $ambiente);
-        }
-        $dadosBrutos = $dadosBrutos['data'] ?? $dadosBrutos;
-        if (!is_array($dadosBrutos)) {
-            unset($resultadoVio, $dadosBrutos);
-            return $this->falhaEstruturaInvalidaCrlv($atendimento, $ambiente);
-        }
-
-        try {
-            $placaBruta = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[0]);
-            $exercicioBruto = $this->extrairCampoNumerico($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[1]);
-            $exercicioBruto = $this->validarExercicioInteiroExato('crlv', self::CAMPOS_PERMITIDOS_CRLV[1], $exercicioBruto);
-            $exercicioBruto = $this->validarExercicioDentroDaFaixaArmazenavel('crlv', self::CAMPOS_PERMITIDOS_CRLV[1], $exercicioBruto);
-            $ufBruta = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[2]);
-            // Chave de EXTRACAO real na resposta da VIO e `rntrc` (ver
-            // comentario da allowlist acima) — o valor extraido e
-            // tratado/armazenado daqui em diante sempre como `rntc` (nome
-            // exigido por veiculo.rntc do Talent).
-            $rntcBruto = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[3]);
-            $tipoBruto = $this->extrairCampoTexto($dadosBrutos, 'crlv', self::CAMPOS_PERMITIDOS_CRLV[4]);
-        } catch (DocumentoVioTipoInvalidoException $e) {
-            error_log($e->getMessage());
-            unset($resultadoVio, $dadosBrutos);
-            return $this->falhaEstruturaInvalidaCrlv($atendimento, $ambiente);
-        }
-
-        $placaVio = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $placaBruta ?? ''));
-        $exercicio = is_numeric($exercicioBruto) ? (int) $exercicioBruto : 0;
-        $ufVio = strtoupper(trim($ufBruta ?? ''));
-        $rntcVio = trim($rntcBruto ?? '');
-        $tipoVio = trim($tipoBruto ?? '');
-        unset($resultadoVio, $dadosBrutos);
-
-        $origem = $ambiente === 'trial' ? 'VIO_TRIAL' : 'VIO_VALIDADO';
-
-        // Cache e salvo pelo QR em si (estruturalmente valido: placa presente
-        // + exercicio numerico + UF dentro da lista fechada de 27 siglas +
-        // RNTC/tipo preenchidos e nao placeholder), independente de bater com
-        // ESTE atendimento — um atendimento futuro com a mesma placa pode
-        // reaproveitar. Placeholder do Trial (ex: "xxxxx") nunca e cacheado —
-        // nao e dado real utilizavel.
-        if (
-            $placaVio !== '' && $exercicio > 0 && in_array($ufVio, self::UFS_VALIDAS, true)
-            && $rntcVio !== '' && $tipoVio !== ''
-            && !$this->ehValorPlaceholder($placaVio) && !$this->ehValorPlaceholder((string) $exercicio)
-            && !$this->ehValorPlaceholder($rntcVio) && !$this->ehValorPlaceholder($tipoVio)
-        ) {
-            $agora = new \DateTimeImmutable('now');
-            $this->cacheDao->salvarCrlv(
-                $identificadorQr,
-                $ambiente,
-                $placaVio,
-                $exercicio,
-                $ufVio,
-                $rntcVio,
-                $tipoVio,
-                $origem,
-                $agora->format('Y-m-d H:i:s'),
-                $agora->modify("+{$ttlDias} days")->format('Y-m-d H:i:s')
-            );
-        }
-
-        $avaliacao = $this->avaliarCrlv($atendimento, $placaVio, $exercicio, $ufVio, $rntcVio, $tipoVio, $origem);
-        $avaliacao['aviso_trial'] = $ambiente === 'trial';
-
         return $avaliacao;
     }
 
@@ -669,8 +447,8 @@ class DocumentoRn
      * string (o que produziria "Array"/aviso, nunca excecao, e passaria
      * pelas validacoes de conteudo como dado real). Lanca
      * DocumentoVioTipoInvalidoException em caso de tipo incompativel --
-     * SEMPRE capturada por validarCnh()/validarCrlv(), nunca deve escapar
-     * de DocumentoRn.
+     * SEMPRE capturada por avaliarResultadoVioApiBrCnh()/Crlv(), nunca deve
+     * escapar de DocumentoRn.
      */
     private function extrairCampoTexto(array $dadosBrutos, string $documento, string $campo): ?string
     {
@@ -955,17 +733,14 @@ class DocumentoRn
      * `crlv_ano` nao era barrado antes da persistencia (achado registrado
      * no /03-revisao de `vio-crlv-exercicio-faixa-storage`).
      *
-     * UNICO ponto de entrada desta cadeia de validacao -- chamado tanto
-     * por `validarCrlv()` (fluxo automatico via VIO Decode, indiretamente
-     * por meio de `extrairCampoNumerico()` + as duas chamadas seguintes)
-     * quanto por `preencherManualCrlv()` (fluxo manual, chamado
+     * Chamado hoje por `preencherManualCrlv()` (fluxo manual, chamado
      * DIRETAMENTE aqui, ja que nao ha um array `$dadosBrutos` de onde
-     * extrair). Nenhuma logica de validacao e duplicada entre os dois
-     * fluxos -- ambos executam exatamente os mesmos 3 metodos privados,
-     * na mesma ordem, com o mesmo comportamento de fail-closed via
-     * `DocumentoVioTipoInvalidoException` (nunca escapa desta classe --
-     * SEMPRE capturada pelo chamador, exatamente como ja acontecia no
-     * fluxo VIO).
+     * extrair) e, de forma equivalente (mesmos 3 metodos privados, mesma
+     * ordem), pelas 2 chamadas correspondentes dentro de
+     * `avaliarResultadoVioApiBrCrlv()` (fluxo automatico via vio.api.br).
+     * Nenhuma logica de validacao e duplicada entre os dois fluxos -- mesmo
+     * comportamento de fail-closed via `DocumentoVioTipoInvalidoException`
+     * (nunca escapa desta classe -- SEMPRE capturada pelo chamador).
      */
     private function validarExercicioCompleto(mixed $valorBruto, string $documento, string $campo): int|string|null
     {
@@ -978,13 +753,11 @@ class DocumentoRn
 
     /**
      * Resultado de falha estruturada para CNH quando a resposta da VIO nao
-     * bate com ESQUEMA_TIPOS_CNH (campo com tipo incompativel) ou quando
-     * `dados`/`dados.data` nao e sequer um array. Mesmo formato de retorno
-     * do ramo `!$resultadoVio['ok']` de validarCnh() -- nenhum valor
+     * bate com o tipo esperado de campo (tipo incompativel). Nenhum valor
      * parcial e persistido, origem/status_revisao preservam o estado ATUAL
-     * do atendimento (nunca marcados como VIO_TRIAL/VIO_VALIDADO/OK),
-     * mensagem generica funcional (nunca expõe nome de campo/tipo PHP ao
-     * cliente -- isso so vai para error_log).
+     * do atendimento (nunca marcados como VIO_API_BR/OK), mensagem generica
+     * funcional (nunca expõe nome de campo/tipo PHP ao cliente -- isso so
+     * vai para error_log).
      */
     private function falhaEstruturaInvalidaCnh(array $atendimento, string $ambiente): array
     {
@@ -1056,11 +829,12 @@ class DocumentoRn
     }
 
     // ============================================================
-    // Fluxo vio.api.br (demanda migracao-vio-api-br-com-cache, 2026-09-25)
-    // — metodos NOVOS. validarCnh()/validarCrlv() acima (fluxo antigo,
-    // Serpro/App\Rn\VioDecodeClient) permanecem INTOCADOS, so para suporte a
-    // rollback manual/controlado por configuracao — nunca mais chamados
-    // automaticamente por App\Controller\DocumentoController.
+    // Fluxo vio.api.br (demanda migracao-vio-api-br-com-cache, 2026-09-25) —
+    // unico fluxo de validacao automatica de CNH/CRLV neste arquivo. O fluxo
+    // antigo (integracao direta com o Serpro via App\Rn\VioDecodeClient,
+    // validarCnh()/validarCrlv()) foi removido nesta demanda
+    // (remocao-legado-serpro-e-hardening-documentos, 2026-09-28) — era
+    // codigo morto ha varias rodadas.
     // ============================================================
 
     /**
@@ -1205,10 +979,11 @@ class DocumentoRn
      * sempre) — a API real nunca devolveu esses campos (vieram NULL), o que
      * tornava a aprovacao automatica estruturalmente impossivel. Criterio
      * atual: leitura completed + qr_type=vio + vio_result presente +
-     * comparacao completed + summary.reliable=true + summary.mismatched=0 +
-     * nenhum campo CRITICO (nome/cpf/data_validade) com mismatch/not_found
-     * em comparacao.campos (namespace de compare.result.fields, que na
-     * pratica veio vazio no teste real — pendencia separada, ver handoff).
+     * comparacao completed + summary.reliable=true + summary.mismatched=0
+     * (ver respostaVioApiBrAprovavel() para o registro do risco residual
+     * aceito: a checagem por campo critico individual via
+     * comparacao.campos foi removida na demanda
+     * remocao-legado-serpro-e-hardening-documentos, 2026-09-28).
      *
      * Nomes de campo de EXTRACAO de dados_leitura tambem corrigidos nesta
      * mesma rodada para as chaves REAIS confirmadas (CAMPO_REAL_CNH_NOME/
@@ -1217,7 +992,7 @@ class DocumentoRn
      */
     public function avaliarResultadoVioApiBrCnh(array $atendimento, array $resultado): array
     {
-        if (!$this->respostaVioApiBrAprovavel($resultado, self::CAMPOS_CRITICOS_CNH, null)) {
+        if (!$this->respostaVioApiBrAprovavel($resultado, null)) {
             return $this->respostaVioApiBrNaoAprovada($atendimento, 'cnh');
         }
 
@@ -1260,7 +1035,7 @@ class DocumentoRn
      */
     public function avaliarResultadoVioApiBrCrlv(array $atendimento, array $resultado): array
     {
-        if (!$this->respostaVioApiBrAprovavel($resultado, self::CAMPOS_CRITICOS_CRLV, null)) {
+        if (!$this->respostaVioApiBrAprovavel($resultado, null)) {
             return $this->respostaVioApiBrNaoAprovada($atendimento, 'crlv');
         }
 
@@ -1368,11 +1143,28 @@ class DocumentoRn
 
     /**
      * Criterio UNICO de aprovacao automatica via vio.api.br, comum a
-     * CNH/CRLV (so os campos criticos e a exigencia de paginas mudam por
-     * documento) — ver App\Rn\VioApiBrClient::consultarResultado() para o
+     * CNH/CRLV — ver App\Rn\VioApiBrClient::consultarResultado() para o
      * formato normalizado de $resultado.
+     *
+     * RISCO RESIDUAL ACEITO (remocao-legado-serpro-e-hardening-documentos,
+     * 2026-09-28): a checagem por campo critico individual via
+     * `comparacao.campos`/`compare.result.fields` (match/mismatch/not_found
+     * por campo) foi REMOVIDA desta decisao — 3 respostas reais e pagas
+     * confirmadas em producao (2 CNH + 1 CRLV) sempre devolveram esse
+     * namespace VAZIO, o que tornava a checagem inoperante na pratica (nunca
+     * disparava). A decisao de aprovacao passa a depender exclusivamente de:
+     * leitura/comparacao completed, `qr_type=vio`, `vio_result` presente,
+     * `summary.reliable=true`, resumo geral `summary.mismatched=0`,
+     * contagem de paginas correta (quando aplicavel) e presenca/tipo valido
+     * dos campos criticos dentro de `dados_leitura` (allowlist + validacao
+     * de tipo/formato/faixa em avaliarResultadoVioApiBrCnh()/Crlv(), nunca
+     * alteradas por esta correcao). Efeito pratico: perde-se uma SEGUNDA
+     * camada de defesa granular por campo — hoje sem efeito observado, mas
+     * potencialmente util se o fornecedor um dia popular esse namespace.
+     * Se isso acontecer, reintroduzir a checagem exige nova rodada de
+     * decisao explicita do usuario, nunca reativacao automatica.
      */
-    private function respostaVioApiBrAprovavel(array $resultado, array $camposCriticos, ?int $paginasEsperadas): bool
+    private function respostaVioApiBrAprovavel(array $resultado, ?int $paginasEsperadas): bool
     {
         if (($resultado['estado_leitura'] ?? null) !== 'completed') {
             return false;
@@ -1394,14 +1186,6 @@ class DocumentoRn
 
         if ($paginasEsperadas !== null) {
             if (($resultado['pages_processed'] ?? null) !== $paginasEsperadas || ($resultado['total_pages'] ?? null) !== $paginasEsperadas) {
-                return false;
-            }
-        }
-
-        $campos = $resultado['comparacao']['campos'] ?? [];
-        foreach ($camposCriticos as $campo) {
-            $estadoCampo = $campos[$campo] ?? null;
-            if ($estadoCampo === 'mismatch' || $estadoCampo === 'not_found') {
                 return false;
             }
         }
