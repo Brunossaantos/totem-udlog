@@ -63,6 +63,71 @@ class DocumentoRn
     private const CAMPOS_CRITICOS_CNH = ['nome', 'cpf', 'data_validade'];
     private const CAMPOS_CRITICOS_CRLV = ['placa', 'renavam', 'exercicio', 'uf'];
 
+    /**
+     * Chaves REAIS confirmadas (2026-09-28, teste real pago/autorizado/unico
+     * contra vio.api.br com uma CNH digital verdadeira, fora deste
+     * ambiente de agentes — script tests/manual/../docs/
+     * teste_real_cnh_e_UNICO_USO.php, NUNCA reexecutado por um agente) do
+     * objeto piano devolvido dentro de `vio_result`
+     * (= App\Rn\VioApiBrClient::normalizarResultado()['dados_leitura']) para
+     * CNH. SUBSTITUEM as chaves antes assumidas/placeholder em minusculo
+     * ('nome'/'cpf'/'data_validade', que eram um palpite nao confirmado
+     * herdado do contrato antigo da VioDecodeClient/Serpro — ver
+     * CAMPOS_PERMITIDOS_CNH, usado SOMENTE por aquele fluxo antigo/separado,
+     * nunca por vio.api.br).
+     *
+     * Mapeamento feito AQUI (em DocumentoRn, na hora de ler os campos), nao
+     * dentro de App\Rn\VioApiBrClient::normalizarResultado() — decisao
+     * deliberada: VioApiBrClient e generico/"burro" por design (repassa
+     * `vio_result` como veio, sem saber se e CNH ou CRLV, sem nenhum
+     * conhecimento de schema de documento especifico); traduzir chaves de
+     * CNH ali criaria uma responsabilidade nova e incoerente com a
+     * separacao ja estabelecida (transporte/contrato minimo vs. logica de
+     * negocio de documento, que sempre viveu em DocumentoRn). A allowlist
+     * ESQUEMA_TIPOS_CNH/CAMPOS_PERMITIDOS_CNH continua intocada (pertence ao
+     * fluxo antigo VioDecodeClient) — a fronteira de tipo para o fluxo
+     * vio.api.br continua sendo feita por extrairCampoTexto() da mesma
+     * forma, so mudam os LITERAIS de nome de campo passados a ela.
+     *
+     * CRLV — chaves REAIS confirmadas em rodada POSTERIOR (2026-09-28,
+     * teste real pago/autorizado/unico contra vio.api.br com um CRLV
+     * verdadeiro, script docs/teste_real_crlv_UNICO_USO.php, NUNCA
+     * reexecutado por um agente). Substituem as chaves antes assumidas/
+     * placeholder em minusculo ('placa'/'exercicio'/'uf'/'rntrc'/'tipo'/
+     * 'renavam'), usadas SOMENTE por avaliarResultadoVioApiBrCrlv() ao ler
+     * `dados_leitura` — CAMPOS_PERMITIDOS_CRLV/ESQUEMA_TIPOS_CRLV
+     * continuam intocados (pertencem ao fluxo antigo VioDecodeClient,
+     * usado por validarCrlv()/CAMPOS_PERMITIDOS_CRLV[n], nao pelo fluxo
+     * vio.api.br).
+     *
+     * Estrutura REAL completa confirmada no teste (30 chaves, dentro de
+     * `dados_leitura`) — registrada aqui como referencia para extensoes
+     * futuras, mesmo as nao usadas hoje: "Código de Segurança do CLA",
+     * "Número do CRV", "UF", "Renavam", "RNTRC", "Exercício", "Nome",
+     * "CPF/CNPJ", "Placa", "Chassi", "Espécie", "Tipo", "Carroceria",
+     * "Combustível", "Ano Fabricação", "Ano Modelo", "Marca Modelo",
+     * "Lotação", "Potência", "Cilindradas", "Categoria", "Cor", "Motor",
+     * "Capacidade Máxima de Carga", "Peso Bruto Total", "Capacidade
+     * Máxima de Tração", "Eixos", "Local", "Data de Emissão",
+     * "Observações". `pages_processed`/`total_pages` vieram NULL (mesmo
+     * padrao ja observado na CNH — CRLV ja nao exigia pagina, nada muda
+     * aqui) e `comparacao.campos` (namespace usado por
+     * respostaVioApiBrAprovavel() para os CAMPOS_CRITICOS_CRLV) veio
+     * VAZIO nesse teste — MESMA pendencia ja registrada para CNH, agora
+     * reforcada tambem para CRLV (nao alterado nesta correcao — ver
+     * handoff).
+     */
+    private const CAMPO_REAL_CNH_NOME = 'Nome';
+    private const CAMPO_REAL_CNH_CPF = 'CPF';
+    private const CAMPO_REAL_CNH_VALIDADE = 'Validade';
+
+    private const CAMPO_REAL_CRLV_PLACA = 'Placa';
+    private const CAMPO_REAL_CRLV_RENAVAM = 'Renavam';
+    private const CAMPO_REAL_CRLV_EXERCICIO = 'Exercício';
+    private const CAMPO_REAL_CRLV_UF = 'UF';
+    private const CAMPO_REAL_CRLV_RNTRC = 'RNTRC';
+    private const CAMPO_REAL_CRLV_TIPO = 'Tipo';
+
     private const MENSAGEM_NAO_APROVADO_CNH = 'CNH nao aprovada automaticamente pela validacao. Preencha manualmente.';
     private const MENSAGEM_NAO_APROVADO_CRLV = 'CRLV nao aprovado automaticamente pela validacao. Preencha manualmente.';
 
@@ -1106,9 +1171,10 @@ class DocumentoRn
      * estado_leitura=completed e estado_comparacao=completed. Criterio de
      * aprovacao automatica (decisao do usuario, migracao-vio-api-br-com-cache):
      * leitura completed + qr_type=vio + vio_result presente + comparacao
-     * completed + summary.reliable=true + summary.mismatched=0 +
-     * pages_processed=2 + total_pages=2 + nenhum campo CRITICO (nome/cpf/
-     * data_validade) com mismatch/not_found. Reaproveita INTEGRALMENTE
+     * completed + summary.reliable=true + summary.mismatched=0 + nenhum
+     * campo CRITICO (nome/cpf/data_validade) com mismatch/not_found (ver
+     * correcao de contrato real de 2026-09-28 mais abaixo — a exigencia de
+     * pages_processed/total_pages foi removida). Reaproveita INTEGRALMENTE
      * avaliarCnh() (mesma regra de conteudo/placeholder/vencimento/
      * persistencia ja aprovada) — origem gravada como VIO_API_BR (valor de
      * ENUM PROPRIO da vio.api.br, separado de VIO_VALIDADO desde a rodada
@@ -1121,19 +1187,46 @@ class DocumentoRn
      * no momento do ENVIO (App\Dao\AtendimentoDao::iniciarEnvioVioApiBr) —
      * o QR bruto em si nunca esta mais disponivel neste ponto (assincrono),
      * so o fingerprint ja calculado.
+     *
+     * Suporte a CNH digital (demanda suporte-cnh-digital, 2026-09-27):
+     * $atendimento['cnh_modo_captura'] continua decidindo, em
+     * App\Controller\DocumentoController, se exige verso e quantas imagens
+     * compoe o PDF enviado a leitura (arquivosCnhCompletosParaModo()/
+     * montarPdfCnh(), INTOCADOS por esta correcao) — mas deixou de ser
+     * usado AQUI para a decisao de aprovacao automatica (ver proximo
+     * paragrafo), portanto este metodo nao le mais
+     * $atendimento['cnh_modo_captura'].
+     *
+     * CORRECAO DE CONTRATO REAL (2026-09-28, teste real pago/autorizado/
+     * unico contra vio.api.br, ver docs/handoffs/
+     * 2026-09-25-migracao-vio-api-br-com-cache.md): a exigencia de
+     * pages_processed/total_pages foi REMOVIDA do criterio de aprovacao da
+     * CNH (equivalente a $paginasEsperadas=null, ja usado pelo CRLV desde
+     * sempre) — a API real nunca devolveu esses campos (vieram NULL), o que
+     * tornava a aprovacao automatica estruturalmente impossivel. Criterio
+     * atual: leitura completed + qr_type=vio + vio_result presente +
+     * comparacao completed + summary.reliable=true + summary.mismatched=0 +
+     * nenhum campo CRITICO (nome/cpf/data_validade) com mismatch/not_found
+     * em comparacao.campos (namespace de compare.result.fields, que na
+     * pratica veio vazio no teste real — pendencia separada, ver handoff).
+     *
+     * Nomes de campo de EXTRACAO de dados_leitura tambem corrigidos nesta
+     * mesma rodada para as chaves REAIS confirmadas (CAMPO_REAL_CNH_NOME/
+     * CPF/VALIDADE = 'Nome'/'CPF'/'Validade'), substituindo os literais
+     * assumidos em minusculo usados ate entao.
      */
     public function avaliarResultadoVioApiBrCnh(array $atendimento, array $resultado): array
     {
-        if (!$this->respostaVioApiBrAprovavel($resultado, self::CAMPOS_CRITICOS_CNH, 2)) {
+        if (!$this->respostaVioApiBrAprovavel($resultado, self::CAMPOS_CRITICOS_CNH, null)) {
             return $this->respostaVioApiBrNaoAprovada($atendimento, 'cnh');
         }
 
         $dados = $resultado['dados_leitura'];
 
         try {
-            $nome = trim($this->extrairCampoTexto($dados, 'cnh_vio_api', 'nome') ?? '');
-            $cpf = CpfValidador::normalizarEValidar($this->extrairCampoTexto($dados, 'cnh_vio_api', 'cpf'));
-            $dataValidade = $this->normalizarData($this->extrairCampoTexto($dados, 'cnh_vio_api', 'data_validade'));
+            $nome = trim($this->extrairCampoTexto($dados, 'cnh_vio_api', self::CAMPO_REAL_CNH_NOME) ?? '');
+            $cpf = CpfValidador::normalizarEValidar($this->extrairCampoTexto($dados, 'cnh_vio_api', self::CAMPO_REAL_CNH_CPF));
+            $dataValidade = $this->normalizarData($this->extrairCampoTexto($dados, 'cnh_vio_api', self::CAMPO_REAL_CNH_VALIDADE));
         } catch (DocumentoVioTipoInvalidoException $e) {
             error_log($e->getMessage());
             return $this->respostaVioApiBrNaoAprovada($atendimento, 'cnh');
@@ -1154,6 +1247,16 @@ class DocumentoRn
      * criticos: placa/renavam/exercicio/uf. Renavam e extraido so para a
      * decisao de aprovacao/cache (nao persistido em tb_atendimento — sem
      * consumidor hoje).
+     *
+     * CORRECAO DE CONTRATO REAL (2026-09-28, teste real pago/autorizado/
+     * unico contra vio.api.br com um CRLV verdadeiro — ver handoff): nomes
+     * de campo de EXTRACAO de dados_leitura corrigidos para as chaves
+     * REAIS confirmadas (CAMPO_REAL_CRLV_PLACA/RENAVAM/EXERCICIO/UF/
+     * RNTRC/TIPO = 'Placa'/'Renavam'/'Exercício'/'UF'/'RNTRC'/'Tipo'),
+     * substituindo os literais assumidos em minusculo usados ate entao.
+     * Logica de negocio de avaliarCrlv() (comparacao de placa com
+     * atendimento, faixa de exercicio, UF valida, etc.) NAO muda — so a
+     * extracao das chaves de $dados.
      */
     public function avaliarResultadoVioApiBrCrlv(array $atendimento, array $resultado): array
     {
@@ -1164,14 +1267,14 @@ class DocumentoRn
         $dados = $resultado['dados_leitura'];
 
         try {
-            $placaBruta = $this->extrairCampoTexto($dados, 'crlv_vio_api', 'placa');
-            $exercicioBruto = $this->extrairCampoNumerico($dados, 'crlv_vio_api', 'exercicio');
-            $exercicioBruto = $this->validarExercicioInteiroExato('crlv_vio_api', 'exercicio', $exercicioBruto);
-            $exercicioBruto = $this->validarExercicioDentroDaFaixaArmazenavel('crlv_vio_api', 'exercicio', $exercicioBruto);
-            $ufBruta = $this->extrairCampoTexto($dados, 'crlv_vio_api', 'uf');
-            $rntcBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', 'rntrc');
-            $tipoBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', 'tipo');
-            $renavamBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', 'renavam');
+            $placaBruta = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_PLACA);
+            $exercicioBruto = $this->extrairCampoNumerico($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_EXERCICIO);
+            $exercicioBruto = $this->validarExercicioInteiroExato('crlv_vio_api', self::CAMPO_REAL_CRLV_EXERCICIO, $exercicioBruto);
+            $exercicioBruto = $this->validarExercicioDentroDaFaixaArmazenavel('crlv_vio_api', self::CAMPO_REAL_CRLV_EXERCICIO, $exercicioBruto);
+            $ufBruta = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_UF);
+            $rntcBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_RNTRC);
+            $tipoBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_TIPO);
+            $renavamBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_RENAVAM);
         } catch (DocumentoVioTipoInvalidoException $e) {
             error_log($e->getMessage());
             return $this->respostaVioApiBrNaoAprovada($atendimento, 'crlv');

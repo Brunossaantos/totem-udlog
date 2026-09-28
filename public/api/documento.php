@@ -29,6 +29,9 @@ $entrada = json_decode(file_get_contents('php://input'), true) ?? [];
 $idTotem = (int) $totem['id_totem'];
 
 switch ($_GET['acao'] ?? '') {
+    case 'definir-modo-cnh':
+        $controller->definirModoCnh($entrada, $idTotem);
+        break;
     case 'upload':
         $controller->upload($entrada, $idTotem);
         break;

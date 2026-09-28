@@ -298,31 +298,54 @@ try {
     // App\Rn\VioApiBrClient::consultarResultado())
     // ============================================================
 
+    // Fixture atualizada 2026-09-28 (correcao de contrato real) -- as chaves
+    // de `dados_leitura` agora usam os nomes REAIS confirmados por teste real
+    // pago/autorizado/unico contra vio.api.br ('Nome'/'CPF'/'Validade'),
+    // substituindo os literais assumidos em minusculo ('nome'/'cpf'/
+    // 'data_validade'). Valores 100% FICTICIOS/sinteticos (CPF matematicamente
+    // valido, nunca real). pages_processed/total_pages default para NULL
+    // (comportamento REAL confirmado -- o fornecedor nunca devolveu esses
+    // campos), refletindo que a exigencia de contagem de paginas foi REMOVIDA
+    // do criterio de aprovacao da CNH nesta mesma rodada.
     function resultadoCnhBase(array $overrides = []): array
     {
         return array_replace([
             'ok' => true, 'ambiguo' => false, 'nao_encontrado' => false,
             'estado_leitura' => 'completed', 'qr_type' => 'vio',
-            'dados_leitura' => ['nome' => 'FULANO DA SILVA', 'cpf' => '111.444.777-35', 'data_validade' => '2030-01-01'],
+            'dados_leitura' => ['Nome' => 'FULANO DE TAL', 'CPF' => '111.444.777-35', 'Validade' => '31/12/2030'],
             'estado_comparacao' => 'completed',
             'comparacao' => ['summary' => ['reliable' => true, 'mismatched' => 0], 'campos' => ['nome' => 'match', 'cpf' => 'match', 'data_validade' => 'match']],
-            'pages_processed' => 2, 'total_pages' => 2,
+            'pages_processed' => null, 'total_pages' => null,
         ], $overrides);
     }
 
+    // Fixture atualizada 2026-09-28 (2a rodada da mesma correcao de contrato
+    // real, agora para o CRLV) -- as chaves de `dados_leitura` usam os nomes
+    // REAIS confirmados por teste real pago/autorizado/unico contra
+    // vio.api.br ('Placa'/'Renavam'/'Exercício'/'UF'/'RNTRC'/'Tipo'),
+    // substituindo os literais assumidos em minusculo ('placa'/'exercicio'/
+    // 'uf'/'rntrc'/'tipo'/'renavam'). `comparacao.campos` continua com as
+    // chaves em minusculo de CAMPOS_CRITICOS_CRLV (['placa', 'renavam',
+    // 'exercicio', 'uf']) -- esse namespace NAO foi alterado nesta correcao
+    // (respostaVioApiBrAprovavel() so olha `comparacao.campos`, nunca
+    // `dados_leitura`; a extracao de dados_leitura e o unico ponto corrigido).
+    // Valores 100% FICTICIOS/sinteticos (nunca placa/renavam reais).
     function resultadoCrlvBase(array $overrides = []): array
     {
         return array_replace([
             'ok' => true, 'ambiguo' => false, 'nao_encontrado' => false,
             'estado_leitura' => 'completed', 'qr_type' => 'vio',
-            'dados_leitura' => ['placa' => 'ABC1234', 'exercicio' => 2025, 'uf' => 'SP', 'rntrc' => '12345678', 'tipo' => 'CAMINHAO', 'renavam' => '98765432100'],
+            'dados_leitura' => ['Placa' => 'ABC1234', 'Exercício' => 2025, 'UF' => 'SP', 'RNTRC' => '12345678', 'Tipo' => 'CAMINHAO', 'Renavam' => '98765432100'],
             'estado_comparacao' => 'completed',
             'comparacao' => ['summary' => ['reliable' => true, 'mismatched' => 0], 'campos' => ['placa' => 'match', 'renavam' => 'match', 'exercicio' => 'match', 'uf' => 'match']],
             'pages_processed' => null, 'total_pages' => null,
         ], $overrides);
     }
 
-    // 1b.1 CNH pages_processed=2/total_pages=2 -- aprovacao elegivel
+    // 1b.1 CNH com pages_processed/total_pages NULL (comportamento REAL
+    // confirmado do fornecedor) -- aprovacao elegivel, ja que a exigencia de
+    // contagem de paginas foi removida do criterio (correcao de contrato
+    // real, 2026-09-28).
     $atCnhOk = novoAtendimento($pdo, $atendimentoDao, $idTotem, 'CNH0001');
     $fpCnhOk = bin2hex(random_bytes(32));
     $tentCnhOk = bin2hex(random_bytes(16));
@@ -331,11 +354,15 @@ try {
     $atCnhOkAtual = $atendimentoDao->buscarPorId((int) $atCnhOk['id_atendimento']);
     $totalCacheAntesCnhOk = (int) $pdo->query('SELECT COUNT(*) FROM tb_vio_api_cache_cnh')->fetchColumn();
     $avalCnhOk = $documentoRn->avaliarResultadoVioApiBrCnh($atCnhOkAtual, resultadoCnhBase());
-    afirmar('CNH com pages_processed=2/total_pages=2 + reliable=true/mismatched=0 + campos ok: APROVADA', $avalCnhOk['pode_avancar'] === true);
+    afirmar('CNH com pages_processed/total_pages NULL (real) + reliable=true/mismatched=0 + campos reais (Nome/CPF/Validade) ok: APROVADA', $avalCnhOk['pode_avancar'] === true);
     $totalCacheDepoisCnhOk = (int) $pdo->query('SELECT COUNT(*) FROM tb_vio_api_cache_cnh')->fetchColumn();
     afirmar('CNH aprovada automaticamente grava cache VIO_CACHE', $totalCacheDepoisCnhOk === $totalCacheAntesCnhOk + 1);
 
-    // 1b.2 CNH so 1 pagina processada -- NUNCA aprova, mesmo com todo o resto ok
+    // 1b.2 CNH com pages_processed=1/total_pages=2 (valor presente e
+    // inconsistente/parcial) -- ANTES desta correcao seria rebaixada para
+    // manual; AGORA a contagem de paginas nao e mais avaliada de jeito
+    // nenhum, entao aprova normalmente (mesmo criterio de conteudo de
+    // sempre, sem exigencia de paginas).
     $atCnh1pag = novoAtendimento($pdo, $atendimentoDao, $idTotem, 'CNH0002');
     $fpCnh1pag = bin2hex(random_bytes(32));
     $tentCnh1pag = bin2hex(random_bytes(16));
@@ -344,9 +371,9 @@ try {
     $atCnh1pagAtual = $atendimentoDao->buscarPorId((int) $atCnh1pag['id_atendimento']);
     $totalCacheAntes1pag = (int) $pdo->query('SELECT COUNT(*) FROM tb_vio_api_cache_cnh')->fetchColumn();
     $aval1pag = $documentoRn->avaliarResultadoVioApiBrCnh($atCnh1pagAtual, resultadoCnhBase(['pages_processed' => 1, 'total_pages' => 2]));
-    afirmar('CNH com so 1 pagina processada (total_pages=2) NUNCA e aprovada automaticamente (rebaixa para manual)', $aval1pag['pode_avancar'] === false);
+    afirmar('CNH com pages_processed=1/total_pages=2 (inconsistente) NAO bloqueia mais a aprovacao (exigencia de paginas removida)', $aval1pag['pode_avancar'] === true);
     $totalCacheDepois1pag = (int) $pdo->query('SELECT COUNT(*) FROM tb_vio_api_cache_cnh')->fetchColumn();
-    afirmar('CNH nao aprovada (1 pagina) NUNCA grava cache', $totalCacheDepois1pag === $totalCacheAntes1pag);
+    afirmar('CNH aprovada (mesmo com contagem de paginas inconsistente) grava cache', $totalCacheDepois1pag === $totalCacheAntes1pag + 1);
 
     // 1b.3 CRLV — fluxo completo aprovado (sem exigencia de paginas)
     $atCrlvOk = novoAtendimento($pdo, $atendimentoDao, $idTotem, 'ABC1234');

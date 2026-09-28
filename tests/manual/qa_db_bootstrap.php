@@ -97,6 +97,10 @@ if (!function_exists('qaDbCriar')) {
         qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/014_tb_lgpd_aceite.sql');
         qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/015_vio_api_br_estados_e_id_externo.sql');
         qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/016_vio_api_br_cache.sql');
+        // Migration 017 (demanda suporte-cnh-digital, 2026-09-27) -- coluna
+        // cnh_modo_captura, aditiva, aplicada por padrao em todo banco qa_
+        // novo desta bateria.
+        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/017_cnh_modo_captura.sql');
 
         return [$admin, $nomeBanco];
     }

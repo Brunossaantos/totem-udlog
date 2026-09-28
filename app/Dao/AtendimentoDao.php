@@ -287,6 +287,21 @@ class AtendimentoDao
     }
 
     /**
+     * Grava o modo de captura escolhido pelo motorista para a CNH (FISICA
+     * fotografada frente+verso, ou DIGITAL do app do Detran/Senatran, so
+     * frente) ANTES de qualquer upload — coluna nova cnh_modo_captura
+     * (migration 017, demanda suporte-cnh-digital). Posse/status/etapa ja
+     * validados pelo chamador (App\Controller\DocumentoController::
+     * definirModoCnh()); $modo ja validado como 'FISICA'|'DIGITAL' pelo
+     * chamador (fail-closed, nunca gravado fora do enum).
+     */
+    public function definirModoCnh(int $id, string $modo): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE tb_atendimento SET cnh_modo_captura = :modo WHERE id_atendimento = :id');
+        $stmt->execute(['modo' => $modo, 'id' => $id]);
+    }
+
+    /**
      * Deteccao de PROCESSANDO obsoleto (mais de $timeoutSegundos sem
      * resolver) — usada pelo endpoint de status (leitura barata, NUNCA chama
      * o VIO) para marcar ERRO e permitir nova tentativa/fallback manual.

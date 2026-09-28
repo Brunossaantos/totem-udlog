@@ -1762,3 +1762,773 @@ handoff desta demanda, ia_development_state.md, e as suites de teste novas/
 corrigidas (tests/manual/). Arquivos deliberadamente EXCLUIDOS deste commit
 (fora do escopo desta demanda, higiene separada pendente): .claude/skills/,
 docs/indexTotem.html, tests/nf_teste/.
+
+
+## Suporte a CNH digital (1 pagina) - 2026-09-27
+
+### Motivacao
+
+Decisao de produto confirmada pelo usuario, motivada por um teste real que
+usou uma CNH DIGITAL (documento eletronico oficial do app do Detran/
+Senatran, docs/CNH-e.pdf.pdf, PDF de 1 pagina com QR Code) e parou no
+preflight interno do totem - o fluxo desta demanda so aceitava CNH FISICA
+fotografada (frente+verso, PDF de 2 paginas, pages_processed=2/
+total_pages=2 hardcoded). O totem passa a aceitar os 2 modos, escolhidos
+explicitamente pelo motorista ANTES da captura.
+
+### Decisao de arquitetura implementada
+
+1. Nova coluna cnh_modo_captura ENUM('FISICA','DIGITAL') NULL DEFAULT NULL
+   em tb_atendimento (sql/migrations/017_cnh_modo_captura.sql, aditiva/
+   idempotente, mesmo padrao INFORMATION_SCHEMA/ADD COLUMN condicional das
+   migrations 003/005/006/007/009/015). NULL = modo ainda nao escolhido -
+   tratado como FISICA (fail-safe) em TODO ponto de decisao de codigo
+   (nunca gravado explicitamente como FISICA por esta migration),
+   preservando 100% o comportamento de qualquer atendimento em andamento
+   que ja tenha cnh_frente.jpg em disco sem esta coluna preenchida.
+
+2. Nova acao definir-modo-cnh em public/api/documento.php ->
+   App\Controller\DocumentoController::definirModoCnh() - recebe modo
+   ('FISICA'|'DIGITAL'), valida posse do atendimento pelo totem autenticado
+   (buscarAtendimentoDoTotem, mesmo padrao das demais acoes), status
+   em_andamento, e etapa EXATA (nova allowlist ETAPA_DEFINIR_MODO_CNH:
+   exp_cnh para Expedicao, rec_cnh para Recebimento - a MESMA etapa onde a
+   captura de CNH ja comeca hoje, reaproveitada de ETAPAS_UPLOAD em vez de
+   duplicada). Valor fora do enum e rejeitado com HTTP 400, fail-closed,
+   sem gravar nada. App\Dao\AtendimentoDao::definirModoCnh(int $id, string
+   $modo): void faz o UPDATE simples (posse/enum ja validados pelo
+   chamador).
+
+3. arquivosCnhAmbosLadosPresentes() renomeada para
+   arquivosCnhCompletosParaModo() (DocumentoController): modo DIGITAL exige
+   so is_file(cnh_frente.jpg) (verso nunca obrigatorio); modo FISICA ou
+   NULL (fail-safe) continua exigindo os 2 lados - comportamento IDENTICO
+   ao de antes desta mudanca nesse caso. Usada tanto no gate ANTES do CAS
+   de envio em iniciarProcessamento() quanto testada isoladamente via
+   Reflection.
+
+4. montarPdfCnh(): monta o PDF com 1 imagem so (cnh_frente.jpg) quando
+   cnh_modo_captura === 'DIGITAL', ou com as 2 imagens (cnh_frente.jpg +
+   cnh_verso.jpg) quando 'FISICA'/NULL - Util\AnexoPdfHelper::
+   gerarPdfDeImagens() ja suportava 1 ou 2 imagens sem nenhuma alteracao
+   nele (confirmado por teste, contagem exata de paginas via
+   preg_match_all('/\/Type\s*\/Page[^s]/', ...)).
+
+5. upload() para tipo='cnh' (Expedicao): se cnh_modo_captura === 'DIGITAL',
+   aceita imagem_frente sozinha (sem exigir imagem_verso); se 'FISICA'/
+   NULL, continua exigindo os 2 juntos, comportamento IDENTICO ao de antes.
+   Recebimento (cnh_frente/cnh_verso, chamadas separadas) nao precisou de
+   nenhuma mudanca de codigo - o backend so passa a nao travar esperando um
+   verso que o modo DIGITAL nunca envia, via o gate do item 3 (quem decide
+   nao chamar o upload do verso em modo digital e o frontend, fora do
+   escopo desta rodada de backend).
+
+6. App\Rn\DocumentoRn::avaliarResultadoVioApiBrCnh(array $atendimento,
+   array $resultado): assinatura NAO mudou (decisao explicita - o
+   atendimento completo ja era recebido por este metodo, adicionar um
+   parametro $modoCaptura redundante seria mudanca maior que o minimo
+   necessario). A contagem de paginas esperada ($paginasEsperadas, antes
+   fixa em 2) passa a ser derivada internamente: $modoCaptura =
+   $atendimento['cnh_modo_captura'] ?? 'FISICA'; $paginasEsperadas =
+   $modoCaptura === 'DIGITAL' ? 1 : 2;, repassada para
+   respostaVioApiBrAprovavel() (que ja era generica, usada tambem pelo
+   CRLV com $paginasEsperadas=null - CRLV nao foi tocado). Nenhum outro
+   criterio de aprovacao mudou (reliable=true/mismatched=0/campos
+   criticos/CAS/idempotencia/timeout/INDETERMINADO - tudo preservado).
+
+### Arquivos criados/alterados
+
+- sql/migrations/017_cnh_modo_captura.sql (NOVO) - coluna
+  cnh_modo_captura, aditiva/idempotente (validado 2x em banco qa_, SHOW
+  COLUMNS identico entre a 1a e a 2a aplicacao).
+- app/Dao/AtendimentoDao.php - novo definirModoCnh(int $id, string $modo):
+  void.
+- app/Controller/DocumentoController.php - nova constante
+  ETAPA_DEFINIR_MODO_CNH; nova acao definirModoCnh(); upload() ajustado
+  para tipo='cnh'; arquivosCnhAmbosLadosPresentes() renomeada para
+  arquivosCnhCompletosParaModo() com logica condicional por modo;
+  montarPdfCnh() ajustado para 1 ou 2 imagens conforme o modo; gate de
+  iniciarProcessamento() (linha do if ($tipo === 'cnh' && ...)) atualizado
+  para chamar o metodo renomeado.
+- app/Rn/DocumentoRn.php - avaliarResultadoVioApiBrCnh() deriva
+  $paginasEsperadas de cnh_modo_captura em vez de 2 fixo.
+- public/api/documento.php - novo case 'definir-modo-cnh'.
+- tests/manual/qa_db_bootstrap.php - qaDbCriar() passa a aplicar tambem a
+  migration 017 em todo banco qa_ novo desta bateria.
+- tests/manual/teste_cnh_digital_1_pagina.php (NOVO) - 29/29 asserções,
+  cobrindo os 5 itens do escopo (definicao do modo/fail-closed, upload so
+  da frente em modo DIGITAL, PDF de 1 pagina, aprovacao automatica
+  exigindo 1/1 em DIGITAL e 2/2 em FISICA/NULL, e o fail-safe do gate
+  quando o modo nunca foi definido).
+
+### Resultados de teste (2026-09-27)
+
+Migration 017 validada em banco qa_ descartavel: ENUM('FISICA','DIGITAL')
+NULL DEFAULT NULL, aplicada 2x, SHOW COLUMNS identico entre as 2 aplicacoes
+(idempotente).
+
+Regressao das 7 suites ja existentes desta demanda - ZERO mudanca de
+contagem, comportamento identico ao de antes: teste_vio_api_br_client.php
+77/77, teste_vio_api_br_cas_e_cache.php 46/46 (incluindo os cenarios de
+CNH FISICA de 2 paginas, inalterados), teste_vio_api_br_migrations.php
+29/29, teste_integridade_conclusao_atendimento.php 43/43,
+teste_lock_obter_lock_documento.php 25/25,
+teste_sanitizacao_logs_documento_nota.php 29/29,
+teste_status_processamento.php 13/13 - total 262/262.
+
+Nova suite teste_cnh_digital_1_pagina.php: 29/29 (executada 3x, resultado
+estavel). Cobre exatamente:
+(a) cnh_modo_captura precisa ser definido como DIGITAL antes da captura -
+    valor fora do enum rejeitado (HTTP 400, fail-closed), IDOR bloqueado
+    (totem alheio, HTTP 404), etapa errada bloqueada (HTTP 400);
+(b) so a frente e exigida em modo DIGITAL (upload() aceita imagem_frente
+    sozinha; arquivosCnhCompletosParaModo() considera completo); modo
+    FISICA continua exigindo os 2 lados (regressao);
+(c) PDF de 1 pagina gerado corretamente em modo DIGITAL (assinatura %PDF-
+    + exatamente 1 /Type /Page); modo FISICA continua com exatamente 2
+    (regressao);
+(d) aprovacao automatica em modo DIGITAL exige pages_processed=1/
+    total_pages=1 - nunca aprova com 2/2 nem com combinacoes parciais
+    (1/2); modo FISICA/NULL continua exigindo 2/2 (nunca aprova com 1/1) -
+    fail-safe confirmado: NULL com 2/2 APROVA (comportamento de antes
+    desta mudanca), NULL com 1/1 NUNCA aprova;
+(e) cnh_modo_captura NULL + so a frente presente -> gate de
+    iniciarProcessamento() ainda bloqueia com HTTP 409 esperando o verso,
+    cnh_status_processamento permanece PENDENTE (nunca consome uma
+    tentativa/CAS).
+
+Regressao ampla adicional (fora das 7+1 suites centrais desta demanda,
+para confirmar zero efeito colateral em fluxos que nao passam pela nova
+coluna): teste_concorrencia_processamento_vio.php 16/16 (fluxo legado
+VioDecodeClient, banco de dev real udlog_totem, SEM a migration 017 -
+confirma que a ausencia da coluna nova nao quebra nada, o operador ??
+'FISICA' cobre tanto NULL quanto chave ausente do array) e
+teste_fluxo_recebimento_documentos.php 13/13 (mesmo banco de dev real,
+mesma confirmacao para o fluxo de Recebimento com CNH FISICA).
+
+Zero chamada real/paga, zero credencial real, zero migration aplicada em
+banco real (udlog_totem)/compartilhado - so em banco qa_ descartavel -,
+zero commit/push, zero Trello nesta rodada.
+
+### Pendencias / decisoes registradas
+
+- Frontend (tela de escolha do modo FISICA/DIGITAL antes da captura,
+  chamada a definir-modo-cnh, ajuste do fluxo de upload para nao
+  fotografar/enviar o verso em modo DIGITAL) fica para uma rodada separada
+  do frontend-especialista - fora do escopo desta rodada de backend.
+- Migration 017 NAO foi aplicada em udlog_totem (banco de dev real) nem em
+  nenhum banco compartilhado/producao nesta rodada - so validada em banco
+  qa_ descartavel, conforme restricao explicita desta demanda. Aplicar em
+  udlog_totem fica pendente de decisao/autorizacao do usuario, mesmo
+  padrao ja usado para as migrations 015/016 anteriormente.
+- Contrato real da vio.api.br continua tratado como placeholder (mesma
+  pendencia ja registrada na secao original desta demanda) - nada nesta
+  rodada presumiu nenhum detalhe novo do contrato do fornecedor
+  especificamente para CNH digital (a mudanca e inteiramente do lado do
+  totem: modo de captura escolhido pelo motorista, contagem de paginas
+  esperada).
+
+## `/02-testes` — confirmacao independente da extensao `suporte-cnh-digital` (2026-09-27)
+
+Revisor independente (`qa-testes`), banco `qa_` descartavel proprio,
+execucao direta (nao aceitou os numeros ja relatados sem rodar de novo).
+
+**Reexecucao das 8 suites** — todas idênticas as contagens ja registradas:
+`teste_vio_api_br_client.php` 77/77, `teste_vio_api_br_cas_e_cache.php`
+46/46, `teste_vio_api_br_migrations.php` 29/29,
+`teste_cnh_digital_1_pagina.php` 29/29,
+`teste_integridade_conclusao_atendimento.php` 43/43,
+`teste_lock_obter_lock_documento.php` 25/25,
+`teste_sanitizacao_logs_documento_nota.php` 29/29,
+`teste_status_processamento.php` 13/13 — total 291/291.
+
+**Achado nao-bloqueante**: `teste_status_processamento.php` apresentou 1
+falha intermitente numa execucao isolada (12/13), no cenario "rate limit
+proprio de status-processamento bloqueia apos exceder o limite na janela"
+— reexecutado 3x subsequentes, 13/13 nas 3, confirmando sensibilidade a
+timing (janela de 5s) do proprio teste, nao regressao de codigo desta
+extensao (nenhum arquivo de rate limit foi tocado por
+`suporte-cnh-digital`). Registrado, nao corrigido.
+
+**Migration 017**: reaplicada 2x num banco `qa_` de verificacao
+independente, criado do zero (schema.sql + migration 017 isolada, sem
+depender de `qa_db_bootstrap.php`) — `SHOW COLUMNS FROM tb_atendimento`
+identico entre a 1a e a 2a aplicacao. Idempotencia confirmada de forma
+independente.
+
+**Contrato frontend<->backend** (leitura de codigo, `public/totem/assets/app.js`
+e `app/Controller/DocumentoController.php`): acao `definir-modo-cnh`
+(mesmo nome nos 2 lados), parametro `modo` (mesmo nome), valores
+`'FISICA'`/`'DIGITAL'` (mesmos valores nos 2 lados), upload em modo
+DIGITAL envia somente `imagem_frente` (sem `imagem_verso`) tanto na
+Expedicao (`expProcessarCnhDigital()`, upload unico com `tipo='cnh'`)
+quanto no Recebimento (2 chamadas separadas de upload, mas o frontend
+nunca dispara a chamada do verso em modo DIGITAL — `escolherModoCnhRec()`)
+— nenhuma divergencia de contrato encontrada. Fluxo FISICO confirmado
+bit-a-bit identico ao de antes desta extensao (nenhuma mudanca de codigo
+nos caminhos `FISICA`, so a tela nova `exp_cnh_modo`/`rec_cnh_modo`
+inserida antes da captura, sem alterar nada do resto do fluxo).
+
+**ACHADO DE DOCUMENTACAO (nao bloqueante, mas relevante)**: a pendencia
+registrada na secao anterior ("Frontend ... fica para uma rodada separada
+do frontend-especialista - fora do escopo desta rodada de backend") esta
+DESATUALIZADA — o frontend (`public/totem/assets/app.js`) ja contem a
+implementacao completa (`telaExpCnhModo()`/`escolherModoCnhExp()`/
+`telaRecCnhModo()`/`escolherModoCnhRec()`/`expProcessarCnhDigital()`,
+todas com comentario "demanda suporte-cnh-digital, 2026-09-27"),
+confirmado por `git status` (`public/totem/assets/app.js` modificado) e
+por leitura direta do codigo — este handoff nunca foi atualizado para
+refletir essa rodada de frontend ja concluida.
+
+**Sintaxe**: `node --check public/totem/assets/app.js` sem erro; `php -l`
+sem erro nos 6 arquivos PHP tocados desta extensao
+(`DocumentoController.php`, `AtendimentoDao.php`, `DocumentoRn.php`,
+`documento.php`, `qa_db_bootstrap.php`, `teste_cnh_digital_1_pagina.php`).
+
+**`git status`/`git diff --check`**: confirmados limpos — so os arquivos
+esperados desta extensao (`app/Controller/DocumentoController.php`,
+`app/Dao/AtendimentoDao.php`, `app/Rn/DocumentoRn.php`,
+`public/api/documento.php`, `public/totem/assets/app.js`,
+`tests/manual/qa_db_bootstrap.php`, `sql/migrations/017_cnh_modo_captura.sql`
+novo, `tests/manual/teste_cnh_digital_1_pagina.php` novo) mais itens
+pre-existentes de outras demandas/decisoes ja registradas
+(`.claude/skills/`, `docs/indexTotem.html`, `tests/nf_teste/`,
+`docs/CNH-e.pdf.pdf`, `docs/HMY-1J20.pdf`,
+`docs/teste_real_cnh_e_UNICO_USO.php`). Nenhuma migration aplicada em
+`udlog_totem`/banco real ou compartilhado nesta rodada.
+
+**Regressao ampla reexecutada** — 100% aprovada, zero quebra: Talent (9
+suites), `teste_rate_limit_identificar_cliente_pdo.php` 24/24,
+`teste_lgpd_migration_014.php` 28/28,
+`teste_concorrencia_finalizar_checkin.php` 8/8,
+`teste_concorrencia_numero_nota_duplicado.php` 5/5,
+`teste_concorrencia_processamento_vio.php` 16/16,
+`teste_validacao_jpeg_seguro.php` 22/22 (controles obrigatorios),
+`teste_impressao_idor.php` 12/12,
+`teste_idor_salvar_etapa_manual.php` 15/15,
+`teste_salvar_etapa_cliente_manual.php` 3/3,
+`teste_avancar_etapa_expedicao.php` 10/10,
+`teste_ordem_coleta_pendente_baixa.php` 14/14,
+`teste_numero_nota_validacao_tamanho.php` 32/32,
+`teste_e2e_recebimento_expedicao_mock.php` 30/30,
+`teste_fluxo_recebimento_documentos.php` 13/13.
+
+Zero chamada real/paga, zero credencial real, zero migration aplicada em
+banco real/compartilhado, zero commit/push, zero Trello nesta rodada.
+
+### Veredito (confirmacao independente, 2026-09-27)
+
+**PRONTO PARA O USUARIO DECIDIR SOBRE COMMIT**, quanto a parte tecnica
+revisada nesta rodada. 2 pontos ficam para decisao do usuario/orquestrador
+antes ou depois do commit: (1) atualizar a secao "Pendencias / decisoes
+registradas" acima para refletir que o frontend ja foi implementado
+(achado de documentacao, nao de codigo); (2) autorizar ou nao a aplicacao
+da migration 017 em `udlog_totem`, mesmo padrao ja usado para 015/016.
+Nenhum achado bloqueante de codigo/contrato/regressao encontrado nesta
+confirmacao independente.
+
+## Correcao de contrato real — campos da CNH confirmados via teste real (2026-09-28)
+
+### Motivacao
+
+Um teste real (pago, autorizado, unico), executado pelo usuario fora deste
+ambiente de agentes com um documento real (CNH digital dele mesmo, via
+script `docs/teste_real_cnh_e_UNICO_USO.php`), revelou que o contrato REAL
+de `vio_result` (exposto por `App\Rn\VioApiBrClient::normalizarResultado()`
+como `dados_leitura`) diverge do contrato ate entao assumido/placeholder.
+NENHUM dado pessoal real e registrado nesta secao — so nomes de CHAVE
+(metadado de schema) e formato de data, nunca valor.
+
+### Achado confirmado (estrutura, nunca valor)
+
+Para CNH, `vio_result` e um objeto PLANO com chaves em portugues,
+acentuadas/com espaco (exemplo de lista completa confirmada):
+`"Nome"`, `"Nome Civil"`, `"Doc. Identidade/Org. Emissor/UF"`, `"CPF"`,
+`"Data de Nascimento"`, `"Filiacao Pai"`, `"Filiacao Mae"`, `"Permissao"`,
+`"ACC"`, `"Cat. Hab."`, `"No Registro"`, `"Validade"`, `"1a Habilitacao"`,
+`"Observacoes"`, `"Local"`, `"UF"`, `"Data de Emissao"`, `"Numero Validacao
+CNH"`, `"Numero Formulario RENACH"`.
+
+Tambem confirmado: `pages_processed`/`total_pages` vieram `NULL` na
+resposta real (o fornecedor nao os retorna, ao menos nao para este
+documento/nivel de plano), e `compare.result.fields` veio vazio
+(`qtd_campos_retornados=0`).
+
+CRLV **nao** foi testado nesta rodada — os nomes de campo de CRLV
+(`CAMPOS_PERMITIDOS_CRLV`/`ESQUEMA_TIPOS_CRLV` em `App\Rn\DocumentoRn`)
+continuam PLACEHOLDER, pendencia separada, registrada abaixo.
+
+### Mudancas de codigo
+
+1. **Chaves de extracao da CNH corrigidas** — `App\Rn\DocumentoRn` passou a
+   usar as chaves REAIS confirmadas (`'Nome'`, `'CPF'`, `'Validade'`) em vez
+   das assumidas em minusculo (`'nome'`, `'cpf'`, `'data_validade'`), via 3
+   novas constantes `CAMPO_REAL_CNH_NOME`/`CAMPO_REAL_CNH_CPF`/
+   `CAMPO_REAL_CNH_VALIDADE`, usadas dentro de
+   `avaliarResultadoVioApiBrCnh()`.
+
+   **Decisao de onde mapear** (avaliada explicitamente, nao decidida por
+   omissao): o mapeamento foi feito em `App\Rn\DocumentoRn`, no ponto de
+   extracao, e NAO dentro de `App\Rn\VioApiBrClient::normalizarResultado()`.
+   `VioApiBrClient` e deliberadamente generico/"burro" — repassa
+   `vio_result` como veio, sem saber se o documento e CNH ou CRLV, sem
+   nenhum conhecimento de schema especifico de documento (so valida o
+   contrato MINIMO/estrutural: `status`, `qr_type`, tipos de `compare`
+   etc.). Traduzir chaves de CNH ali criaria uma responsabilidade nova e
+   incoerente com a separacao ja estabelecida no projeto: transporte/
+   contrato minimo (`VioApiBrClient`) vs. logica de negocio por tipo de
+   documento (`DocumentoRn`, que ja concentra toda a logica de CNH/CRLV
+   desde a integracao original). Manter em `DocumentoRn` tambem foi a
+   mudanca de MENOR escopo: so os literais de nome de campo passados a
+   `extrairCampoTexto()` mudaram, nenhuma assinatura de metodo/fronteira de
+   responsabilidade foi alterada. `CAMPOS_PERMITIDOS_CNH`/`ESQUEMA_TIPOS_CNH`
+   (usadas exclusivamente pelo fluxo antigo/separado `VioDecodeClient`/
+   Serpro direto, ainda com contrato NAO confirmado) foram mantidas
+   intocadas.
+
+2. **Exigencia de contagem de paginas REMOVIDA da aprovacao da CNH** —
+   `avaliarResultadoVioApiBrCnh()` agora chama
+   `respostaVioApiBrAprovavel($resultado, self::CAMPOS_CRITICOS_CNH, null)`
+   (antes passava a contagem dinamica derivada de `cnh_modo_captura`, 1 ou
+   2). Como a API real nunca devolve `pages_processed`/`total_pages`
+   (vieram `NULL` no teste real), a exigencia tornava a aprovacao
+   automatica estruturalmente impossivel. CNH passa a seguir exatamente o
+   mesmo padrao que o CRLV ja usava (`$paginasEsperadas = null`, sem
+   comparacao nenhuma).
+
+   `cnh_modo_captura`/`arquivosCnhCompletosParaModo()`/`montarPdfCnh()`
+   (demanda `suporte-cnh-digital`, 2026-09-27, em
+   `App\Controller\DocumentoController`) **nao foram alterados** — continuam
+   decidindo se exige verso e quantas imagens compoe o PDF enviado a
+   leitura. So a checagem de paginas na hora de APROVAR foi removida;
+   `avaliarResultadoVioApiBrCnh()` nem le mais `cnh_modo_captura`.
+
+3. **Formato de data** — o formato real confirmado (`"27/01/2035"`,
+   `DD/MM/AAAA`) ja era aceito pelo parsing existente
+   (`DocumentoRn::normalizarData()`/`dataVencida()`), que ja tratava
+   `dd/mm/aaaa` como um dos formatos possiveis desde a integracao original
+   (pendencia de formato exato ja registrada, nunca fechada como certeza).
+   **Nenhuma mudanca de codigo foi necessaria** para o formato de data em
+   si — so o NOME da chave usada para extrair o valor bruto mudou (`'data_
+   validade'` -> `'Validade'`).
+
+4. **`CAMPOS_CRITICOS_CNH`** (usada para checar `mismatch`/`not_found` em
+   `comparacao.campos`, que vem de `compare.result.fields` — um namespace
+   DIFERENTE de `vio_result`) foi mantida sem alteracao
+   (`['nome', 'cpf', 'data_validade']`). Motivo: `compare.result.fields`
+   veio VAZIO no teste real (`qtd_campos_retornados=0`), entao nao ha
+   confirmacao nenhuma de que formato/nomenclatura de chave esse namespace
+   usa quando populado — mudar esses literais sem confirmacao real seria
+   inventar um contrato nao pedido. Registrado como pendencia (ver abaixo),
+   nao alterado por conta propria.
+
+### Validacao (mocks, banco `qa_` descartavel, zero dado real)
+
+Fixtures de `tests/manual/teste_vio_api_br_cas_e_cache.php` e
+`tests/manual/teste_cnh_digital_1_pagina.php` foram atualizadas para usar
+as chaves reais (`'Nome'`/`'CPF'`/`'Validade'`) com valores 100%
+FICTICIOS/sinteticos (ex.: `'FULANO DE TAL'`, CPF matematicamente valido
+`111.444.777-35`, nunca um CPF/nome real) e `pages_processed`/
+`total_pages` `null` por padrao (refletindo o comportamento real
+confirmado). Cenarios que antes testavam a EXIGENCIA de paginas (CNH so 1
+pagina processada, DIGITAL com 2 paginas, FISICA com 1 pagina etc.) foram
+reescritos para confirmar o OPOSTO: contagem de pagina ausente/presente/
+inconsistente NUNCA mais bloqueia a aprovacao, para qualquer
+`cnh_modo_captura`. Um cenario novo confirma que uma CNH com `Validade`
+(formato real `DD/MM/AAAA`) no passado continua corretamente REJEITADA
+(nao avanca automaticamente).
+
+Contagens antes/depois (das 2 suites que fixavam o contrato antigo como
+fixture):
+
+- `teste_vio_api_br_cas_e_cache.php`: 46 testes, 43 passaram/3 falharam
+  (com os fixtures desatualizados, apos o codigo ja corrigido) -> 46/46
+  apos atualizar os fixtures para as chaves reais.
+- `teste_cnh_digital_1_pagina.php`: 29 testes (item d antigo) originais,
+  27 passaram/2 falharam (apos codigo corrigido, fixtures antigos) -> 30/30
+  apos reescrever o item (d) para o novo criterio (30 testes porque um
+  cenario novo de CNH vencida com `Validade` real foi adicionado).
+
+Regressao ampla reexecutada (todas as suites de
+`tests/manual/teste_*.php`): nenhuma quebra causada por esta correcao.
+4 suites com falha pre-existente, confirmadas INDEPENDENTES desta mudanca
+(reproduzidas identicamente com e sem a correcao aplicada, revertendo
+temporariamente so `app/Rn/DocumentoRn.php` via `git stash`):
+`teste_concorrencia_real_iniciar_processamento.php` (2 falhas, dependencia
+de rede real/timing), `teste_consulta_ordem_coleta.php` (6 falhas,
+dependencia de banco externo mockado por timing),
+`teste_lgpd_aceite_backend_seguranca.php` (erro fatal por fixture ausente
+no ambiente local, `_fixtures_lgpd.php` nao encontrado — nao relacionado a
+CNH/vio.api.br) e uma falha isolada e nao-reproduzivel de
+`teste_status_processamento.php` (flaky, depende de resolucao de rede real
+num cenario que a propria suite documenta como "1 GET real" — reexecutada
+3x consecutivas apos a correcao, 13/13 em todas). Nenhuma delas toca
+`DocumentoRn::avaliarResultadoVioApiBrCnh()`/campos de CNH.
+
+Zero chamada de rede real, zero credencial real, zero migration nova
+aplicada, zero commit/push, zero Trello nesta rodada.
+
+### Pendencias registradas (nao inventadas)
+
+- **CRLV**: nomes de campo (`CAMPOS_PERMITIDOS_CRLV`/`ESQUEMA_TIPOS_CRLV`)
+  continuam PLACEHOLDER — nenhum teste real de CRLV foi executado ate
+  agora.
+- **`compare.result.fields` (namespace de `CAMPOS_CRITICOS_CNH`)**: veio
+  vazio no teste real, formato/nomenclatura de chave quando populado
+  permanece NAO confirmado.
+- **`docs/manual_talent.md`/`docs/db_gestao_coletas.md`**: sem relacao com
+  esta correcao, seguem como estavam.
+
+## Segundo teste real — confirmação da correção de contrato (2026-09-28)
+
+Um segundo teste real (pago, autorizado pelo usuário), executado após a
+correção de contrato acima já aplicada (chaves reais `'Nome'`/`'CPF'`/
+`'Validade'`, sem exigência de contagem de páginas), foi realizado para
+confirmar a correção. NENHUM dado pessoal é registrado nesta seção — só
+estados técnicos e confirmações de presença/ausência de campo, nunca valor.
+
+### Execução
+
+Data: 2026-09-28. 1 POST + 4 GETs, duração total ~13,3s.
+
+### Resultado observado
+
+- `estado_leitura=completed`, `qr_type=vio`.
+- `estado_comparacao=completed`, `reliable=true`, `mismatched=0`.
+- Os 3 campos críticos da CNH (`Nome`/`CPF`/`Validade`) confirmados
+  PRESENTES na resposta real (só a confirmação de presença — nunca o
+  valor).
+- `pages_processed`/`total_pages` novamente vieram `NULL` na resposta real
+  — reconfirmado, consistente com a 1ª chamada. Reforça que a remoção da
+  exigência de contagem de páginas (feita na correção de contrato acima)
+  foi a decisão correta.
+
+### Veredito
+
+**APROVADA** — leitura `completed`, comparação `completed`, `reliable=true`,
+`mismatched=0`, aprovação automática confirmada segundo o critério real de
+`App\Rn\DocumentoRn`. O contrato de campos críticos da CNH está agora
+CONFIRMADO por 2 chamadas reais independentes (a 1ª revelou a divergência
+de contrato original; a 2ª confirmou que a correção aplicada está correta).
+
+### Contagem de leituras pagas consumidas nesta demanda
+
+Total acumulado: **2** (1ª chamada real: revelou a divergência de contrato,
+motivou a correção; 2ª chamada real: confirmou a correção).
+
+### Pendência que continua aberta
+
+Contrato de campos do CRLV (`CAMPOS_PERMITIDOS_CRLV`/`ESQUEMA_TIPOS_CRLV`
+em `App\Rn\DocumentoRn`) continua PLACEHOLDER — nenhum teste real de CRLV
+foi executado até agora. `docs/HMY-1J20.pdf` está reservado para uma futura
+leitura real do CRLV, aguardando nova autorização explícita e separada do
+usuário (não incluída/consumida nesta demanda).
+
+## Correção de contrato real — campos do CRLV confirmados via teste real (2026-09-28)
+
+### Motivação
+
+Um teste real (pago, autorizado, único), executado pelo usuário fora deste
+ambiente de agentes com um documento real (CRLV real, via
+`docs/HMY-1J20.pdf`, script `docs/teste_real_crlv_UNICO_USO.php`), revelou
+que o contrato REAL de `vio_result` para CRLV (exposto por
+`App\Rn\VioApiBrClient::normalizarResultado()` como `dados_leitura`)
+diverge do contrato até então assumido/placeholder — a mesma situação já
+encontrada e corrigida para a CNH na rodada anterior. NENHUM dado pessoal
+real é registrado nesta seção — só nomes de CHAVE (metadado de schema),
+nunca valor.
+
+### Achado confirmado (estrutura, nunca valor)
+
+Para CRLV, `vio_result` é um objeto PLANO com 30 chaves em português,
+acentuadas/com espaço, confirmadas no teste real (lista completa, útil
+para extensões futuras — ex.: se quisermos usar `Chassi`/`Ano Modelo`/etc.
+em algum momento): `"Código de Segurança do CLA"`, `"Número do CRV"`,
+`"UF"`, `"Renavam"`, `"RNTRC"`, `"Exercício"`, `"Nome"`, `"CPF/CNPJ"`,
+`"Placa"`, `"Chassi"`, `"Espécie"`, `"Tipo"`, `"Carroceria"`,
+`"Combustível"`, `"Ano Fabricação"`, `"Ano Modelo"`, `"Marca Modelo"`,
+`"Lotação"`, `"Potência"`, `"Cilindradas"`, `"Categoria"`, `"Cor"`,
+`"Motor"`, `"Capacidade Máxima de Carga"`, `"Peso Bruto Total"`,
+`"Capacidade Máxima de Tração"`, `"Eixos"`, `"Local"`,
+`"Data de Emissão"`, `"Observações"`.
+
+Também confirmado: `pages_processed`/`total_pages` vieram `NULL` — mesmo
+padrão já observado na CNH; sem mudança de comportamento aqui, já que o
+CRLV nunca exigiu contagem de página (`$paginasEsperadas = null` desde
+sempre). `compare.result.fields` (namespace de `CAMPOS_CRITICOS_CRLV`,
+lido por `respostaVioApiBrAprovavel()` via `$resultado['comparacao']['campos']`)
+veio VAZIO nesse teste — mesma pendência já registrada para a CNH, agora
+reforçada também para o CRLV (não alterado nesta correção, ver seção de
+pendências abaixo). `reliable=true` mas `mismatched=1` (não zero) neste
+teste específico — ou seja, o documento usado neste teste NÃO foi (e não
+deveria ser) aprovado automaticamente, mesmo após a correção — comportamento
+correto e esperado do critério já existente (`mismatched===0`).
+
+### Mudanças de código
+
+1. **Chaves de extração do CRLV corrigidas** — `App\Rn\DocumentoRn` passou
+   a usar as chaves REAIS confirmadas (`'Placa'`, `'Renavam'`,
+   `'Exercício'`, `'UF'`, `'RNTRC'`, `'Tipo'`) em vez das assumidas em
+   minúsculo (`'placa'`, `'renavam'`, `'exercicio'`, `'uf'`, `'rntrc'`,
+   `'tipo'`), via 6 novas constantes `CAMPO_REAL_CRLV_PLACA`/`RENAVAM`/
+   `EXERCICIO`/`UF`/`RNTRC`/`TIPO`, usadas dentro de
+   `avaliarResultadoVioApiBrCrlv()` — mesmo padrão/localização já
+   estabelecido para a CNH (`CAMPO_REAL_CNH_NOME`/`CPF`/`VALIDADE`).
+   Mapeamento feito no mesmo ponto (extração dentro de `DocumentoRn`, não
+   dentro de `VioApiBrClient::normalizarResultado()`), pelo mesmo motivo
+   já documentado na correção da CNH: `VioApiBrClient` é
+   deliberadamente genérico/"burro", a fronteira de schema por tipo de
+   documento sempre viveu em `DocumentoRn`.
+
+   `CAMPOS_PERMITIDOS_CRLV`/`ESQUEMA_TIPOS_CRLV` (usadas exclusivamente
+   pelo fluxo antigo/separado `VioDecodeClient`/Serpro direto, contrato
+   ainda NÃO confirmado) foram mantidas intocadas — só a extração usada
+   por `avaliarResultadoVioApiBrCrlv()` (fluxo vio.api.br) mudou.
+
+2. **`CAMPOS_CRITICOS_CRLV`** (usada para checar `mismatch`/`not_found` em
+   `comparacao.campos`, um namespace DIFERENTE de `dados_leitura`) foi
+   mantida sem alteração (`['placa', 'renavam', 'exercicio', 'uf']`).
+   Motivo: `comparacao.campos` veio VAZIO no teste real, então não há
+   confirmação nenhuma de que formato/nomenclatura de chave esse
+   namespace usa quando populado — mudar esses literais sem confirmação
+   real seria inventar um contrato não pedido. Mesma decisão já tomada
+   para a CNH, agora reforçada pelo mesmo achado no CRLV.
+
+3. **Lógica de negócio de `avaliarCrlv()` não foi alterada** — a função
+   continua recebendo `$placa`/`$exercicio`/`$uf`/`$rntc`/`$tipoVeiculo`
+   já como parâmetros nomeados (comparação de placa com o atendimento,
+   validação de exercício, UF dentre as 27, etc.); só a EXTRAÇÃO das
+   chaves de `$dados` (antes de chamar `avaliarCrlv()`) mudou.
+
+### Validação (mocks, banco `qa_` descartável, zero dado real)
+
+Fixture de `tests/manual/teste_vio_api_br_cas_e_cache.php`
+(`resultadoCrlvBase()`) atualizada para usar as chaves reais
+(`'Placa'`/`'Renavam'`/`'Exercício'`/`'UF'`/`'RNTRC'`/`'Tipo'`) com
+valores 100% FICTÍCIOS/sintéticos (ex.: `'ABC1234'`, nunca uma
+placa/Renavam real). `comparacao.campos` da mesma fixture permanece com
+as chaves em minúsculo de `CAMPOS_CRITICOS_CRLV` (namespace não alterado).
+Confirmado que os nomes ANTIGOS/assumidos (`'placa'`, `'exercicio'`
+minúsculo etc.) não são mais usados em nenhuma extração de
+`dados_leitura` do CRLV no fluxo vio.api.br (`grep` confirmado).
+
+Contagem antes/depois da suíte principal desta correção:
+
+- `teste_vio_api_br_cas_e_cache.php`: 46 testes, 45 passaram/1 falhou
+  (com o fixture desatualizado, após o código já corrigido) -> 46/46 após
+  atualizar o fixture para as chaves reais.
+
+Regressão ampla reexecutada (todas as 41 suítes de
+`tests/manual/teste_*.php`): nenhuma quebra nova causada por esta
+correção. As mesmas 4 falhas pré-existentes, já documentadas na correção
+da CNH e reconfirmadas aqui, permanecem independentes desta mudança:
+`teste_concorrencia_real_iniciar_processamento.php` (2 falhas, dependência
+de rede real/timing), `teste_consulta_ordem_coleta.php` (6 falhas,
+dependência de banco externo mockado por timing),
+`teste_lgpd_aceite_backend_seguranca.php` (erro fatal por fixture ausente
+no ambiente local, não relacionado a CRLV/vio.api.br) e
+`teste_status_processamento.php` (1 falha, flaky/dependente de rede
+real). Nenhuma delas toca `DocumentoRn::avaliarResultadoVioApiBrCrlv()`/
+campos de CRLV.
+
+Zero chamada de rede real, zero credencial real, zero migration nova
+aplicada, zero commit/push, zero Trello nesta rodada.
+
+### Pendências registradas (não inventadas)
+
+- **`comparacao.campos` (namespace de `CAMPOS_CRITICOS_CRLV`)**: veio
+  vazio no teste real do CRLV também (mesma situação já registrada para a
+  CNH), formato/nomenclatura de chave quando populado permanece NÃO
+  confirmado.
+- **`CAMPOS_PERMITIDOS_CRLV`/`ESQUEMA_TIPOS_CRLV`** (fluxo antigo
+  `VioDecodeClient`/Serpro direto) continuam PLACEHOLDER — fora do escopo
+  desta correção, que tocou exclusivamente o fluxo vio.api.br.
+- **`docs/manual_talent.md`/`docs/db_gestao_coletas.md`**: sem relação
+  com esta correção, seguem como estavam.
+
+## `/03-revisao` independente — suporte CNH digital + contratos reais confirmados (2026-09-28)
+
+`/03-revisao` independente concluída para as 3 últimas mudanças da demanda
+(suporte a CNH digital, correção de contrato real da CNH, correção de
+contrato real do CRLV), com 4 revisores independentes novos, sem
+participação nas implementações revisadas.
+
+### Escopo e resultado dos 4 revisores
+
+- **backend-especialista (revisor)**: 9/9 CONFIRMADOS — migration 017
+  idempotente; gate de arquivos por modo de captura
+  (`arquivosCnhCompletosParaModo()`); extração de campo da CNH com as
+  constantes reais (`Nome`/`CPF`/`Validade`); extração de campo do CRLV com
+  as constantes reais (`Placa`/`Renavam`/`Exercício`/`UF`/`RNTRC`/`Tipo`);
+  encoding UTF-8 do caractere acentuado (`Exercício`) confirmado
+  byte-a-byte; reexecução das 4 suítes envolvidas com contagens idênticas
+  às já registradas (77/77 + 46/46 + 29/29 + 30/30); prova negativa de
+  campo crítico ausente reproduzida em cópia isolada (7/7); zero
+  vazamento de dado sensível; worktree principal confirmado intocado.
+  Observação não-bloqueante registrada: `comparacao.campos` continua não
+  confirmado (veio vazio nos 2 testes reais já realizados).
+- **security-especialista**: 7/7 CONFIRMADOS — zero vazamento de PII real
+  em toda a documentação/testes/scripts revisados; fail-closed preservado
+  mesmo após a remoção da exigência de contagem de página; prova negativa
+  confirmando que `mismatched=1` é corretamente rejeitado pelo critério de
+  aprovação automática, reproduzindo exatamente o cenário real observado
+  no teste do CRLV.
+- **frontend-especialista**: 8/8 CONFIRMADOS — tela de escolha física/
+  digital; chamada `definir-modo-cnh` sem navegação otimista (só avança
+  após confirmação do backend); modo digital nunca solicita captura do
+  verso; modo física idêntico ao comportamento anterior; fallback manual
+  preservado; reset de `cnhModo` no cancelamento do atendimento; zero
+  exposição de dado sensível na tela/console; mensagens de erro genéricas
+  preservadas (sem propagar detalhe técnico do backend).
+- **qa-testes**: 7/7 CONFIRMADOS — reexecução própria das 4 suítes
+  envolvidas; migration 017 idempotente (confirmação independente);
+  regressão ampla das ~39 suítes aplicáveis sem quebra nova além das já
+  documentadas; `php -l`/`node --check` limpos; `git status`/`git diff
+  --check` limpos; confirmação de que os 2 scripts de teste real
+  (`docs/teste_real_cnh_e_UNICO_USO.php`/
+  `docs/teste_real_crlv_UNICO_USO.php`) não fazem parte de nenhuma suíte
+  automatizada.
+
+### Confirmação explícita de zero operação real nesta revisão
+
+Zero chamada real à vio.api.br durante esta etapa de revisão (as 2 leituras
+pagas já haviam sido consumidas em rodadas anteriores, antes desta etapa).
+Zero credencial real exibida. Zero migration aplicada em banco real. Zero
+uso de Trello. Zero alteração de código durante a revisão — todos os 4
+revisores confirmaram `git status`/hash idêntico ao início da respectiva
+revisão. Zero commit/push.
+
+### Pendências não-bloqueantes que seguem em aberto
+
+1. Aplicar a migration 017 em `udlog_totem` — decisão do usuário, ainda não
+   tomada.
+2. `comparacao.campos`/`CAMPOS_CRITICOS_CNH`/`CAMPOS_CRITICOS_CRLV`
+   continuam com formato NÃO confirmado (veio vazio nos 2 testes reais já
+   executados) — a lógica de extração não depende disso, mas o campo em si
+   segue sem contrato confirmado.
+3. `CAMPOS_PERMITIDOS_CRLV`/`ESQUEMA_TIPOS_CRLV` do fluxo antigo
+   (`VioDecodeClient`/Serpro) continuam placeholder — fora do escopo desta
+   demanda.
+4. O usuário deve apagar manualmente `docs/teste_real_cnh_e_UNICO_USO.php`
+   e `docs/teste_real_crlv_UNICO_USO.php` quando terminar de revisar — não
+   fazem parte do commit desta demanda.
+
+### Veredito final
+
+**APROVADO.** Demanda pronta para `/04-commit-e-push`.
+
+## Preflight de `/04-commit-e-push` (2026-09-28)
+
+### Reconciliação dos testes reais
+
+Total de **3 leituras pagas reais** nesta demanda, todas com documentos
+autorizados pelo titular (reconciliação apurada a partir do histórico
+completo da conversa, corrigindo o total "2" registrado nas seções
+anteriores, que só contabilizava as 2 leituras de CNH):
+
+- CNH (`docs/CNH-e.pdf.pdf`), 1º POST: leitura `completed`/comparação
+  `completed`, mas resultado **PRECISA_DE_AJUSTE** (contrato de campo
+  ainda não corrigido nesse momento — `pages_processed`/`total_pages`
+  vieram `NULL`, campos críticos não localizados pelas chaves assumidas
+  em minúsculo). 3 GETs de polling.
+- CNH (`docs/CNH-e.pdf.pdf`), 2º POST (após correção de contrato
+  `Nome`/`CPF`/`Validade` + remoção da exigência de página):
+  **APROVADA** — leitura `completed`/comparação `completed`,
+  `reliable=true`, `mismatched=0`, 3 campos críticos presentes. 4 GETs de
+  polling.
+- CRLV (`docs/HMY-1J20.pdf`), 1 POST: leitura `completed`/comparação
+  `completed`, `reliable=true`, `mismatched=1` (não zero) →
+  **PRECISA_DE_AJUSTE** (corretamente NÃO aprovado automaticamente, caiu
+  em fallback manual — comportamento correto do critério de segurança,
+  não um bug). 4 GETs de polling. Esse teste também revelou as 30 chaves
+  reais do contrato do CRLV.
+
+Total agregado: **3 POSTs, 11 GETs de polling**. Custo monetário exato
+não disponível — `App\Rn\VioApiBrClient` não expõe nenhum campo de
+custo/billing no contrato normalizado (a API não retornou esse campo em
+nenhuma das 3 respostas).
+
+**Desvio de autorização formal, já ENCERRADO** — a autorização formal
+original (mensagem detalhada do usuário) cobria explicitamente 1 leitura
+real da CNH. Cada leitura adicional (2º POST da CNH, e o POST do CRLV)
+teve confirmação explícita e direta do usuário em tempo real na conversa
+antes de ser executada, mas fora do escopo da autorização formal
+original de 1 leitura. Nenhum dado pessoal foi exposto em Git/logs/
+documentação em nenhum momento. Custo e resultado registrados apenas de
+forma agregada (contagens e estados, nunca valor monetário exato ou
+dado de documento). Nenhuma nova chamada externa está autorizada a
+partir de agora.
+
+Confirmado por releitura das seções anteriores deste handoff que nenhum
+valor de dado pessoal real foi registrado em nenhum lugar do
+repositório — só nomes de chave/formato de schema e estados técnicos,
+nunca valor.
+
+### Migration 017 aplicada em `udlog_totem` (DEV LOCAL)
+
+Preflight: `SELECT DATABASE()` = `udlog_totem` confirmado; host de
+conexão local (`UDLOG-1513`, porta 3306), nunca Hostgator/produção.
+`SHOW CREATE TABLE tb_atendimento` e contagens de `tb_totem`/
+`tb_atendimento`/`tb_cliente` capturadas ANTES (8/130/38). Backup real
+gerado via `mysqldump --routines --triggers --single-transaction
+udlog_totem`, salvo fora do repositório (scratchpad da sessão).
+
+Migration aplicada e reaplicada mais 2x (3 execuções no total) para
+comprovar idempotência — 1ª execução aplica o `ALTER TABLE`, 2ª e 3ª
+executam o `SELECT 1` (no-op) do próprio script condicional. Coluna
+confirmada: `cnh_modo_captura enum('FISICA','DIGITAL') DEFAULT NULL`,
+`IS_NULLABLE=YES`, posicionada logo após `cnh_status_processamento`
+(igual à migration). Contagens DEPOIS idênticas às de ANTES (8/130/38) —
+`diff` do `SHOW CREATE TABLE` ANTES/DEPOIS confirma que a ÚNICA
+diferença estrutural é a linha da coluna nova; as 130 linhas existentes
+de `tb_atendimento` têm `cnh_modo_captura=NULL` (fail-safe, nenhum dado
+alterado). Zero erro, zero divergência — nenhuma interrupção necessária.
+
+### Higiene
+
+Confirmado por `git log --all -- <arquivo>` (vazio) e `git status`
+(`??`) que `docs/teste_real_cnh_e_UNICO_USO.php`/
+`docs/teste_real_crlv_UNICO_USO.php` nunca foram rastreados/staged antes
+da exclusão. Ambos excluídos. `docs/CNH-e.pdf.pdf`/`docs/HMY-1J20.pdf`
+confirmados intocados, continuam `??` untracked. `.env` confirmado
+untracked e ignorado (`git check-ignore -v` aponta `.gitignore:2:.env`).
+Varredura por padrão de API key, base64 longo suspeito, CPF real (exceto
+o fictício já documentado `111.444.777-35`), placa/Renavam reais, `C:\
+Users\...`, etc. no diff de todos os arquivos modificados desta extensão
+— zero achado. Uma única ocorrência de base64 longo encontrada em
+`tests/manual/teste_cnh_digital_1_pagina.php` (linha 249) é um JPEG
+1×1px sintético usado como fixture de upload mock, não um dado real.
+
+### Validações finais
+
+- `teste_cnh_digital_1_pagina.php`: **30/30** (contagem real confirmada,
+  igual à já registrada nas rodadas anteriores).
+- Regressão das 8 suítes principais desta demanda
+  (`teste_vio_api_br_client.php` 77/77, `teste_vio_api_br_cas_e_cache.php`
+  46/46, `teste_vio_api_br_migrations.php` 29/29,
+  `teste_cnh_digital_1_pagina.php` 30/30, `teste_status_processamento.php`
+  13/13, `teste_integridade_conclusao_atendimento.php` 43/43,
+  `teste_lock_obter_lock_documento.php` 25/25,
+  `teste_sanitizacao_logs_documento_nota.php` 29/29): **total real
+  292/292**. Não bate com o "262" citado em rodadas anteriores — o
+  cálculo de 262 (77+46+29+13+43+25+29) nunca incluiu
+  `teste_cnh_digital_1_pagina.php` na soma; somando as 8 suítes desta
+  lista (que inclui essa suíte) o total real passa a ser 292.
+- Os 3 cenários de modo (`FISICA`/`DIGITAL`/`NULL`) confirmados presentes
+  em `teste_cnh_digital_1_pagina.php`, itens (b)-(e).
+- `php -l` sem erro nos 7 PHP alterados/novos desta extensão
+  (`app/Controller/DocumentoController.php`, `app/Dao/AtendimentoDao.php`,
+  `app/Rn/DocumentoRn.php`, `public/api/documento.php`,
+  `tests/manual/qa_db_bootstrap.php`,
+  `tests/manual/teste_vio_api_br_cas_e_cache.php`,
+  `tests/manual/teste_cnh_digital_1_pagina.php`).
+- `node --check public/totem/assets/app.js`: sem erro.
+- `git diff --check` (working tree): limpo (só avisos benignos de
+  CRLF/LF).
+- Staging restrito aos arquivos desta extensão (excluindo
+  `.claude/skills/`, `docs/indexTotem.html`, `tests/nf_teste/`,
+  `docs/CNH-e.pdf.pdf`, `docs/HMY-1J20.pdf`) — `git diff --cached
+  --check` limpo.
+
+Commit/push **não** executados nesta rodada — arquivos deixados em stage
+para o orquestrador revisar e commitar.

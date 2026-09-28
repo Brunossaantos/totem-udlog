@@ -96,6 +96,19 @@ class DocumentoController
     ];
 
     /**
+     * Etapa exigida por tipo_atendimento para definirModoCnh() — a mesma
+     * etapa onde a captura de CNH comecaria (ver ETAPAS_UPLOAD acima:
+     * 'exp_cnh' para Expedicao, 'rec_cnh' para Recebimento), reaproveitada
+     * aqui em vez de duplicada, ja que o modo precisa ser escolhido ANTES do
+     * primeiro upload de imagem da CNH (demanda suporte-cnh-digital,
+     * 2026-09-27).
+     */
+    private const ETAPA_DEFINIR_MODO_CNH = [
+        'expedicao' => 'exp_cnh',
+        'recebimento' => 'rec_cnh',
+    ];
+
+    /**
      * Allowlist EXPLICITA e FECHADA de etapas permitidas para
      * iniciar-processamento/status-processamento/preencher-manual, por
      * (tipo_atendimento, tipo_documento) — NUNCA comparacao textual generica
@@ -115,6 +128,43 @@ class DocumentoController
             'crlv' => ['rec_crlv', 'rec_aguarde_documentos'],
         ],
     ];
+
+    /**
+     * Define o modo de captura da CNH (FISICA fotografada frente+verso, ou
+     * DIGITAL do app do Detran/Senatran, so frente) escolhido pelo motorista
+     * ANTES de qualquer upload de imagem — grava cnh_modo_captura (migration
+     * 017, demanda suporte-cnh-digital, 2026-09-27). Fail-closed: valor fora
+     * do enum e rejeitado sem gravar nada. Mesma validacao de posse/tipo/
+     * status/etapa das demais acoes deste Controller (etapa EXATA, mesma
+     * onde a captura de CNH comecaria — ver ETAPA_DEFINIR_MODO_CNH).
+     */
+    public function definirModoCnh(array $entrada, int $idTotem): void
+    {
+        $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
+        $modo = $entrada['modo'] ?? null;
+
+        if (!$idAtendimento || !in_array($modo, ['FISICA', 'DIGITAL'], true)) {
+            Resposta::erro('Dados incompletos');
+        }
+
+        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+
+        if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
+            Resposta::erro('Atendimento nao encontrado', 404);
+        }
+        if ($atendimento['status'] !== 'em_andamento') {
+            Resposta::erro('Atendimento nao esta em andamento');
+        }
+
+        $etapaEsperada = self::ETAPA_DEFINIR_MODO_CNH[$atendimento['tipo']] ?? null;
+        if ($etapaEsperada === null || $atendimento['etapa_atual'] !== $etapaEsperada) {
+            Resposta::erro('Atendimento nao esta na etapa esperada para definir o modo de captura da CNH');
+        }
+
+        $this->atendimentoDao->definirModoCnh($idAtendimento, $modo);
+
+        Resposta::sucesso(['ok' => true, 'cnh_modo_captura' => $modo]);
+    }
 
     /**
      * Upload das fotos de CNH/CRLV — Expedicao (cnh: frente+verso numa unica
@@ -151,13 +201,25 @@ class DocumentoController
             if ($tipo === 'cnh') {
                 $frente = $entrada['imagem_frente'] ?? null;
                 $verso = $entrada['imagem_verso'] ?? null;
+                // Fail-safe: NULL (modo ainda nao definido) trata como
+                // FISICA, mesmo comportamento de antes desta mudanca
+                // (demanda suporte-cnh-digital, 2026-09-27).
+                $modoCaptura = $atendimento['cnh_modo_captura'] ?? 'FISICA';
 
-                if (!$frente || !$verso) {
-                    Resposta::erro('Imagens de frente e verso da CNH sao obrigatorias');
+                if ($modoCaptura === 'DIGITAL') {
+                    if (!$frente) {
+                        Resposta::erro('Imagem de frente da CNH e obrigatoria');
+                    }
+
+                    UploadHelper::salvarImagemBase64($frente, $atendimento['pasta_documentos'], 'cnh_frente.jpg');
+                } else {
+                    if (!$frente || !$verso) {
+                        Resposta::erro('Imagens de frente e verso da CNH sao obrigatorias');
+                    }
+
+                    UploadHelper::salvarImagemBase64($frente, $atendimento['pasta_documentos'], 'cnh_frente.jpg');
+                    UploadHelper::salvarImagemBase64($verso, $atendimento['pasta_documentos'], 'cnh_verso.jpg');
                 }
-
-                UploadHelper::salvarImagemBase64($frente, $atendimento['pasta_documentos'], 'cnh_frente.jpg');
-                UploadHelper::salvarImagemBase64($verso, $atendimento['pasta_documentos'], 'cnh_verso.jpg');
             } elseif ($tipo === 'cnh_frente' || $tipo === 'cnh_verso') {
                 $imagem = $entrada['imagem'] ?? null;
 
@@ -284,7 +346,7 @@ class DocumentoController
         // Util\AnexoPdfHelper::gerarPdfDeImagens() ja rejeita e nunca chega a
         // fazer nenhum POST se um dos 2 arquivos faltar), mas desperdicaria
         // um ciclo de CAS/ERRO por uma condicao inteiramente previsivel.
-        if ($tipo === 'cnh' && !$this->arquivosCnhAmbosLadosPresentes($atendimento)) {
+        if ($tipo === 'cnh' && !$this->arquivosCnhCompletosParaModo($atendimento)) {
             Resposta::erro('Aguardando captura de frente e verso da CNH antes de iniciar a validacao', 409);
             return;
         }
@@ -418,10 +480,25 @@ class DocumentoController
      * temporario em `finally` (sucesso OU falha) — cobrindo os pontos 5/6/7
      * do escopo desta demanda sem duplicar logica ja aprovada. As imagens
      * JPEG originais (cnh_frente.jpg/cnh_verso.jpg) NUNCA sao modificadas.
+     *
+     * Suporte a CNH digital (demanda suporte-cnh-digital, 2026-09-27): se
+     * cnh_modo_captura === 'DIGITAL', monta o PDF com 1 imagem so (so a
+     * frente e capturada nesse modo — o verso nunca existe); caso contrario
+     * ('FISICA' ou NULL, fail-safe), continua montando com as 2 imagens,
+     * comportamento IDENTICO ao de antes desta mudanca.
+     * Util\AnexoPdfHelper::gerarPdfDeImagens() ja suporta 1 ou 2 imagens sem
+     * nenhuma alteracao nele.
      */
     private function montarPdfCnh(array $atendimento): string
     {
         $pasta = rtrim($_ENV['STORAGE_PATH'] ?? '', '/') . '/' . $atendimento['pasta_documentos'];
+        $modoCaptura = $atendimento['cnh_modo_captura'] ?? 'FISICA';
+
+        if ($modoCaptura === 'DIGITAL') {
+            return AnexoPdfHelper::gerarPdfDeImagens([
+                $pasta . '/cnh_frente.jpg',
+            ]);
+        }
 
         return AnexoPdfHelper::gerarPdfDeImagens([
             $pasta . '/cnh_frente.jpg',
@@ -430,15 +507,25 @@ class DocumentoController
     }
 
     /**
-     * Checagem explicita de que os 2 lados da CNH ja existem em disco —
-     * usada SOMENTE como um gate ANTES do CAS de envio (ver comentario em
-     * iniciarProcessamento()), nunca como a garantia primaria (essa continua
-     * sendo Util\AnexoPdfHelper::validarJpeg()/gerarPdfDeImagens(), que ja
-     * rejeita com seguranca se um arquivo faltar).
+     * Checagem explicita de que os arquivos exigidos da CNH ja existem em
+     * disco para o modo de captura do atendimento — usada SOMENTE como um
+     * gate ANTES do CAS de envio (ver comentario em iniciarProcessamento()),
+     * nunca como a garantia primaria (essa continua sendo Util\
+     * AnexoPdfHelper::validarJpeg()/gerarPdfDeImagens(), que ja rejeita com
+     * seguranca se um arquivo faltar). Renomeada de
+     * arquivosCnhAmbosLadosPresentes() (demanda suporte-cnh-digital,
+     * 2026-09-27): modo DIGITAL exige so a frente (o verso nunca e
+     * obrigatorio); modo FISICA ou NULL (fail-safe, comportamento de antes
+     * desta mudanca) continua exigindo os 2 lados.
      */
-    private function arquivosCnhAmbosLadosPresentes(array $atendimento): bool
+    private function arquivosCnhCompletosParaModo(array $atendimento): bool
     {
         $pasta = rtrim($_ENV['STORAGE_PATH'] ?? '', '/') . '/' . $atendimento['pasta_documentos'];
+        $modoCaptura = $atendimento['cnh_modo_captura'] ?? 'FISICA';
+
+        if ($modoCaptura === 'DIGITAL') {
+            return is_file($pasta . '/cnh_frente.jpg');
+        }
 
         return is_file($pasta . '/cnh_frente.jpg') && is_file($pasta . '/cnh_verso.jpg');
     }
