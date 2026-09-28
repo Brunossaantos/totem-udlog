@@ -2532,3 +2532,23 @@ Users\...`, etc. no diff de todos os arquivos modificados desta extensão
 
 Commit/push **não** executados nesta rodada — arquivos deixados em stage
 para o orquestrador revisar e commitar.
+
+
+## Commit funcional registrado (2026-09-28)
+
+Hash do commit funcional desta extensao: `d5212cc5386422c7bff502c69379733a0ae23889`
+Mensagem: "feat(vio): adiciona suporte a CNH digital de uma pagina"
+Autor/committer: Bruno Santos <brunossaantos@gmail.com>
+Branch: main. Sem force push. Sem atribuicao de IA.
+
+Arquivos versionados neste commit: migration 017 (cnh_modo_captura),
+ajustes em DocumentoController/DocumentoRn/AtendimentoDao/documento.php,
+app.js (tela de escolha fisica/digital), qa_db_bootstrap.php, teste novo
+teste_cnh_digital_1_pagina.php, fixture atualizada de
+teste_vio_api_br_cas_e_cache.php, handoff e ia_development_state.md.
+Arquivos deliberadamente EXCLUIDOS deste commit: .claude/skills/,
+docs/indexTotem.html, tests/nf_teste/ (higiene separada pendente),
+docs/CNH-e.pdf.pdf e docs/HMY-1J20.pdf (documentos originais do usuario,
+nunca versionados). Scripts de teste real de uso unico
+(teste_real_cnh_e_UNICO_USO.php, teste_real_crlv_UNICO_USO.php) foram
+removidos do disco antes deste commit, nunca chegaram a ser rastreados.
