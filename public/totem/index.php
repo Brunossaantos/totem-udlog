@@ -51,14 +51,14 @@ $lgpdTermoJson = json_encode(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>UDLOG — Totem de autoatendimento</title>
-<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/app.css?v=<?= (int) @filemtime(__DIR__ . '/assets/app.css') ?>">
 </head>
 <body data-totem-token="<?= htmlspecialchars($totem['token_api'], ENT_QUOTES, 'UTF-8') ?>" data-totem-nome="<?= htmlspecialchars($totem['nome'], ENT_QUOTES, 'UTF-8') ?>">
 <div id="app"></div>
 <script type="application/json" id="lgpd-termo-dados"><?= $lgpdTermoJson ?></script>
 <script src="assets/tesseract/tesseract.min.js"></script>
-<script src="assets/app.js"></script>
-<script src="assets/impressao.js"></script>
-<script src="assets/diagnostico-impressao.js"></script>
+<script src="assets/app.js?v=<?= (int) @filemtime(__DIR__ . '/assets/app.js') ?>"></script>
+<script src="assets/impressao.js?v=<?= (int) @filemtime(__DIR__ . '/assets/impressao.js') ?>"></script>
+<script src="assets/diagnostico-impressao.js?v=<?= (int) @filemtime(__DIR__ . '/assets/diagnostico-impressao.js') ?>"></script>
 </body>
 </html>
