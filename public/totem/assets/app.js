@@ -6,6 +6,288 @@
 const TOKEN = document.body.dataset.totemToken;
 const API_BASE = '/api/';
 
+// -------------------- instrumentacao de tempo (demanda captura-notas-sem-interrupcao, impl. 1) --------------------
+// Ativada EXCLUSIVAMENTE por ?medir=1 na URL (lida uma vez, aqui). Sem a flag:
+// marca()/medirNovaSeq()/medirLimpar() sao return imediato, nenhum DOM, nenhum
+// listener, nenhum timer. So em memoria (sem localStorage/sessionStorage/
+// cookie/fetch/beacon). Eventos: lista fechada abaixo; nada dinamico (sem
+// imagem, texto de OCR, CNPJ, razao social, numero da nota, idAtendimento,
+// mensagem de excecao). marca() nunca lanca.
+const MEDIR = (function () {
+    try { return new URLSearchParams(window.location.search).get('medir') === '1'; } catch (e) { return false; }
+})();
+const MEDIR_EVENTOS = new Set([
+    'cap_click', 'cap_canvas_ini', 'cap_canvas_fim', 'enc_ini', 'enc_fim',
+    'upload_ini', 'upload_fim', 'ocr_fila_cli', 'ocr_fila_num',
+    'ocr_ini_cli', 'ocr_fim_cli', 'ocr_ini_num', 'ocr_fim_num',
+    'res_aplic_cli', 'res_descart_cli', 'res_aplic_num', 'res_descart_num',
+    'liberado', 'usar_click', 'falha_captura', 'falha_upload', 'falha_ocr_cli', 'falha_ocr_num'
+]);
+const MEDIR_MAX_EVENTOS = 500;
+let medirSeqContador = 0;   // contador sequencial (nota_seq), so em memoria
+let medirPiso = 0;          // seqs <= piso pertencem a atendimento ja limpo: eventos tardios ignorados
+let medirSeqPrevia = 0;     // nota_seq da captura em previa (0 = nenhuma / medicao desligada)
+let medirBuffer = [];
+let medirPainelEls = null;
+
+function medirNovaSeq() {
+    if (!MEDIR) return 0;
+    medirSeqContador += 1;
+    return medirSeqContador;
+}
+
+function marca(nome, seq) {
+    if (!MEDIR) return;
+    try {
+        if (!MEDIR_EVENTOS.has(nome)) return;
+        if (typeof seq !== 'number' || !(seq > medirPiso)) return;
+        medirBuffer.push({ n: nome, s: seq, t: Math.round(performance.now()) });
+        if (medirBuffer.length > MEDIR_MAX_EVENTOS) medirBuffer.shift();
+        if (nome === 'liberado') medirAtualizarPainel();
+    } catch (e) { /* silencioso: instrumentacao nunca interfere no fluxo */ }
+}
+
+function medirLimpar() {
+    if (!MEDIR) return;
+    try {
+        medirBuffer = [];
+        medirPiso = medirSeqContador;
+        medirSeqPrevia = 0;
+        medirAtualizarPainel();
+    } catch (e) { /* silencioso */ }
+}
+
+// Agrupa o buffer por nota_seq: { seq: { nome_evento: t } } (ultimo valor de cada evento).
+// Alem disso guarda, em ordem cronologica, TODAS as ocorrencias de usar_click
+// (usar_lista) e de falha_upload (falha_upload_lista): nenhum clique sobrescreve o anterior.
+function medirAgrupar() {
+    const porSeq = new Map();
+    for (const ev of medirBuffer) {
+        if (!porSeq.has(ev.s)) porSeq.set(ev.s, { usar_lista: [], falha_upload_lista: [] });
+        const g = porSeq.get(ev.s);
+        g[ev.n] = ev.t;
+        if (ev.n === 'usar_click') g.usar_lista.push(ev.t);
+        else if (ev.n === 'falha_upload') g.falha_upload_lista.push(ev.t);
+    }
+    return porSeq;
+}
+
+function medirDelta(ev, a, b) {
+    return (typeof ev[a] === 'number' && typeof ev[b] === 'number') ? ev[b] - ev[a] : null;
+}
+
+function medirEstat(lista) {
+    const n = lista.length;
+    if (!n) return { n: 0, ultima: null, media: null, min: null, max: null };
+    return {
+        n,
+        ultima: lista[n - 1],
+        media: Math.round(lista.reduce((a, b) => a + b, 0) / n),
+        min: Math.min.apply(null, lista),
+        max: Math.max.apply(null, lista)
+    };
+}
+
+// Ambiente da medicao: SOMENTE numeros (sem userAgent, hostname, URL, caminho).
+function medirAmbiente() {
+    const num = v => (typeof v === 'number' && isFinite(v) && v > 0 ? Math.round(v) : null);
+    let vw = null;
+    let vh = null;
+    try {
+        const video = document.getElementById('videoScanner');
+        if (video) { vw = num(video.videoWidth); vh = num(video.videoHeight); }
+    } catch (e) { /* silencioso */ }
+    return {
+        screen_width: num(window.screen && window.screen.width),
+        screen_height: num(window.screen && window.screen.height),
+        viewport_width: num(window.innerWidth),
+        viewport_height: num(window.innerHeight),
+        video_width: vw,
+        video_height: vh
+    };
+}
+
+// notas[]: por nota_seq. tempo_total = liberado - cap_click (principal);
+// tentativas_upload = numero de usar_click (null se nenhum). Primeiro usar_click = inicial.
+// tempo_humano_inicial = 1o usar_click - cap_click; tempo_retry = ultimo usar_click -
+// ultima falha_upload anterior a ele (so com retry, senao null); tempo_tecnico_sucesso =
+// liberado - ultimo usar_click. Campos sem os eventos necessarios ficam null.
+function medirResumo() {
+    const notas = [];
+    const totais = [];
+    const humanos = [];
+    const tecnicos = [];
+    const retries = [];
+    for (const [seq, ev] of medirAgrupar()) {
+        const usar = ev.usar_lista;
+        const tentativas = usar.length ? usar.length : null;
+        const primeiro = usar.length ? usar[0] : null;
+        const ultimo = usar.length ? usar[usar.length - 1] : null;
+        const total = medirDelta(ev, 'cap_click', 'liberado');
+        const humano = (primeiro !== null && typeof ev.cap_click === 'number') ? primeiro - ev.cap_click : null;
+        const tecnico = (ultimo !== null && typeof ev.liberado === 'number') ? ev.liberado - ultimo : null;
+        let retry = null;
+        if (usar.length > 1) {
+            const antes = ev.falha_upload_lista.filter(t => t <= ultimo);
+            if (antes.length) retry = ultimo - antes[antes.length - 1];
+        }
+        if (total !== null) totais.push(total);
+        if (humano !== null && tecnico !== null) { humanos.push(humano); tecnicos.push(tecnico); }
+        if (retry !== null) retries.push(retry);
+        notas.push({
+            nota_seq: seq,
+            tempo_total_ms: total,
+            tempo_humano_inicial_ms: humano,
+            tempo_retry_ms: retry,
+            tempo_tecnico_sucesso_ms: tecnico,
+            tentativas_upload: tentativas,
+            canvas_ms: medirDelta(ev, 'cap_canvas_ini', 'cap_canvas_fim'),
+            encode_ms: medirDelta(ev, 'enc_ini', 'enc_fim'),
+            upload_ms: medirDelta(ev, 'upload_ini', 'upload_fim'),
+            fila_cli_ms: medirDelta(ev, 'ocr_fila_cli', 'ocr_ini_cli'),
+            ocr_cli_ms: medirDelta(ev, 'ocr_ini_cli', 'ocr_fim_cli'),
+            fila_num_ms: medirDelta(ev, 'ocr_fila_num', 'ocr_ini_num'),
+            ocr_num_ms: medirDelta(ev, 'ocr_ini_num', 'ocr_fim_num'),
+            falhas: ['falha_captura', 'falha_upload', 'falha_ocr_cli', 'falha_ocr_num'].filter(n => typeof ev[n] === 'number')
+        });
+    }
+    const t = medirEstat(totais);
+    return {
+        n: t.n, ultima: t.ultima, media: t.media, min: t.min, max: t.max,
+        media_humano: medirEstat(humanos).media,
+        media_tecnico: medirEstat(tecnicos).media,
+        media_retry: medirEstat(retries).media,
+        notas
+    };
+}
+
+function medirTexto() {
+    const r = medirResumo();
+    const f = v => (v === null ? 'na' : v);
+    const a = medirAmbiente();
+    const linhas = r.notas.map(x => 'nota_seq=' + x.nota_seq
+        + ' total_ms=' + f(x.tempo_total_ms)
+        + ' humano_inicial_ms=' + f(x.tempo_humano_inicial_ms)
+        + ' retry_ms=' + f(x.tempo_retry_ms)
+        + ' tecnico_sucesso_ms=' + f(x.tempo_tecnico_sucesso_ms)
+        + ' tentativas_upload=' + f(x.tentativas_upload)
+        + ' canvas_ms=' + f(x.canvas_ms)
+        + ' encode_ms=' + f(x.encode_ms)
+        + ' upload_ms=' + f(x.upload_ms)
+        + ' fila_cli_ms=' + f(x.fila_cli_ms)
+        + ' ocr_cli_ms=' + f(x.ocr_cli_ms)
+        + ' fila_num_ms=' + f(x.fila_num_ms)
+        + ' ocr_num_ms=' + f(x.ocr_num_ms)
+        + (x.falhas.length ? ' falhas=' + x.falhas.join(',') : ''));
+    return ['MEDICAO totem-udlog',
+        'capturas=' + r.n + ' ultima_ms=' + f(r.ultima) + ' media_ms=' + f(r.media) + ' min_ms=' + f(r.min) + ' max_ms=' + f(r.max)
+            + ' media_humano_inicial_ms=' + f(r.media_humano) + ' media_retry_ms=' + f(r.media_retry)
+            + ' media_tecnico_sucesso_ms=' + f(r.media_tecnico),
+        'screen=' + f(a.screen_width) + 'x' + f(a.screen_height) + ' viewport=' + f(a.viewport_width) + 'x' + f(a.viewport_height)
+            + ' video=' + f(a.video_width) + 'x' + f(a.video_height)]
+        .concat(linhas).join('\n');
+}
+
+// JSON sanitizado (so numeros, null e nomes fixos) usado no download local.
+function medirJson() {
+    const r = medirResumo();
+    return JSON.stringify({
+        ambiente: medirAmbiente(),
+        resumo: { capturas: r.n, ultima_ms: r.ultima, media_ms: r.media, min_ms: r.min, max_ms: r.max,
+            media_humano_inicial_ms: r.media_humano,
+            media_retry_ms: r.media_retry, media_tecnico_sucesso_ms: r.media_tecnico },
+        notas: r.notas
+    }, null, 2);
+}
+
+function medirStatus(txt) {
+    if (medirPainelEls && medirPainelEls.status) medirPainelEls.status.textContent = txt;
+}
+
+// Atualiza o painel SO se ele estiver na tela atual; nunca falha se nao existe.
+function medirAtualizarPainel() {
+    if (!MEDIR || !medirPainelEls) return;
+    try {
+        if (!medirPainelEls.raiz.isConnected) { medirPainelEls = null; return; }
+        const r = medirResumo();
+        const f = v => (v === null ? '-' : v + ' ms');
+        medirPainelEls.stats.textContent = 'Capturas: ' + r.n + '\nÚltima (total): ' + f(r.ultima) + '\nMédia: ' + f(r.media)
+            + '\nMínimo: ' + f(r.min) + '\nMáximo: ' + f(r.max)
+            + '\nMédia humano inicial: ' + f(r.media_humano) + '\nMédia retry: ' + f(r.media_retry)
+            + '\nMédia técnico sucesso: ' + f(r.media_tecnico);
+    } catch (e) { /* silencioso */ }
+}
+
+// Fallback SEM textarea: arquivo JSON local (Blob + <a download> temporario,
+// invisivel e removido logo depois). Sem rede, storage ou backend.
+function medirBaixarArquivo() {
+    try {
+        const url = URL.createObjectURL(new Blob([medirJson()], { type: 'application/json' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'metricas-totem.json';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => { URL.revokeObjectURL(url); }, 1000);
+        medirStatus('Arquivo JSON baixado');
+    } catch (e) { medirStatus('Falha ao gerar o arquivo'); }
+}
+
+function medirCopiar() {
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(medirTexto()).then(
+                () => { medirStatus('Copiado para a área de transferência'); },
+                () => { medirBaixarArquivo(); }
+            );
+        } else {
+            medirBaixarArquivo();
+        }
+    } catch (e) { medirBaixarArquivo(); }
+}
+
+// Remove referencias do painel ao sair da tela (o DOM some junto com a tela) e
+// devolve o alinhamento original de #tela. Chamado por ir().
+function medirDesmontarPainel() {
+    if (!MEDIR || !medirPainelEls) return;
+    try { medirPainelEls.tela.style.justifyContent = ''; } catch (e) { /* silencioso */ }
+    medirPainelEls = null;
+}
+
+// Painel NO FLUXO da tela (rec_digitaliza, so com ?medir=1): <details> recolhido
+// ao final de #tela, depois de Finalizar. Ao expandir empurra o conteudo; sem
+// fixed/absolute/sticky/z-index. #tela tem justify-content:center + overflow-y:auto,
+// o que deixaria o topo inalcancavel quando o conteudo estoura: enquanto expandido,
+// o alinhamento passa a flex-start (rolagem normal alcanca topo e rodape).
+function medirMontarPainel(tela) {
+    if (!MEDIR || !tela) return;
+    try {
+        const mk = (tag, css) => { const el = document.createElement(tag); el.style.cssText = css; return el; };
+        const btnCss = 'min-height:64px;padding:0 18px;font-size:16px;font-weight:700;border-radius:10px;cursor:pointer;';
+        const raiz = mk('details', 'flex-shrink:0;width:100%;max-width:min(90%,600px);margin:0 auto;box-sizing:border-box;background:#FFFFFF;color:#3A3A3A;border:2px solid #B0B0B1;border-radius:10px;');
+        const resumo = mk('summary', 'min-height:64px;display:flex;align-items:center;padding:0 16px;font-size:16px;font-weight:700;color:#0179AD;cursor:pointer;');
+        resumo.textContent = 'MEDIÇÃO ATIVA';
+        const corpo = mk('div', 'padding:6px 16px 16px;font-size:15px;');
+        const stats = mk('div', 'white-space:pre-line;margin-bottom:10px;color:#3A3A3A;');
+        const status = mk('div', 'min-height:20px;margin-bottom:10px;color:#3A3A3A;');
+        const copiar = mk('button', btnCss + 'width:100%;background:#0179AD;color:#FFFFFF;border:2px solid #0179AD;');
+        copiar.type = 'button';
+        copiar.textContent = 'Copiar métricas';
+        corpo.appendChild(stats); corpo.appendChild(status); corpo.appendChild(copiar);
+        raiz.appendChild(resumo); raiz.appendChild(corpo);
+        tela.appendChild(raiz);
+        medirPainelEls = { raiz, stats, status, tela };
+        raiz.addEventListener('toggle', () => {
+            tela.style.justifyContent = raiz.open ? 'flex-start' : '';
+            if (raiz.open) { medirAtualizarPainel(); raiz.scrollIntoView({ block: 'nearest' }); }
+        });
+        copiar.addEventListener('click', medirCopiar);
+        medirAtualizarPainel();
+    } catch (e) { medirPainelEls = null; }
+}
+
 // Fonte UNICA do texto/versao/hash do termo LGPD — renderizada no servidor
 // por public/totem/index.php (App\Content\TermoLgpd) e injetada aqui via
 // <script type="application/json" id="lgpd-termo-dados">, nunca duplicada
@@ -270,6 +552,7 @@ async function cancelarESair() {
 // -------------------- navegacao --------------------
 
 function ir(tela) {
+    medirDesmontarPainel();
     pararCamera();
     state.tela = tela;
     // Sem .barra-cancelar em 'lgpd' (mesma decisao ja tomada para 'home':
@@ -311,7 +594,7 @@ function renderTela() {
         case 'exp_impressao': tela.innerHTML = telaImpressao(); processarImpressao(); break;
         case 'rec_placa_qtd': tela.innerHTML = telaRecPlacaQtd(); break;
         case 'rec_bloqueado': tela.innerHTML = telaBloqueado(); break;
-        case 'rec_digitaliza': tela.innerHTML = telaDigitaliza(); iniciarCameraScanner(); break;
+        case 'rec_digitaliza': tela.innerHTML = telaDigitaliza(); medirMontarPainel(tela); iniciarCameraScanner(); break;
         case 'rec_cliente': tela.innerHTML = telaCliente(); habilitarAutocompleteCliente(); break;
         // O backend so conhece a etapa UNICA 'rec_cnh' (unificacao da rodada
         // corretiva de 2026-09-26, mesmo padrao ja usado por 'exp_cnh' na
@@ -367,6 +650,7 @@ function novoAtendimento() {
     ocrNumeroFila = [];
     numeroModalFila = [];
     numeroModalAberta = false;
+    medirLimpar();
     ir('lgpd');
 }
 
@@ -1738,6 +2022,7 @@ async function iniciarRecebimento(excedeLimite) {
             ocrNumeroFila = [];
             numeroModalFila = [];
             numeroModalAberta = false;
+            medirLimpar();
             await api('atendimento.php', 'salvar-etapa', { id_atendimento: state.idAtendimento, etapa: 'digitalizacao_notas' });
             ir('rec_digitaliza');
         }
@@ -2187,11 +2472,25 @@ const SCANNER_NOTA_LIMITE_BYTES = 4.5 * 1024 * 1024; // 4.5MB
 // REAL do video (sem downscale fixo de 900px como capturarFotoBase64,
 // usada por CNH/CRLV) e comprime so o necessario para respeitar o limite.
 function capturarFotoScannerNota(video) {
+    marca('cap_canvas_ini', medirSeqPrevia);
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    // dimensoes trocadas (largura/altura invertidas) porque o conteudo e
+    // desenhado ja rotacionado 270 graus a partir do video nativo (landscape)
+    // -- mesma rotacao fixa que o diagnostico com imagem real (2026-09-04)
+    // confirmou como correta para a camera do totem (ver antiga
+    // rotacionarImagem270(), removida). Agora a imagem nasce em pe: e a
+    // UNICA fonte de verdade para previa, envio/persistencia
+    // (confirmarUsoImagemNota()) e OCR (processarOcrNota()/
+    // processarOcrNumeroNota() nao rotacionam mais, pra evitar rotacao dupla).
+    canvas.width = video.videoHeight;
+    canvas.height = video.videoWidth;
+    const ctx = canvas.getContext('2d');
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(270 * Math.PI / 180);
+    ctx.drawImage(video, -video.videoWidth / 2, -video.videoHeight / 2, video.videoWidth, video.videoHeight);
+    marca('cap_canvas_fim', medirSeqPrevia);
 
+    marca('enc_ini', medirSeqPrevia);
     const qualidades = [0.92, 0.85, 0.75, 0.65, 0.5, 0.4];
     let dataUrl = null;
     let tamanhoBytes = Infinity;
@@ -2203,19 +2502,33 @@ function capturarFotoScannerNota(video) {
 
     // ultimo recurso: se mesmo no piso de qualidade ainda exceder o limite,
     // reduz moderadamente a escala do canvas (90%) e tenta novamente
-    let escalaAtual = canvas.width;
-    let alturaAtual = canvas.height;
+    // -- fator aplicado tanto ao canvas de destino (ja com dimensoes trocadas)
+    // quanto ao recorte desenhado do video nativo, preservando a mesma
+    // rotacao de 270 graus em cada tentativa.
+    const larguraOriginal = canvas.width;
+    const alturaOriginal = canvas.height;
+    let escalaAtual = larguraOriginal;
+    let alturaAtual = alturaOriginal;
     while (tamanhoBytes > SCANNER_NOTA_LIMITE_BYTES && escalaAtual > 600) {
         escalaAtual = Math.round(escalaAtual * 0.9);
         alturaAtual = Math.round(alturaAtual * 0.9);
+        const fator = escalaAtual / larguraOriginal;
         const canvasMenor = document.createElement('canvas');
         canvasMenor.width = escalaAtual;
         canvasMenor.height = alturaAtual;
-        canvasMenor.getContext('2d').drawImage(video, 0, 0, escalaAtual, alturaAtual);
+        const ctxMenor = canvasMenor.getContext('2d');
+        ctxMenor.translate(canvasMenor.width / 2, canvasMenor.height / 2);
+        ctxMenor.rotate(270 * Math.PI / 180);
+        ctxMenor.drawImage(
+            video,
+            -(video.videoWidth * fator) / 2, -(video.videoHeight * fator) / 2,
+            video.videoWidth * fator, video.videoHeight * fator
+        );
         dataUrl = canvasMenor.toDataURL('image/jpeg', 0.4);
         tamanhoBytes = Math.round((dataUrl.length - 'data:image/jpeg;base64,'.length) * 0.75);
     }
 
+    marca('enc_fim', medirSeqPrevia);
     console.log('[scanner Netum] captura gerada:', {
         largura: escalaAtual, altura: alturaAtual,
         tamanho_aproximado_kb: Math.round(tamanhoBytes / 1024)
@@ -2231,8 +2544,16 @@ function capturarPreviaNota() {
         return;
     }
     if (state.notaOrdem >= 5) return;
+    medirSeqPrevia = medirNovaSeq();
+    marca('cap_click', medirSeqPrevia);
     mostrarStatusScanner('Capturando imagem...');
-    const imagem = capturarFotoScannerNota(video);
+    let imagem;
+    try {
+        imagem = capturarFotoScannerNota(video);
+    } catch (e) {
+        marca('falha_captura', medirSeqPrevia); // sem detalhe do erro; relanca o mesmo erro
+        throw e;
+    }
     state.previewNotaAtual = imagem;
     exibirPreviaNota(imagem);
 }
@@ -2278,26 +2599,32 @@ async function confirmarUsoImagemNota() {
     mostrarStatusScanner('Enviando documento...');
     const imagem = state.previewNotaAtual;
     const ordem = state.notaOrdem + 1;
+    const notaSeq = medirSeqPrevia; // nota_seq desta captura (numerico; 0 sem ?medir=1)
+    marca('usar_click', notaSeq); // uma vez por captura: apos a guarda de duplo clique
     try {
+        marca('upload_ini', notaSeq);
         const resultado = await api('nota.php', 'processar', { id_atendimento: state.idAtendimento, ordem, imagem, chave: null });
+        marca('upload_fim', notaSeq);
         if (resultado.cliente_identificado) state.clienteIdentificado = true;
         state.notaOrdem = ordem;
         state.notasImagens.push(imagem);
         state.notasNumeros.push({ ordem, numero: null, confirmado: false, origem: null });
         state.previewNotaAtual = null;
-        processarOcrNota(imagem, ordem);
-        processarOcrNumeroNota(imagem, ordem);
+        processarOcrNota(imagem, ordem, notaSeq);
+        processarOcrNumeroNota(imagem, ordem, notaSeq);
         const contador = document.getElementById('contadorNotas');
         if (contador) contador.textContent = state.notaOrdem;
         atualizarIndicadorNumerosNota();
         mostrarStatusScanner('Documento salvo');
         voltarParaVideoAoVivo();
+        marca('liberado', notaSeq);
         if (state.notaOrdem >= 5) {
             const btn = document.getElementById('btnCapturarNota');
             if (btn) btn.disabled = true;
             mostrarStatusScanner('Limite de 5 notas atingido');
         }
     } catch (e) {
+        marca('falha_upload', notaSeq);
         const msg = (e instanceof TypeError)
             ? 'Erro ao enviar o documento. Verifique a conexão e tente novamente.'
             : (e.message || 'Erro ao salvar o documento.');
@@ -2363,12 +2690,16 @@ async function finalizarDigitalizacao() {
 // IDENTIFICADA, a fila e esvaziada e nenhuma nota seguinte dispara OCR/
 // chamada de identificacao (early-stop por atendimento).
 //
-// AJUSTE (2026-09-04, diagnostico com imagem real): antes de chamar
-// worker.recognize(), uma copia rotacionada em 270 graus (rotacionarImagem270())
-// e gerada em memoria e usada SO para o OCR — a imagem original, ja salva
-// via confirmarUsoImagemNota(), nunca e alterada. Extracao de chave de
+// AJUSTE (2026-09-04, diagnostico com imagem real): confirmado que a imagem
+// crua do video precisa de rotacao fixa de 270 graus para o OCR reconhecer
+// o texto (0/90/180 graus nunca produzem CNPJ valido). Extracao de chave de
 // acesso (44 digitos) removida do processo (nunca validou em 14 combinacoes
 // testadas) — chave_ocr sempre enviado como null ao backend.
+//
+// AJUSTE (2026-09-28): essa rotacao de 270 graus agora e aplicada diretamente
+// em capturarFotoScannerNota() (a imagem ja nasce em pe, salva/enviada assim)
+// — o OCR passou a usar a MESMA imagem, sem rotacionar de novo (a antiga
+// rotacionarImagem270(), que gerava uma copia so para o OCR, foi removida).
 
 let tesseractWorkerPromise = null;
 let ocrFila = [];
@@ -2376,16 +2707,109 @@ let ocrProcessando = false;
 
 // CNPJ: 14 digitos, aceitando mascara padrao (99.999.999/9999-99) ou
 // separadores/espacos soltos que o OCR as vezes insere no lugar da mascara.
-const CNPJ_REGEX = /\d{2}[.\s]?\d{3}[.\s]?\d{3}[/\s]?\d{4}[-\s]?\d{2}/g;
+// AJUSTE (2026-09-28, diagnostico com 3 notas reais novas — nota_02 confirmou
+// ser exatamente o caso da LDC ja registrado como pendencia): o regex antigo
+// tolerava so 0 ou 1 caractere de separacao, e so os caracteres "." ou
+// espaco/tab/quebra-de-linha (\s). Duas falhas reais confirmadas: (1) o OCR
+// as vezes usa VIRGULA no lugar do ponto entre os 2 primeiros grupos de
+// digitos (ex.: "00,831.373/0002-95"), o que o regex antigo nunca aceitava —
+// caso real da propria LDC, nao capturado antes; (2) como \s tambem casa
+// quebra de linha, o regex antigo por vezes atravessava duas linhas
+// distintas da tabela do DANFE (ex.: fim de uma inscricao estadual + inicio
+// de outro campo numerico na linha seguinte) e "engolia" digitos de campos
+// nao relacionados, gerando falso candidato de 14 digitos e impedindo o
+// CNPJ real (que ficava dividido entre as duas correspondencias) de ser
+// capturado corretamente — caso real observado com o CNPJ do destinatario
+// de uma das 3 notas de calibracao. Correcao pontual: tolera de 0 a 2
+// caracteres de separacao (nao so 0 ou 1), incluindo virgula, mas restrito a
+// espaco/tab (nunca quebra de linha) — mantendo a tolerancia a variacoes de
+// OCR sem voltar a atravessar linhas da tabela.
+const CNPJ_REGEX = /\d{2}[.,\t ]{0,2}\d{3}[.,\t ]{0,2}\d{3}[/,\t ]{0,2}\d{4}[-,\t ]{0,2}\d{2}/g;
 
-// Extraida do antigo ocr-worker.js (mesma logica/heuristica, nao alterada)
-// — so processamento de string, roda direto na thread principal.
+// Palavras que nunca aparecem DENTRO de uma razao social, mas sao comuns em
+// cabecalhos/rotulos do layout padrao de DANFE — qualquer token da linha
+// (normalizado, sem acento) igual a uma destas descarta a linha inteira como
+// candidata. Heuristica, nao lista exaustiva/contrato formal.
+const OCR_PALAVRAS_CABECALHO_DANFE = new Set([
+    'documento', 'auxiliar', 'cumento', 'eletronica', 'eletrônica', 'danfe',
+    'fiscal', 'nota', 'autenticidade', 'tenticidade', 'portal', 'protocolo',
+    'autorizacao', 'autorização', 'autorizadora', 'chave', 'acesso',
+    'destinatario', 'destinatário', 'remetente', 'recebemos', 'recebimento',
+    'transportador', 'fatura', 'duplicatas', 'imposto', 'icms', 'calculo',
+    'cálculo', 'inscricao', 'inscrição', 'estadual', 'endereco', 'endereço',
+    'informacoes', 'informações', 'complementares', 'reservado', 'fisco',
+    'natureza', 'operacao', 'operação', 'serie', 'série', 'crt', 'regime',
+    'tributario', 'tributário', 'consulta', 'assinatura', 'identificacao',
+    'identificação', 'recebedor',
+]);
+
+// Sufixos/termos tipicos de razao social de empresa brasileira — usados so
+// como bonus de pontuacao entre candidatas plausiveis (heuristica, nunca
+// obrigatorio).
+const OCR_TERMOS_EMPRESA = [
+    's/a', 'sa', 'ltda', 'eireli', 'me', 'industria', 'indústria', 'comercio',
+    'comércio', 'transporte', 'transportes', 'armazens', 'armazéns',
+    'armazem', 'armazém', 'logistica', 'logística', 'company', 'international',
+    'agroindustria', 'agroindústria', 'quimicos', 'químicos',
+];
+
+function ocrNormalizarTexto(s) {
+    return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+// Extraida do antigo ocr-worker.js — so processamento de string, roda direto
+// na thread principal.
 // NOTA (2026-09-04): extracao de chave de acesso (44 digitos) REMOVIDA —
 // diagnostico real (14 combinacoes/2 imagens) mostrou que ela nunca valida
 // via OCR (1 unico digito errado entre 44 ja invalida o resultado), mesmo
 // quando CNPJ solto e razao social ja saem corretos. Chave deixou de fazer
 // parte do processo de identificacao (ver handoff da demanda
 // recebimento-leitura-notas).
+// AJUSTE (2026-09-28, diagnostico com 3 notas reais): a heuristica antiga de
+// razao social (primeira linha 100% alfabetica, sem nenhum digito, entre as
+// 20 primeiras) falhava em 2 das 3 notas reais — pegava linha de ruido do
+// topo da imagem numa delas, e o texto do logo/cabecalho ("... DOCUMENTO
+// AUXILIAR DA") na outra — porque no layout real do DANFE a razao social do
+// emitente as vezes aparece na MESMA linha de outros dados (CNPJ/IE/chave de
+// acesso), nunca isolada como a heuristica antiga assumia. Nova heuristica
+// (ainda heuristica, nao contrato formal): para cada linha (ate a 40a),
+// extrai o PREFIXO alfabetico (tokens ate o primeiro que contenha algum
+// digito) em vez de exigir a linha inteira livre de digitos — permite captar
+// a razao social mesmo colada a dados numericos na mesma linha. Descarta
+// candidatas com token puramente simbolico (ruido de OCR de elementos
+// graficos), com predominancia de "palavras" de 1-2 caracteres, ou que
+// contenham alguma palavra tipica de cabecalho/rotulo de DANFE
+// (OCR_PALAVRAS_CABECALHO_DANFE). Entre as candidatas restantes, pontua e
+// escolhe a mais plausivel (mais tokens, presenca de termos tipicos de razao
+// social como "LTDA"/"S/A"/"COMERCIO"), penalizando (sem excluir por
+// completo) candidatas que apareçam depois da secao "DESTINATARIO/
+// REMETENTE" do DANFE — essas tendem a ser a contraparte do emitente (o
+// cliente a identificar), nao o proprio emitente; a penalidade (em vez de
+// exclusao total) preserva o caso real em que o emitente e repetido mais
+// abaixo, em "informacoes do local de retirada".
+// AJUSTE (2026-09-28, diagnostico com as mesmas 3 notas reais, campo que
+// ainda falhava): 1 das 3 razoes sociais (nota da Louis Dreyfus Company)
+// so aparecia, na imagem real, colada na MESMA linha reconhecida a um
+// token de cabecalho ("DANFE") — a regra acima descartava a LINHA INTEIRA
+// so por conter esse token, jogando fora a razao social correta junto, e
+// o processo acabava escolhendo uma 2a ocorrencia do nome da empresa mais
+// abaixo no canhoto, reconhecida de forma bem mais distorcida pelo OCR.
+// Correcao pontual: ao encontrar um token de cabecalho dentro da linha,
+// em vez de descartar a linha inteira, tenta o PREFIXO de tokens antes
+// dele como candidata (nunca o sufixo — nao houve caso real do padrao
+// inverso ate agora). So aceita esse prefixo se tiver pelo menos 2 tokens
+// e NENHUM token curto (<=2 letras) — criterio mais estrito que o da
+// linha inteira (que tolera ate 50% de tokens curtos), porque um prefixo
+// cortado no meio de uma linha e mais sujeito a ser fragmento/lixo de OCR
+// do que uma linha inteira ja validada de uma vez; diagnostico real
+// confirmou que essa regra mais estrita rejeita corretamente um prefixo
+// truncado de outra nota (contendo tokens de 2 letras remanescentes de
+// palavra quebrada) que teria sido lixo. Candidata aceita nessas condicoes
+// recebe um bonus de pontuacao (equivalente a 2 termos tipicos de razao
+// social baterem) — nome colado a um rotulo de cabecalho e um sinal
+// estrutural forte de que e o proprio emitente, pois o layout padrao do
+// DANFE poe o nome do emitente junto da caixa "DOCUMENTO AUXILIAR DA NOTA
+// FISCAL ELETRONICA/DANFE".
 function extrairCandidatos(texto) {
     const textoSeguro = texto || '';
 
@@ -2399,19 +2823,67 @@ function extrairCandidatos(texto) {
     }
     const cnpjsUnicos = [...new Set(cnpjsCandidatos)];
 
-    // Razao social candidata: heuristica simples (ver observacao no
-    // cabecalho do arquivo) — primeira linha reconhecida, entre as 20
-    // primeiras, predominantemente alfabetica (sem digitos, tamanho
-    // plausivel para um nome de empresa), onde costuma aparecer o nome do
-    // emitente no layout padrao de DANFE.
     const linhas = textoSeguro.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     let razaoSocialCandidata = null;
-    for (const linha of linhas.slice(0, 20)) {
-        const letras = (linha.match(/[A-Za-zÀ-ÖØ-öø-ÿ]/g) || []).length;
-        const digitosNaLinha = (linha.match(/\d/g) || []).length;
-        if (linha.length >= 6 && linha.length <= 80 && digitosNaLinha === 0 && letras >= linha.length * 0.6) {
-            razaoSocialCandidata = linha;
-            break;
+    let melhorPontuacao = -Infinity;
+    let apósSecaoDestinatario = false;
+
+    for (const linha of linhas.slice(0, 40)) {
+        if (/destinatari|remetente/.test(ocrNormalizarTexto(linha))) {
+            apósSecaoDestinatario = true;
+        }
+
+        const tokens = linha.split(/\s+/).filter(Boolean);
+        const prefixoTokens = [];
+        for (const tok of tokens) {
+            if (/\d/.test(tok)) break;
+            prefixoTokens.push(tok);
+        }
+        // descarta tokens formados so por simbolos (ex.: "+", "|") — nomes
+        // de empresa reais nao trazem esse tipo de token solto, mas ruido de
+        // OCR de elementos graficos do layout sim; "-" isolado e tolerado
+        // (conector comum, ex.: "S/A - Logistica").
+        if (prefixoTokens.some(t => t !== '-' && !/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(t))) continue;
+
+        const candidata = prefixoTokens.join(' ').trim().replace(/[\s-]+$/, '');
+        if (candidata.length < 6 || candidata.length > 80) continue;
+
+        const letras = (candidata.match(/[A-Za-zÀ-ÖØ-öø-ÿ]/g) || []).length;
+        if (letras < candidata.length * 0.6) continue;
+
+        const palavras = candidata.split(/\s+/).filter(Boolean);
+        if (palavras.length < 2) continue;
+
+        const curtas = palavras.filter(p => p.replace(/\W/g, '').length <= 2).length;
+        if (curtas > palavras.length * 0.5) continue;
+
+        let normPalavras = palavras.map(p => ocrNormalizarTexto(p.replace(/[^\p{L}]/gu, '')));
+        const idxCabecalho = normPalavras.findIndex(p => OCR_PALAVRAS_CABECALHO_DANFE.has(p));
+        let palavrasFinais = palavras;
+        let candidataFinal = candidata;
+        let coladaCabecalho = false;
+        if (idxCabecalho !== -1) {
+            if (idxCabecalho < 2) continue; // sem prefixo plausivel antes do token de cabecalho
+            const prefixo = palavras.slice(0, idxCabecalho);
+            const curtasPrefixo = prefixo.filter(p => p.replace(/\W/g, '').length <= 2).length;
+            if (curtasPrefixo > 0) continue;
+            palavrasFinais = prefixo;
+            normPalavras = normPalavras.slice(0, idxCabecalho);
+            candidataFinal = prefixo.join(' ');
+            coladaCabecalho = true;
+        }
+
+        let pontuacao = palavrasFinais.length;
+        for (const termo of OCR_TERMOS_EMPRESA) {
+            if (normPalavras.includes(termo)) pontuacao += 5;
+        }
+        pontuacao += Math.min(candidataFinal.length, 60) * 0.1;
+        if (apósSecaoDestinatario) pontuacao -= 15;
+        if (coladaCabecalho) pontuacao += 10;
+
+        if (pontuacao > melhorPontuacao) {
+            melhorPontuacao = pontuacao;
+            razaoSocialCandidata = candidataFinal;
         }
     }
 
@@ -2427,17 +2899,31 @@ function extrairCandidatos(texto) {
 // rotulos, excluindo explicitamente comprimentos de CNPJ (14) e de chave de
 // acesso (44). Qualquer outro caso cai no preenchimento manual obrigatorio
 // (ver processarProximaOcrNumeroDaFila()/enfileirarNumeroNotaModal()).
-const NUMERO_NOTA_REGEX_ROTULO = /N[º°ºoO]\.?\s*[:\-]?\s*(\d[\d.\s]{0,12}\d|\d)/;
+// AJUSTE (2026-09-28, diagnostico com 3 notas reais): o grupo numerico
+// tolerava espaco/tab interno (junto com o ponto), o que por vezes fazia o
+// regex atravessar, na MESMA linha, o numero da nota e um campo numerico
+// vizinho separado por espaco (ex.: "Nº 000.029.553 11.1 /2" — o "11"
+// seguinte era engolido junto, estourando para 11 digitos e sendo descartado
+// pelo filtro de faixa, quando o correto — 9 digitos — era so "000.029.553").
+// Retirado \s do grupo (mantido so o ponto como separador tolerado) —
+// corrige esse atravessamento sem reabrir o CNPJ_REGEX (que e outro regex,
+// ja corrigido em rodada anterior).
+const NUMERO_NOTA_REGEX_ROTULO = /N[º°ºoO]\.?\s*[:\-]?\s*(\d[\d.]{0,12}\d|\d)/;
 
 function extrairNumeroNota(texto) {
     const textoSeguro = texto || '';
     const linhas = textoSeguro.split(/\r?\n/);
+    // Coleta TODAS as correspondencias validas (nao para na primeira) —
+    // diagnostico real mostrou o OCR por vezes quebrando "Nº 000.029.553" em
+    // duas linhas ("Nº 000.0" numa linha, "29.553" na seguinte), fazendo a
+    // 1a linha gerar uma correspondencia truncada/errada mesmo havendo, mais
+    // abaixo no mesmo texto, uma 2a ocorrencia completa e correta (o DANFE
+    // repete o numero da nota em mais de um ponto do layout). Entre as
+    // correspondencias validas, prefere a mais completa (maior quantidade de
+    // digitos) — uma correspondencia truncada por quebra de linha
+    // naturalmente tem menos digitos que a ocorrencia completa.
+    const candidatos = [];
     for (const linha of linhas) {
-        // "SERIE"/"SÉRIE" na mesma linha do rotulo e um forte indicio de
-        // cabecalho combinado "Nº ... SERIE ..." — nesse caso o numero mais
-        // proximo do rotulo "N" ainda tende a ser o correto (o regex ja para
-        // no primeiro grupo numerico apos o rotulo), mas evitamos linhas que
-        // citem SOMENTE serie sem nenhum rotulo de numero reconhecido.
         const m = linha.match(NUMERO_NOTA_REGEX_ROTULO);
         if (!m) continue;
         const bruto = m[1].replace(/[.\s]/g, '');
@@ -2445,9 +2931,14 @@ function extrairNumeroNota(texto) {
         if (bruto.length === 44) continue; // chave de acesso, nunca numero de nota
         if (bruto.length === 14) continue; // provavel CNPJ confundido com rotulo
         if (bruto.length < 1 || bruto.length > 9) continue; // faixa plausivel de numero de nota
-        return { numero: bruto, confiancaAlta: true };
+        candidatos.push(bruto);
     }
-    return { numero: null, confiancaAlta: false };
+    if (candidatos.length === 0) return { numero: null, confiancaAlta: false };
+    let melhor = candidatos[0];
+    for (const candidato of candidatos) {
+        if (candidato.length > melhor.length) melhor = candidato;
+    }
+    return { numero: melhor, confiancaAlta: true };
 }
 
 // Serializa TODAS as chamadas worker.recognize() do Tesseract.js entre as
@@ -2474,8 +2965,9 @@ function executarReconhecimentoSerializado(fn) {
 let ocrNumeroFila = [];
 let ocrNumeroProcessando = false;
 
-function processarOcrNumeroNota(imagem, ordem) {
-    ocrNumeroFila.push({ imagem, ordem, idAtendimento: state.idAtendimento });
+function processarOcrNumeroNota(imagem, ordem, medirSeq) {
+    marca('ocr_fila_num', medirSeq);
+    ocrNumeroFila.push({ imagem, ordem, idAtendimento: state.idAtendimento, medirSeq });
     processarProximaOcrNumeroDaFila();
 }
 
@@ -2490,18 +2982,28 @@ async function processarProximaOcrNumeroDaFila() {
         const workerPromise = iniciarOcrWorker();
         if (!workerPromise) throw new Error('Tesseract.js indisponivel');
         const worker = await workerPromise;
-        const imagemRotacionada = await rotacionarImagem270(proxima.imagem);
-        const resultado = await executarReconhecimentoSerializado(() => worker.recognize(imagemRotacionada));
+        // AJUSTE (2026-09-28): proxima.imagem ja nasce rotacionada 270 graus
+        // (em pe) em capturarFotoScannerNota() — nao rotaciona de novo aqui
+        // (rotacao dupla giraria mais 270 graus = 180 graus, resultado errado).
+        const resultado = await executarReconhecimentoSerializado(() => {
+            marca('ocr_ini_num', proxima.medirSeq);
+            return worker.recognize(proxima.imagem);
+        });
+        marca('ocr_fim_num', proxima.medirSeq);
         const texto = (resultado && resultado.data && resultado.data.text) || '';
         const extraido = extrairNumeroNota(texto);
         numeroSugerido = extraido.confiancaAlta ? extraido.numero : null;
     } catch (e) {
+        marca('falha_ocr_num', proxima.medirSeq);
         console.warn('[OCR] falha ao extrair numero da nota', e);
         numeroSugerido = null;
     } finally {
         ocrNumeroProcessando = false;
         if (deAtendimentoAtual && state.tela === 'rec_digitaliza') {
             enfileirarNumeroNotaModal(proxima.ordem, numeroSugerido);
+            marca('res_aplic_num', proxima.medirSeq);
+        } else {
+            marca('res_descart_num', proxima.medirSeq);
         }
         processarProximaOcrNumeroDaFila();
     }
@@ -2707,31 +3209,6 @@ function marcarNumeroNotaConfirmado(ordem, numero) {
     atualizarIndicadorNumerosNota();
 }
 
-// Gera uma COPIA rotacionada em 270 graus da imagem, usada exclusivamente
-// para o OCR/Tesseract.js — NUNCA persistida nem enviada ao backend como a
-// "nota" (a imagem original, ja salva via confirmarUsoImagemNota(), segue
-// intocada). Rotacao fixa: diagnostico real (2 imagens diferentes, 4
-// rotacoes cada) confirmou que 0/90/180 graus nunca produzem CNPJ valido, e
-// 270 graus sempre produz. 270/90 graus trocam largura/altura — por isso o
-// canvas de destino usa img.height/img.width invertidos.
-function rotacionarImagem270(imagemDataUrl) {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.height;
-            canvas.height = img.width;
-            const ctx = canvas.getContext('2d');
-            ctx.translate(canvas.width / 2, canvas.height / 2);
-            ctx.rotate(270 * Math.PI / 180);
-            ctx.drawImage(img, -img.width / 2, -img.height / 2);
-            resolve(canvas);
-        };
-        img.onerror = () => reject(new Error('Falha ao carregar imagem para rotacao de OCR'));
-        img.src = imagemDataUrl;
-    });
-}
-
 // Cria (uma unica vez) e reaproveita o worker interno do Tesseract.js —
 // evita recarregar o modelo de idioma a cada nota. Chamado diretamente na
 // thread principal (nao ha mais Worker customizado — ver comentario acima).
@@ -2761,9 +3238,10 @@ function iniciarOcrWorker() {
 // Enfileira uma nota para OCR — chamado logo apos confirmarUsoImagemNota()
 // salvar a imagem com sucesso, sem await (fire-and-forget do ponto de vista
 // da UI, nao bloqueia a captura da proxima nota).
-function processarOcrNota(imagem, ordem) {
+function processarOcrNota(imagem, ordem, medirSeq) {
     if (state.clienteIdentificado) return; // early-stop: cliente ja identificado neste atendimento
-    ocrFila.push({ imagem, ordem, idAtendimento: state.idAtendimento });
+    marca('ocr_fila_cli', medirSeq);
+    ocrFila.push({ imagem, ordem, idAtendimento: state.idAtendimento, medirSeq });
     processarProximaOcrDaFila();
 }
 
@@ -2784,20 +3262,27 @@ async function processarProximaOcrDaFila() {
         const workerPromise = iniciarOcrWorker();
         if (!workerPromise) throw new Error('Tesseract.js indisponivel');
         const worker = await workerPromise;
-        // rotacao fixa de 270 graus, so na copia em memoria usada pro OCR —
-        // a imagem original (proxima.imagem) ja foi salva intocada por
-        // confirmarUsoImagemNota() antes desta chamada.
-        const imagemRotacionada = await rotacionarImagem270(proxima.imagem);
+        // AJUSTE (2026-09-28): proxima.imagem ja nasce rotacionada 270 graus
+        // (em pe) em capturarFotoScannerNota() — nao rotaciona de novo aqui
+        // (rotacao dupla giraria mais 270 graus = 180 graus, resultado errado).
         // serializado com a fila de OCR do numero da nota (ocrNumeroFila) —
         // ver executarReconhecimentoSerializado(), o worker do Tesseract.js
         // e unico e nao suporta recognize() concorrente.
-        const resultado = await executarReconhecimentoSerializado(() => worker.recognize(imagemRotacionada));
+        const resultado = await executarReconhecimentoSerializado(() => {
+            marca('ocr_ini_cli', proxima.medirSeq);
+            return worker.recognize(proxima.imagem);
+        });
+        marca('ocr_fim_cli', proxima.medirSeq);
         const texto = (resultado && resultado.data && resultado.data.text) || '';
         const { cnpjsCandidatos, razaoSocialCandidata } = extrairCandidatos(texto);
         if (deAtendimentoAtual && !state.clienteIdentificado) {
             identificarClienteNota(proxima.ordem, cnpjsCandidatos, razaoSocialCandidata);
+            marca('res_aplic_cli', proxima.medirSeq);
+        } else {
+            marca('res_descart_cli', proxima.medirSeq);
         }
     } catch (e) {
+        marca('falha_ocr_cli', proxima.medirSeq);
         console.warn('[OCR] falha ao processar nota via Tesseract.js', e);
         if (deAtendimentoAtual && !state.clienteIdentificado) {
             identificarClienteNota(proxima.ordem, [], null);

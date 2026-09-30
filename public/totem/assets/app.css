@@ -155,6 +155,17 @@ input.campo-texto {
    que continuam em 360px via .caixa-scanner/.previa-nota). .guia-scanner usa
    inset em % e escala junto automaticamente. */
 #caixaScanner, #previaNota { max-width: min(92%, 900px); }
+/* AJUSTE (2026-09-28, demanda foto-nota-em-pe): a previa da nota agora
+   nasce em pe (rotacionada 270 graus na captura, ver capturarFotoScannerNota()
+   em app.js) — mas a altura inline aplicada via JS em ambos os elementos
+   (aplicarAlturaScanner()) usa a proporcao NATIVA do video ao vivo
+   (paisagem, 4:3, correta para #caixaScanner), o que deixava a previa
+   (retrato) com pillarbox grande e a nota pequena dentro da caixa. Este
+   !important sobrescreve SO a altura de #previaNota (nunca a de
+   #caixaScanner, que continua paisagem corretamente, e nunca a de
+   #expCamPreview/#recCamPreview, que nao usam este ID) para a imagem
+   exibir na sua propria proporcao (retrato), sem pillarbox. */
+#previaNota { height: auto !important; max-height: 70vh; }
 .status-scanner { font-size: 13px; color: var(--text-primary); text-align: center; }
 /* excecoes semanticas mantidas (sucesso/erro), texto proprio ja indica o
    estado (nunca so cor). */
