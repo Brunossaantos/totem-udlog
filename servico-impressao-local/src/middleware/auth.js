@@ -2,7 +2,7 @@
 
 /**
  * Autenticacao PROPRIA deste servico (nao e o token do totem, nem do
- * Trello, nem do Talent). O front-end do totem envia este token no
+ * Talent). O front-end do totem envia este token no
  * cabecalho Authorization: Bearer <token>, valor esse que o backend PHP
  * apenas repassa como referencia via IMPRESSAO_LOCAL_TOKEN no .env -- o
  * valor real e definido/gerado aqui, na config local do servico

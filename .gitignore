@@ -35,3 +35,13 @@ Thumbs.db
 # chamadas HTTP reais a APIs externas (ex: Talent) e nunca devem ser
 # versionados, mesmo sem dado pessoal explícito no próprio arquivo
 tests/manual/_*.php
+
+# Ferramentas de IA (Claude Code): agentes, comandos, skills, configuracao,
+# instrucoes do projeto, contratos de comunicacao, estado do projeto (resumido
+# e backup completo) e documentacao/handoffs de trabalho. Ficam apenas na
+# maquina de desenvolvimento e nunca sao versionados.
+.claude/
+CLAUDE.md
+docs/
+ia_development_state.md
+ia_development_state_bkp.md

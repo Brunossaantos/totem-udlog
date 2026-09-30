@@ -3,7 +3,7 @@
 
   "porta": 4747,
 
-  "_comentario_token": "Token proprio deste servico (diferente de qualquer token do totem/Trello/Talent). Gerar com: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\". O mesmo valor deve ser colocado em IMPRESSAO_LOCAL_TOKEN no .env do backend PHP (fora deste repositorio de servico), que e quem informa esse token ao front-end do totem.",
+  "_comentario_token": "Token proprio deste servico (diferente de qualquer token do totem/Talent). Gerar com: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\". O mesmo valor deve ser colocado em IMPRESSAO_LOCAL_TOKEN no .env do backend PHP (fora deste repositorio de servico), que e quem informa esse token ao front-end do totem.",
   "token": "SUBSTITUA_POR_UM_TOKEN_ALEATORIO_LONGO_GERADO_COM_CRYPTO",
 
   "_comentario_max_bytes": "Tamanho maximo, em BYTES, do PDF ja decodificado do base64 (nao do base64 em si). Requisicoes com PDF maior que isso sao rejeitadas antes de chegar na impressora.",

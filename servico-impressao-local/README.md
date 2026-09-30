@@ -68,8 +68,8 @@ neste repositorio** — e o roteiro para quando o mini PC fisico existir.
 
 ### 2.4. Gerar o token do servico
 
-Este servico usa um token PROPRIO (nunca reutilizar token do totem, do
-Trello ou do Talent). Gerar um valor aleatorio forte:
+Este servico usa um token PROPRIO (nunca reutilizar token do totem ou
+do Talent). Gerar um valor aleatorio forte:
 
 ```
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -82,8 +82,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 > - **Nunca** colocar o token em URL/querystring.
 > - **Nunca** passar o token como argumento de linha de comando visivel
 >   (evitar que apareca no historico do shell).
-> - **Nunca** registrar o token em print de tela, log, documentacao,
->   ticket ou comentario do Trello.
+> - **Nunca** registrar o token em print de tela, log, documentacao
+>   ou ticket.
 > - **Sempre** autenticar via header HTTP `Authorization: Bearer <token>`
 >   — nunca outro mecanismo.
 > - Testes manuais que precisem do token (secoes 4.3/4.4) devem ser feitos
