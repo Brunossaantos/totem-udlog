@@ -483,8 +483,8 @@ let atendimentoGeracao = 0;
 // OCR em fila ou em execucao, identificar-cliente em voo.
 function trabalhoAtivoNotas() {
     return !!state.capturaNotaEmAndamento
-        || ocrProcessando || ocrNumeroProcessando
-        || ocrFila.length > 0 || ocrNumeroFila.length > 0
+        || ocrProcessando
+        || ocrFila.length > 0
         || identificacoesEmVoo > 0;
 }
 
@@ -695,7 +695,6 @@ function novoAtendimento() {
         rec: estadoRecVazio(),
     });
     ocrFila = [];
-    ocrNumeroFila = [];
     numeroModalFila = [];
     numeroModalAberta = false;
     medirLimpar();
@@ -2069,7 +2068,6 @@ async function iniciarRecebimento(excedeLimite) {
             atendimentoGeracao++;
             suspensaoInicioMs = 0;
             ocrFila = [];
-            ocrNumeroFila = [];
             numeroModalFila = [];
             numeroModalAberta = false;
             medirLimpar();
@@ -2149,7 +2147,8 @@ function atualizarIndicadorNumerosNota() {
 //           tardio do OCR e ignorado.
 function telaRevisaoNumeros() {
     return `<div class="rev-wrap">
-        <div class="titulo">Confira o número das notas</div>
+        <div class="titulo">Confira as notas</div>
+        <p class="rev-instrucao">Toque em cada nota para conferir o número. Se estiver certo, toque em Confirmar. Se estiver errado, corrija. Quando todas estiverem confirmadas, toque em Continuar.</p>
         <div class="rev-leitura" id="revisaoLeitura" role="status" style="display:none"></div>
         <div class="rev-lista" id="revisaoLista"></div>
         <div class="rev-rodape">
@@ -2167,7 +2166,7 @@ const REV_ICONES = {
     confirmado: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>'
 };
 
-function criarCartaoNota(ordem, imagem) {
+function criarCartaoNota(ordem, imagem, total) {
     const cartao = document.createElement('button');
     cartao.type = 'button';
     cartao.className = 'rev-cartao';
@@ -2175,13 +2174,13 @@ function criarCartaoNota(ordem, imagem) {
     cartao.addEventListener('click', () => tocarCartaoNota(ordem));
     const img = document.createElement('img');
     img.className = 'rev-miniatura';
-    img.alt = 'Nota ' + ordem;
+    img.alt = 'Nota ' + ordem + ' de ' + total;
     if (imagem) img.src = imagem; // imagem ja em memoria (nao duplicada em storage)
     const textos = document.createElement('div');
     textos.className = 'rev-textos';
     const rotulo = document.createElement('div');
     rotulo.className = 'rev-rotulo';
-    rotulo.textContent = 'Nota ' + ordem;
+    rotulo.textContent = 'Nota ' + ordem + ' de ' + total;
     const numero = document.createElement('div');
     numero.className = 'rev-numero';
     const selo = document.createElement('span');
@@ -2231,7 +2230,7 @@ function atualizarRevisaoNumeros(msgErro) {
     notas.forEach((n, i) => {
         let cartao = document.getElementById('cartaoNota' + n.ordem);
         if (!cartao) {
-            cartao = criarCartaoNota(n.ordem, (state.notasImagens || [])[i]);
+            cartao = criarCartaoNota(n.ordem, (state.notasImagens || [])[i], notas.length);
             lista.appendChild(cartao);
         }
         preencherCartaoNota(cartao, n);
@@ -2240,12 +2239,12 @@ function atualizarRevisaoNumeros(msgErro) {
     const falta = notas.filter(n => !n.confirmado).length;
     const elLeitura = document.getElementById('revisaoLeitura');
     if (elLeitura) {
-        elLeitura.textContent = lendo > 0 ? 'Lendo notas... ' + lendo + ' ainda em leitura.' : '';
+        elLeitura.textContent = lendo > 0 ? (lendo === 1 ? 'Lendo 1 nota...' : 'Lendo ' + lendo + ' notas...') : '';
         elLeitura.style.display = lendo > 0 ? '' : 'none';
     }
     const elMotivo = document.getElementById('revisaoMotivo');
     if (elMotivo) {
-        elMotivo.textContent = falta > 0 ? 'Falta conferir ' + falta + ' nota(s).' : 'Todas as notas conferidas.';
+        elMotivo.textContent = falta > 0 ? (falta === 1 ? 'Falta conferir 1 nota.' : 'Faltam conferir ' + falta + ' notas.') : 'Todas as notas conferidas.';
     }
     const elErro = document.getElementById('revisaoErro');
     if (elErro) {
@@ -2648,8 +2647,8 @@ function capturarFotoScannerNota(video) {
     // confirmou como correta para a camera do totem (ver antiga
     // rotacionarImagem270(), removida). Agora a imagem nasce em pe: e a
     // UNICA fonte de verdade para previa, envio/persistencia
-    // (confirmarUsoImagemNota()) e OCR (processarOcrNota()/
-    // processarOcrNumeroNota() nao rotacionam mais, pra evitar rotacao dupla).
+    // (confirmarUsoImagemNota()) e OCR (processarOcrNota() nao rotaciona mais,
+    // pra evitar rotacao dupla).
     canvas.width = video.videoHeight;
     canvas.height = video.videoWidth;
     const ctx = canvas.getContext('2d');
@@ -2785,8 +2784,7 @@ async function confirmarUsoImagemNota() {
         // estado do numero: 'pendente' (OCR nao terminou) | 'sugerido' | 'sem_sugestao' | 'confirmado'
         state.notasNumeros.push({ ordem, numero: null, confirmado: false, origem: null, sugestao: null, estado: 'pendente', ocrConcluido: false, manualOverride: false });
         state.previewNotaAtual = null;
-        processarOcrNota(imagem, ordem, notaSeq);
-        processarOcrNumeroNota(imagem, ordem, notaSeq);
+        processarOcrNota(imagem, ordem, notaSeq); // passada unica: numero + candidatos de cliente
         const contador = document.getElementById('contadorNotas');
         if (contador) contador.textContent = state.notaOrdem;
         atualizarIndicadorNumerosNota();
@@ -3129,35 +3127,15 @@ function extrairNumeroNota(texto) {
     return { numero: melhor, confiancaAlta: true };
 }
 
-// Serializa TODAS as chamadas worker.recognize() do Tesseract.js entre as
-// duas filas de OCR existentes (ocrFila, identificacao de cliente, e a nova
-// ocrNumeroFila abaixo) — o worker do Tesseract.js e unico e reaproveitado
-// (iniciarOcrWorker()), e chamar recognize() concorrentemente nele nao e
-// seguro. Cada fila mantem sua propria ordem interna (ocrProcessando/
-// ocrNumeroProcessando); este mutex extra so garante que as duas filas nunca
-// disputem o mesmo worker ao mesmo tempo.
+// Serializa as chamadas worker.recognize() do Tesseract.js — o worker e unico e
+// reaproveitado (iniciarOcrWorker()) e chamar recognize() concorrentemente nele
+// nao e seguro. Com a passada unica ha uma unica fila (ocrFila), mas o mutex e
+// mantido como defesa.
 let filaExecucaoTesseract = Promise.resolve();
 function executarReconhecimentoSerializado(fn) {
     const execucao = filaExecucaoTesseract.then(fn, fn);
     filaExecucaoTesseract = execucao.catch(() => {});
     return execucao;
-}
-
-// Fila dedicada de OCR para o numero da nota — INDEPENDENTE da fila de
-// identificacao de cliente (ocrFila/processarProximaOcrDaFila): aquela usa
-// early-stop assim que o cliente e identificado (nao dispara OCR nas notas
-// seguintes), mas o numero da nota precisa ser capturado em TODAS as notas,
-// independente do estado de identificacao do cliente. Por isso roda uma
-// segunda passada de reconhecimento por nota (custo de CPU aceito nesta
-// implementacao — ver observacao registrada no handoff desta etapa).
-let ocrNumeroFila = [];
-let ocrNumeroProcessando = false;
-
-function processarOcrNumeroNota(imagem, ordem, medirSeq) {
-    marca('ocr_fila_num', medirSeq);
-    // idAtendimento/geracao CAPTURADOS no enfileiramento (nunca lidos tarde)
-    ocrNumeroFila.push({ imagem, ordem, idAtendimento: state.idAtendimento, geracao: atendimentoGeracao, medirSeq });
-    processarProximaOcrNumeroDaFila();
 }
 
 // true se o atendimento em que o item foi enfileirado ainda e o atual (mesmo id
@@ -3180,19 +3158,43 @@ function aplicarResultadoOcrNumero(ordem, sugestao) {
     if (state.tela === 'rec_revisao_numeros') atualizarRevisaoNumeros();
 }
 
-async function processarProximaOcrNumeroDaFila() {
-    if (ocrNumeroProcessando) return;
-    const proxima = ocrNumeroFila.shift();
+// OCR de PASSADA UNICA por nota: um unico worker.recognize() cujo texto alimenta
+// extrairNumeroNota (estado da nota, prioridade) e extrairCandidatos (cliente).
+// Enfileirado logo apos confirmarUsoImagemNota() salvar a imagem, sem await
+// (nao bloqueia a captura da proxima nota). O OCR roda para TODAS as notas (o
+// numero e necessario mesmo com o cliente ja identificado); o "early-stop" de
+// cliente pula so a chamada identificarClienteNota (ver finally abaixo).
+// Marcas ?medir=1: ocr_fila_num/ocr_ini_num/ocr_fim_num/falha_ocr_num/
+// res_aplic_num/res_descart_num descrevem a passada de OCR; ocr_ini_cli/
+// ocr_fim_cli cercam so a chamada de identificacao (ocr_cli_ms = tempo da
+// identificacao; fila_cli_ms fica sempre 'na'; eventos *_fila_cli, res_*_cli e
+// falha_ocr_cli nao sao mais emitidos).
+function processarOcrNota(imagem, ordem, medirSeq) {
+    marca('ocr_fila_num', medirSeq);
+    // idAtendimento/geracao CAPTURADOS no enfileiramento (nunca lidos tarde)
+    ocrFila.push({ imagem, ordem, idAtendimento: state.idAtendimento, geracao: atendimentoGeracao, medirSeq });
+    processarProximaOcrDaFila();
+}
+
+// Processa a fila nota por nota (sem reconhecimentos em paralelo). Mesmo em caso
+// de erro real de OCR (imagem ilegivel, modelo de idioma, worker indisponivel)
+// a nota vai a sem_sugestao e, se o cliente ainda nao foi identificado, chama
+// identificarClienteNota com candidatos vazios, para a nota sempre sair de
+// PENDENTE (o backend trata candidatos vazios como NAO_IDENTIFICADA, sem erro).
+async function processarProximaOcrDaFila() {
+    if (ocrProcessando) return;
+    const proxima = ocrFila.shift();
     if (!proxima) return;
-    ocrNumeroProcessando = true;
+    ocrProcessando = true;
     let numeroSugerido = null;
+    let cnpjsCandidatos = [];
+    let razaoSocialCandidata = null;
     try {
         const workerPromise = iniciarOcrWorker();
         if (!workerPromise) throw new Error('Tesseract.js indisponivel');
         const worker = await workerPromise;
-        // AJUSTE (2026-09-28): proxima.imagem ja nasce rotacionada 270 graus
-        // (em pe) em capturarFotoScannerNota() — nao rotaciona de novo aqui
-        // (rotacao dupla giraria mais 270 graus = 180 graus, resultado errado).
+        // proxima.imagem ja nasce rotacionada 270 graus (em pe) em
+        // capturarFotoScannerNota() — nao rotaciona de novo aqui.
         const resultado = await executarReconhecimentoSerializado(() => {
             marca('ocr_ini_num', proxima.medirSeq);
             return worker.recognize(proxima.imagem);
@@ -3201,20 +3203,30 @@ async function processarProximaOcrNumeroDaFila() {
         const texto = (resultado && resultado.data && resultado.data.text) || '';
         const extraido = extrairNumeroNota(texto);
         numeroSugerido = extraido.confiancaAlta ? extraido.numero : null;
+        const candidatos = extrairCandidatos(texto);
+        cnpjsCandidatos = candidatos.cnpjsCandidatos;
+        razaoSocialCandidata = candidatos.razaoSocialCandidata;
     } catch (e) {
         marca('falha_ocr_num', proxima.medirSeq);
-        console.warn('[OCR] falha ao extrair numero da nota', e);
+        console.warn('[OCR] falha ao processar nota via Tesseract.js', e);
         numeroSugerido = null;
+        cnpjsCandidatos = [];
+        razaoSocialCandidata = null;
     } finally {
-        ocrNumeroProcessando = false;
-        // guard reavaliado DEPOIS do await do recognize e antes de escrever estado
+        ocrProcessando = false;
+        // guard reavaliado DEPOIS do await do recognize (id e geracao capturados)
         if (atendimentoVigente(proxima)) {
+            // 1) numero primeiro: estado da nota gravado antes de qualquer chamada de rede
             aplicarResultadoOcrNumero(proxima.ordem, numeroSugerido);
             marca('res_aplic_num', proxima.medirSeq);
+            // 2) cliente em segundo plano (sem await); so enquanto nao identificado
+            if (!state.clienteIdentificado) {
+                identificarClienteNota(proxima.ordem, cnpjsCandidatos, razaoSocialCandidata, proxima.idAtendimento, proxima.geracao, proxima.medirSeq);
+            }
         } else {
             marca('res_descart_num', proxima.medirSeq);
         }
-        processarProximaOcrNumeroDaFila();
+        processarProximaOcrDaFila();
         notificarFimDeTrabalhoNotas();
     }
 }
@@ -3293,16 +3305,36 @@ function mensagemErroSalvarNumero(e) {
     return 'Não foi possível salvar. Toque para tentar de novo.';
 }
 
+// Topo dos modais de numero: identificacao "Nota N de M" + miniatura da nota
+// (state.notasImagens, em memoria; o src e atribuido por DOM, nunca gravado em storage).
+function cabecalhoModalNota(ordem) {
+    const total = (state.notasNumeros || []).length;
+    return `<div class="nota-modal-topo">
+            <img class="nota-modal-mini" id="notaModalMini" alt="">
+            <div class="nota-modal-id">Nota ${escapeHtml(ordem)} de ${escapeHtml(total)}</div>
+        </div>`;
+}
+function preencherMiniaturaModalNota(ordem) {
+    const img = document.getElementById('notaModalMini');
+    if (!img) return;
+    const i = (state.notasNumeros || []).findIndex(n => n.ordem === ordem);
+    const src = i >= 0 ? (state.notasImagens || [])[i] : null;
+    if (src) img.src = src; else img.style.display = 'none';
+    img.alt = 'Foto da nota ' + ordem;
+}
+
 function abrirModalNumeroNotaSugestao(ordem, sugestao) {
     abrirModal(`
-        <div class="titulo">Nota nº ${escapeHtml(sugestao)} identificada</div>
-        <div class="subtitulo">Confira o número antes de continuar</div>
+        ${cabecalhoModalNota(ordem)}
+        <div class="nota-modal-instrucao">O sistema leu este número. Confira na nota: está certo?</div>
+        <div class="nota-modal-numero">${escapeHtml(sugestao)}</div>
         <div class="grupo-botoes">
             <button class="btn-primario" id="btnConfirmarNumeroSugerido">Confirmar</button>
             <button class="btn-fantasma" id="btnCorrigirNumeroSugerido">Corrigir</button>
         </div>
         <button class="btn-saida-modal-nota" onclick="confirmarCancelarNotaModal()">✕ Cancelar atendimento</button>
     `);
+    preencherMiniaturaModalNota(ordem);
     const btnConfirmar = document.getElementById('btnConfirmarNumeroSugerido');
     const btnCorrigir = document.getElementById('btnCorrigirNumeroSugerido');
     if (btnConfirmar) btnConfirmar.addEventListener('click', () => confirmarNumeroNotaSugerido(ordem, sugestao));
@@ -3327,13 +3359,14 @@ async function confirmarNumeroNotaSugerido(ordem, sugestao) {
 
 function abrirModalNumeroNotaManual(ordem, valorInicial, mensagemErro) {
     abrirModal(`
-        <div class="titulo">Número da nota fiscal</div>
-        <div class="subtitulo">Digite o número da nota (obrigatório)</div>
+        ${cabecalhoModalNota(ordem)}
+        <div class="nota-modal-instrucao">Digite o número da nota (só os números).</div>
         <input class="campo-texto" id="inputNumeroNota" inputmode="numeric" readonly value="${escapeHtml(valorInicial || '')}" placeholder="Número da nota">
         <div class="status-scanner erro" id="numeroNotaErro" style="${mensagemErro ? '' : 'display:none'}">${escapeHtml(mensagemErro || '')}</div>
         <div class="teclado-numerico-nota" id="tecladoNumericoNota"></div>
         <button class="btn-saida-modal-nota" onclick="confirmarCancelarNotaModal()">✕ Cancelar atendimento</button>
     `);
+    preencherMiniaturaModalNota(ordem);
     montarTecladoNumericoNota(ordem);
 }
 
@@ -3457,77 +3490,19 @@ function iniciarOcrWorker() {
     return tesseractWorkerPromise;
 }
 
-// Enfileira uma nota para OCR — chamado logo apos confirmarUsoImagemNota()
-// salvar a imagem com sucesso, sem await (fire-and-forget do ponto de vista
-// da UI, nao bloqueia a captura da proxima nota).
-function processarOcrNota(imagem, ordem, medirSeq) {
-    if (state.clienteIdentificado) return; // early-stop: cliente ja identificado neste atendimento
-    marca('ocr_fila_cli', medirSeq);
-    ocrFila.push({ imagem, ordem, idAtendimento: state.idAtendimento, geracao: atendimentoGeracao, medirSeq });
-    processarProximaOcrDaFila();
-}
-
-// Processa a fila nota por nota (nao dispara reconhecimentos em paralelo —
-// evita competir por CPU/memoria). Mesmo em caso de erro real de OCR
-// (imagem ilegivel, falha ao baixar o modelo de idioma, worker indisponivel
-// etc.) chama identificarClienteNota com candidatos vazios, para a nota
-// sempre sair de PENDENTE (o backend ja trata candidatos vazios como
-// NAO_IDENTIFICADA, sem erro) — corrige o bug de nota presa em PENDENTE.
-async function processarProximaOcrDaFila() {
-    if (ocrProcessando) return;
-    if (state.clienteIdentificado) { ocrFila = []; return; }
-    const proxima = ocrFila.shift();
-    if (!proxima) return;
-    ocrProcessando = true;
-    try {
-        const workerPromise = iniciarOcrWorker();
-        if (!workerPromise) throw new Error('Tesseract.js indisponivel');
-        const worker = await workerPromise;
-        // AJUSTE (2026-09-28): proxima.imagem ja nasce rotacionada 270 graus
-        // (em pe) em capturarFotoScannerNota() — nao rotaciona de novo aqui
-        // (rotacao dupla giraria mais 270 graus = 180 graus, resultado errado).
-        // serializado com a fila de OCR do numero da nota (ocrNumeroFila) —
-        // ver executarReconhecimentoSerializado(), o worker do Tesseract.js
-        // e unico e nao suporta recognize() concorrente.
-        const resultado = await executarReconhecimentoSerializado(() => {
-            marca('ocr_ini_cli', proxima.medirSeq);
-            return worker.recognize(proxima.imagem);
-        });
-        marca('ocr_fim_cli', proxima.medirSeq);
-        const texto = (resultado && resultado.data && resultado.data.text) || '';
-        const { cnpjsCandidatos, razaoSocialCandidata } = extrairCandidatos(texto);
-        // guard reavaliado DEPOIS do await do recognize (id e geracao capturados)
-        if (atendimentoVigente(proxima) && !state.clienteIdentificado) {
-            identificarClienteNota(proxima.ordem, cnpjsCandidatos, razaoSocialCandidata, proxima.idAtendimento, proxima.geracao);
-            marca('res_aplic_cli', proxima.medirSeq);
-        } else {
-            marca('res_descart_cli', proxima.medirSeq);
-        }
-    } catch (e) {
-        marca('falha_ocr_cli', proxima.medirSeq);
-        console.warn('[OCR] falha ao processar nota via Tesseract.js', e);
-        if (atendimentoVigente(proxima) && !state.clienteIdentificado) {
-            identificarClienteNota(proxima.ordem, [], null, proxima.idAtendimento, proxima.geracao);
-        }
-    } finally {
-        ocrProcessando = false;
-        processarProximaOcrDaFila();
-        notificarFimDeTrabalhoNotas();
-    }
-}
-
 // Chama o endpoint de identificacao. Retry simples (2 tentativas extras,
 // backoff curto) so para falha de rede (TypeError do fetch) — nunca para
 // resposta de negocio (NAO_IDENTIFICADA/ERRO), que e tratada como
 // "segue sem identificar automaticamente", sem alarme ao motorista.
-// idAtendimento/geracao vem CAPTURADOS no enfileiramento do OCR; o guard e
+// idAtendimento/geracao vem CAPTURADOS no enfileiramento do OCR (medirSeq: so medicao); o guard e
 // reavaliado antes de CADA chamada api() (inclusive retries) e antes de escrever
 // estado, para nunca chamar a API com id nulo ou do atendimento novo.
 let identificacoesEmVoo = 0;
-async function identificarClienteNota(ordem, cnpjsCandidatos, razaoSocialCandidata, idAtendimentoCapturado, geracaoCapturada) {
+async function identificarClienteNota(ordem, cnpjsCandidatos, razaoSocialCandidata, idAtendimentoCapturado, geracaoCapturada, medirSeq) {
     const alvo = { idAtendimento: idAtendimentoCapturado, geracao: geracaoCapturada };
     const backoffMs = [1000, 2000];
     identificacoesEmVoo++;
+    marca('ocr_ini_cli', medirSeq); // so ?medir=1: inicio da identificacao
     try {
         for (let tentativa = 0; tentativa <= backoffMs.length; tentativa++) {
             if (!atendimentoVigente(alvo)) return;
@@ -3541,8 +3516,7 @@ async function identificarClienteNota(ordem, cnpjsCandidatos, razaoSocialCandida
                 });
                 if (!atendimentoVigente(alvo)) return; // resultado tardio: descarta
                 if ((resultado.status === 'IDENTIFICADA' || resultado.ja_identificado_no_atendimento) && !state.clienteIdentificado) {
-                    state.clienteIdentificado = true;
-                    ocrFila = [];
+                    state.clienteIdentificado = true; // a fila de OCR NAO e purgada: o numero das demais notas ainda e lido
                     mostrarStatusScanner('Cliente identificado');
                 }
                 return;
@@ -3556,6 +3530,7 @@ async function identificarClienteNota(ordem, cnpjsCandidatos, razaoSocialCandida
             }
         }
     } finally {
+        marca('ocr_fim_cli', medirSeq);
         identificacoesEmVoo--;
         notificarFimDeTrabalhoNotas();
     }
