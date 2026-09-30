@@ -643,3 +643,39 @@ input.campo-texto {
     font-size: clamp(17px, 1.9vw, 22px);
     font-weight: 750;
 }
+
+/* Tela de revisao dos numeros das notas (demanda captura-notas-sem-interrupcao,
+   impl. 2). Paleta UDLOG + verde #1d7a5f / vermelho #a32d2d ja existentes (sempre
+   com texto branco e icone). Sem position:fixed; rodape sticky dentro do #tela. */
+.rev-wrap { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 640px; margin: auto; }
+.rev-leitura { font-size: 16px; font-weight: 600; color: var(--text-primary); text-align: center; }
+.rev-lista { display: flex; flex-direction: column; gap: 12px; }
+.rev-cartao {
+    display: flex; align-items: center; gap: 14px; width: 100%; min-height: 96px;
+    padding: 8px 12px; background: #FFFFFF; color: var(--text-primary);
+    border: 2px solid #B0B0B1; border-radius: 12px; text-align: left;
+    font-family: inherit; cursor: pointer;
+}
+.rev-cartao-sugerido { border-color: #0179AD; }
+.rev-cartao-sem_sugestao { border-color: #a32d2d; }
+.rev-cartao-confirmado { border-color: #1d7a5f; }
+.rev-miniatura { flex: 0 0 72px; width: 72px; height: 96px; object-fit: cover; border: 1px solid #B0B0B1; border-radius: 6px; background: #FFFFFF; }
+.rev-textos { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.rev-rotulo { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.rev-numero { font-size: 16px; color: var(--text-primary); overflow-wrap: anywhere; }
+.rev-numero-grande { font-size: 28px; font-weight: 800; line-height: 1.1; }
+.rev-selo { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px; font-size: 14px; font-weight: 700; border: 2px solid transparent; }
+.rev-selo-icone { display: inline-flex; }
+.rev-selo-pendente { background: #FFFFFF; color: #3A3A3A; border-color: #B0B0B1; }
+.rev-selo-sugerido { background: #0179AD; color: #FFFFFF; border-color: #0179AD; }
+.rev-selo-sem_sugestao { background: #a32d2d; color: #FFFFFF; border-color: #a32d2d; }
+.rev-selo-confirmado { background: #1d7a5f; color: #FFFFFF; border-color: #1d7a5f; }
+.rev-rodape { position: sticky; bottom: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 0 4px; background: #FFFFFF; }
+.rev-motivo { font-size: 16px; font-weight: 600; color: var(--text-primary); text-align: center; }
+.rev-erro { font-size: 16px; font-weight: 600; color: #a32d2d; text-align: center; }
+.rev-continuar {
+    min-height: 64px; width: 100%; padding: 0 22px; border-radius: 10px;
+    font-size: 20px; font-weight: 700; cursor: pointer;
+    background: #0179AD; color: #FFFFFF; border: 2px solid #0179AD;
+}
+.rev-continuar:disabled { background: #B0B0B1; color: #3A3A3A; border-color: #B0B0B1; cursor: not-allowed; }
