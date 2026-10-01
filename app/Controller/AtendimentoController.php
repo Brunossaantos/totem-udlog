@@ -797,7 +797,41 @@ class AtendimentoController
         }
 
         $this->atendimentoRn->atualizarEtapa($idAtendimento, $transicao['proxima_etapa']);
-        Resposta::sucesso(['proxima_tela' => $transicao['proxima_tela'], 'etapa' => $transicao['proxima_etapa']]);
+        $resposta = ['proxima_tela' => $transicao['proxima_tela'], 'etapa' => $transicao['proxima_etapa']];
+        if (in_array($transicao['proxima_etapa'], ['exp_confirmacao', 'rec_confirmacao'], true)) {
+            // Aditivo: a tela de confirmacao precisa dos dados ja persistidos
+            // (VIO ou preenchimento manual); o front nunca os recebia.
+            $resposta['dados_confirmacao'] = $this->dadosParaConfirmacao($atendimento);
+        }
+        Resposta::sucesso($resposta);
+    }
+
+    /**
+     * Dados do PROPRIO atendimento (posse ja validada) exibidos na tela de
+     * confirmacao. CPF integral de proposito: o motorista o confere/edita ali
+     * e salvarDadosMotorista() compara digitos contra o snapshot (mascarar
+     * corromperia a confirmacao).
+     */
+    private function dadosParaConfirmacao(array $a): array
+    {
+        $validade = (string) ($a['cnh_validade'] ?? '');
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $validade, $m)) {
+            $validade = $m[3] . '/' . $m[2] . '/' . $m[1];
+        }
+        $texto = static fn ($v): string => $v === null ? '' : (string) $v;
+
+        return [
+            'placa' => $texto($a['placa'] ?? null),
+            'motorista_nome' => $texto($a['motorista_nome'] ?? null),
+            'motorista_cpf' => $texto($a['motorista_cpf'] ?? null),
+            'cnh_validade' => $validade,
+            'crlv_ano' => $texto($a['crlv_ano'] ?? null),
+            'crlv_uf' => $texto($a['crlv_uf'] ?? null),
+            'crlv_rntc' => $texto($a['crlv_rntc'] ?? null),
+            'crlv_tipo_veiculo' => $texto($a['crlv_tipo_veiculo'] ?? null),
+            'cliente_nome' => $texto($a['cliente_nome'] ?? null),
+            'cliente_cnpj' => $texto($a['cliente_cnpj'] ?? null),
+        ];
     }
 
     /**

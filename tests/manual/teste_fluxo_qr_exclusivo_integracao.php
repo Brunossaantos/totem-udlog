@@ -184,10 +184,89 @@ try {
     qaChamarWorker($banco, ['acao'=>'iniciar','id_atendimento'=>$trocadoFalha,'id_totem'=>$totem,'tipo'=>'cnh','imagem_qr_base64'=>$jpeg]);
     qaChamarWorker($banco, ['acao'=>'status','id_atendimento'=>$trocadoFalha,'id_totem'=>$totem,'tipo'=>'cnh','resultado'=>qaResultado('crlv', ['Placa'=>$f['placa'],'Renavam'=>$f['renavam'],'RNTRC'=>$f['rntrc']])]);
     qaAfirmar('tipo trocado com dados de falha nao aprova o documento', ($dao->buscarPorId($trocadoFalha)['cnh_origem_validacao'] ?? '') === 'NAO_VALIDADO');
+    $placaDiv = qaNovo($dao, $totem, 'exp_crlv');
+    qaChamarWorker($banco, ['acao'=>'iniciar','id_atendimento'=>$placaDiv,'id_totem'=>$totem,'tipo'=>'crlv','imagem_qr_base64'=>$jpeg]);
+    qaChamarWorker($banco, ['acao'=>'status','id_atendimento'=>$placaDiv,'id_totem'=>$totem,'tipo'=>'crlv','resultado'=>qaResultado('crlv', ['Placa'=>$f['placa'],'Renavam'=>$f['renavam'],'RNTRC'=>$f['rntrc']])]);
+    qaAfirmar('CRLV com placa divergente nao aprova o documento', ($dao->buscarPorId($placaDiv)['crlv_origem_validacao'] ?? '') === 'NAO_VALIDADO');
     $invQr1 = qaNovo($dao, $totem, 'exp_cnh'); $invQr2 = qaNovo($dao, $totem, 'exp_crlv'); $antes = qaContador($pdo, 'posts');
     qaChamarWorker($banco, ['acao'=>'iniciar','id_atendimento'=>$invQr1,'id_totem'=>$totem,'tipo'=>'cnh','imagem_qr_base64'=>'data:image/jpeg;base64,' . QA_S_QR_INVALIDO]);
     qaChamarWorker($banco, ['acao'=>'iniciar','id_atendimento'=>$invQr2,'id_totem'=>$totem,'tipo'=>'crlv','imagem_qr_base64'=>'data:image/jpeg;base64,' . base64_encode(QA_S_QR_NAO_JPEG)]);
     qaAfirmar('Base64 invalido e bytes nao-JPEG nao geram POST', qaContador($pdo, 'posts') === $antes);
+
+    // ---- motivo_usuario e re-escaneio de documento reprovado ----
+    $ent = static fn(string $acao, int $id, string $tipo, array $extra = []) => ['acao'=>$acao,'id_atendimento'=>$id,'id_totem'=>$GLOBALS['totem'],'tipo'=>$tipo,'imagem_qr_base64'=>$GLOBALS['jpeg']] + $extra;
+    $reprov = qaNovo($dao, $totem, 'exp_crlv');
+    qaChamarWorker($banco, $ent('iniciar', $reprov, 'crlv'));
+    $r = qaChamarWorker($banco, $ent('status', $reprov, 'crlv', ['resultado'=>qaResultado('crlv', ['Placa'=>$f['placa'],'Renavam'=>$f['renavam']])]));
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    qaAfirmar('(a) placa divergente: terminal com motivo_usuario=placa_divergente e pode_avancar=false', ($d['terminal'] ?? false) === true && ($d['pode_avancar'] ?? true) === false && ($d['motivo_usuario'] ?? null) === 'placa_divergente');
+    $corpo = json_encode($r['body']);
+    qaAfirmar('(a) resposta sem placa lida/valor do documento/motivo_codigo', !str_contains($corpo, $f['placa']) && !str_contains($corpo, $f['renavam']) && !str_contains($corpo, 'motivo_codigo') && !str_contains($corpo, 'Placa do CRLV'));
+    $tentativaAntiga = (string) $dao->buscarPorId($reprov)['crlv_tentativa_id'];
+    $r = qaChamarWorker($banco, $ent('status', $reprov, 'crlv'));
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    qaAfirmar('motivo_usuario vem apenas da chamada que efetivou o terminal (poll seguinte: null, sem GET)', array_key_exists('motivo_usuario', $d) && $d['motivo_usuario'] === null);
+
+    $rntrcSem = qaNovo($dao, $totem, 'exp_crlv');
+    qaChamarWorker($banco, $ent('iniciar', $rntrcSem, 'crlv'));
+    $r = qaChamarWorker($banco, $ent('status', $rntrcSem, 'crlv', ['resultado'=>qaResultado('crlv', ['RNTRC'=>''])]));
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    qaAfirmar('(b) RNTRC ausente: motivo_usuario=rntrc_ausente', ($d['motivo_usuario'] ?? null) === 'rntrc_ausente');
+    $venc = qaNovo($dao, $totem, 'exp_cnh');
+    qaChamarWorker($banco, $ent('iniciar', $venc, 'cnh'));
+    $r = qaChamarWorker($banco, $ent('status', $venc, 'cnh', ['resultado'=>qaResultado('cnh', ['Validade'=>'2001-01-01'])]));
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    qaAfirmar('CNH vencida: motivo_usuario=cnh_vencida', ($d['motivo_usuario'] ?? null) === 'cnh_vencida');
+    $ileg = qaNovo($dao, $totem, 'exp_cnh');
+    qaChamarWorker($banco, $ent('iniciar', $ileg, 'cnh'));
+    $r = qaChamarWorker($banco, $ent('status', $ileg, 'cnh', ['resultado'=>['ok'=>true,'estado_leitura'=>'failed','qr_type'=>'vio','dados_leitura'=>[]]]));
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    qaAfirmar('leitura failed: motivo_usuario=documento_ilegivel', ($d['motivo_usuario'] ?? null) === 'documento_ilegivel');
+    $dadosInv = qaNovo($dao, $totem, 'exp_crlv');
+    qaChamarWorker($banco, $ent('iniciar', $dadosInv, 'crlv'));
+    $r = qaChamarWorker($banco, $ent('status', $dadosInv, 'crlv', ['resultado'=>qaResultado('crlv', ['UF'=>'XX'])]));
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    qaAfirmar('UF invalida: motivo_usuario=dados_invalidos', ($d['motivo_usuario'] ?? null) === 'dados_invalidos');
+    $r = qaChamarWorker($banco, $ent('status', $cnh, 'cnh'));
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    qaAfirmar('documento aprovado: motivo_usuario=null', array_key_exists('motivo_usuario', $d) && $d['motivo_usuario'] === null && ($d['pode_avancar'] ?? false) === true);
+
+    // (c) re-escaneio: duas chamadas CONCORRENTES sobre o reprovado -> exatamente 1 POST adicional.
+    $antes = qaContador($pdo, 'posts');
+    $cmds = []; $procs = []; $pipesTodos = [];
+    foreach ([1, 2] as $i) {
+        $cmd = [PHP_BINARY, '-d', 'log_errors=1', '-d', 'error_log="' . $qaLogArquivo . '"', __FILE__, '--worker', $banco, base64_encode(json_encode($ent('iniciar', $reprov, 'crlv'), JSON_THROW_ON_ERROR))];
+        $pp = []; $procs[$i] = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pp, null, null, ['bypass_shell' => true]); $pipesTodos[$i] = $pp;
+    }
+    foreach ($procs as $i => $p) { $qaSaidas[] = stream_get_contents($pipesTodos[$i][1]); $qaSaidas[] = stream_get_contents($pipesTodos[$i][2]); fclose($pipesTodos[$i][1]); fclose($pipesTodos[$i][2]); proc_close($p); }
+    $at = $dao->buscarPorId($reprov);
+    qaAfirmar('(c) re-escaneio concorrente faz exatamente 1 POST adicional', qaContador($pdo, 'posts') === $antes + 1);
+    qaAfirmar('(c) re-escaneio gera tentativa_id nova e estado em processamento', (string) $at['crlv_tentativa_id'] !== $tentativaAntiga && in_array($at['crlv_status_processamento'], ['PROCESSANDO_LEITURA', 'ENVIANDO'], true));
+    qaAfirmar('(c) resultado tardio da tentativa anterior e descartado', $dao->gravarResultadoFinalVioApiBr($reprov, 'crlv', $tentativaAntiga, 'CONCLUIDO') === false && $dao->buscarPorId($reprov)['crlv_status_processamento'] === 'PROCESSANDO_LEITURA');
+    // (d) iniciar duplicado durante processamento nao faz 2o POST.
+    $antes = qaContador($pdo, 'posts');
+    qaChamarWorker($banco, $ent('iniciar', $reprov, 'crlv'));
+    qaChamarWorker($banco, $ent('iniciar', $reprov, 'crlv'));
+    qaAfirmar('(d) iniciar durante PROCESSANDO_LEITURA nao faz 2o POST', qaContador($pdo, 'posts') === $antes);
+    // Estados ENVIANDO/INDETERMINADO tambem nunca reabrem.
+    foreach (['ENVIANDO', 'INDETERMINADO'] as $estado) {
+        $pdo->prepare('UPDATE tb_atendimento SET crlv_status_processamento=:s WHERE id_atendimento=:id')->execute(['s'=>$estado,'id'=>$reprov]);
+        qaChamarWorker($banco, $ent('iniciar', $reprov, 'crlv'));
+        qaAfirmar("(d) iniciar em {$estado} nao faz POST", qaContador($pdo, 'posts') === $antes);
+    }
+    $pdo->prepare("UPDATE tb_atendimento SET crlv_status_processamento='PROCESSANDO_LEITURA' WHERE id_atendimento=:id")->execute(['id'=>$reprov]);
+    // Com dados corretos, o re-escaneio aprova.
+    $r = qaChamarWorker($banco, $ent('status', $reprov, 'crlv', ['resultado'=>qaResultado('crlv')]));
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    $at = $dao->buscarPorId($reprov);
+    qaAfirmar('(c) re-escaneio com dados corretos aprova (VIO_API_BR, pode_avancar, motivo_usuario=null)', $at['crlv_origem_validacao'] === 'VIO_API_BR' && ($d['pode_avancar'] ?? false) === true && array_key_exists('motivo_usuario', $d) && $d['motivo_usuario'] === null);
+    // (e) aprovado: novo iniciar e idempotente, sem POST.
+    $antes = qaContador($pdo, 'posts'); $tentAprov = (string) $at['crlv_tentativa_id'];
+    $r = qaChamarWorker($banco, $ent('iniciar', $reprov, 'crlv'));
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    qaAfirmar('(e) iniciar apos aprovado e idempotente: sem POST, sem trocar tentativa, pode_avancar', qaContador($pdo, 'posts') === $antes && (string) $dao->buscarPorId($reprov)['crlv_tentativa_id'] === $tentAprov && ($d['pode_avancar'] ?? false) === true);
+    // Por documento: CAS direto nao reabre aprovado nem outro documento.
+    qaAfirmar('CAS nao reabre documento aprovado', $dao->iniciarEnvioVioApiBr($cnh, 'cnh', bin2hex(random_bytes(16))) === false);
 
     $talentId = qaNovo($dao, $totem, 'exp_confirmacao');
     $pdo->prepare("UPDATE tb_atendimento SET ordem_coleta='QA-OC',cliente_cnpj='11222333000181',motorista_nome='QA MOTORISTA',motorista_cpf='52998224725',crlv_uf='SP',crlv_rntc='QA',crlv_tipo_veiculo='CAMINHAO' WHERE id_atendimento=:id")->execute(['id'=>$talentId]);
@@ -207,6 +286,14 @@ try {
     $log = is_file($qaLogArquivo) ? (string) file_get_contents($qaLogArquivo) : '';
     $http = implode("\n", $qaSaidas);
     qaAfirmar('controle positivo: error_log capturado em arquivo temporario com falha tecnica registrada', $log !== '' && str_contains($log, 'RuntimeException'));
+    // Observabilidade de reprovacao VIO: codigo de allowlist no log, sem valores.
+    $linhaDiv = preg_match('/\[DocumentoController\] vio_reprovado id=' . $placaDiv . ' tipo=crlv estado_leitura=completed qr_type=vio motivo=placa_divergente( chaves_vio_result=.*)?$/m', $log, $mDiv) === 1;
+    $linhaRntrc = preg_match('/\[DocumentoController\] vio_reprovado id=' . $incompleto . ' tipo=crlv estado_leitura=completed qr_type=vio motivo=rntrc_ausente( chaves_vio_result=.*)?$/m', $log, $mRn) === 1;
+    qaAfirmar('log vio_reprovado traz motivo=placa_divergente para CRLV com placa divergente', $linhaDiv);
+    qaAfirmar('log vio_reprovado traz motivo=rntrc_ausente para CRLV sem RNTRC', $linhaRntrc);
+    qaAfirmar('log vio_reprovado lista apenas NOMES de chaves (Placa, UF, RNTRC), sem valores', $linhaDiv && str_contains($mDiv[1] ?? '', 'chaves_vio_result=Placa,Exerc') && str_contains($mDiv[1], 'RNTRC'));
+    qaAfirmar('motivo_codigo nao vaza na resposta HTTP do controller', !str_contains($http ?? implode("
+", $qaSaidas), 'motivo_codigo'));
     foreach ([['log PHP', $log], ['respostas HTTP/stderr', $http]] as [$alvo, $texto]) {
         $v = $achar($texto, $sentQr + $sentOk + $sentFalha);
         qaAfirmar("{$alvo}: nenhuma sentinela de QR/Base64/API key/CPF/placa/Renavam/RNTRC/nome" . ($v ? ' [VAZOU: ' . implode(',', $v) . ']' : ''), $v === []);

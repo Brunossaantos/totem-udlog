@@ -139,6 +139,7 @@ class DocumentoRn
 
         $avaliacao = $this->avaliarCnh($atendimento, $nome, (string) $cpf, (string) $dataValidade, 'MANUAL');
         $avaliacao['aviso_trial'] = false;
+        unset($avaliacao['motivo_codigo']); // uso interno (log VIO), nunca vai ao cliente
 
         // Preenchimento manual NUNCA e gravado em cache (nao alimenta o VIO,
         // nao impede consulta futura ao VIO para o mesmo QR).
@@ -199,6 +200,7 @@ class DocumentoRn
 
         $avaliacao = $this->avaliarCrlv($atendimento, $placa, $exercicio, $uf, $rntc, $tipo, 'MANUAL');
         $avaliacao['aviso_trial'] = false;
+        unset($avaliacao['motivo_codigo']); // uso interno (log VIO), nunca vai ao cliente
 
         return $avaliacao;
     }
@@ -215,19 +217,19 @@ class DocumentoRn
         $statusRevisaoAtual = $atendimento['cnh_status_revisao'] ?? 'OK';
 
         if ($nome === '') {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'Nome da CNH nao informado/legivel', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'campos_cnh_invalidos', 'motivo' => 'Nome da CNH nao informado/legivel', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
         if ($this->ehValorPlaceholder($nome)) {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'Nome da CNH retornou dado placeholder (ambiente de demonstracao), sem dado real utilizavel', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'placeholder', 'motivo' => 'Nome da CNH retornou dado placeholder (ambiente de demonstracao), sem dado real utilizavel', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
         if ($cpf === '') {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'CPF da CNH invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'campos_cnh_invalidos', 'motivo' => 'CPF da CNH invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
         if ($dataValidade === '') {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'Data de validade da CNH nao informada', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'campos_cnh_invalidos', 'motivo' => 'Data de validade da CNH nao informada', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
         if ($this->dataVencida($dataValidade)) {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'CNH vencida', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'cnh_vencida', 'motivo' => 'CNH vencida', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
 
         $statusRevisao = $origem === 'MANUAL' ? 'PENDENTE_REVISAO' : 'OK';
@@ -250,14 +252,14 @@ class DocumentoRn
         $statusRevisaoAtual = $atendimento['crlv_status_revisao'] ?? 'OK';
 
         if ($exercicio <= 0) {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'Exercicio do CRLV nao informado/invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'exercicio_invalido', 'motivo' => 'Exercicio do CRLV nao informado/invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
 
         if (
             $this->ehValorPlaceholder($placa) || $this->ehValorPlaceholder((string) $exercicio) || $this->ehValorPlaceholder($uf)
             || $this->ehValorPlaceholder($rntc) || $this->ehValorPlaceholder($tipoVeiculo)
         ) {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'CRLV retornou dado placeholder (ambiente de demonstracao), sem dado real utilizavel', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'placeholder', 'motivo' => 'CRLV retornou dado placeholder (ambiente de demonstracao), sem dado real utilizavel', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
 
         // UF ausente/invalida = CRLV NAO aprovado — lista fechada das 27
@@ -265,12 +267,12 @@ class DocumentoRn
         // integracao-talent-portaria-checkin, resolve veiculo.uf obrigatorio
         // do Talent).
         if (!in_array($uf, self::UFS_VALIDAS, true)) {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'UF do CRLV nao informada/invalida', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'uf_invalida', 'motivo' => 'UF do CRLV nao informada/invalida', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
 
         $placaAtendimento = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($atendimento['placa'] ?? '')));
         if ($placa === '' || $placa !== $placaAtendimento) {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'Placa do CRLV nao confere com a placa do atendimento', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'placa_divergente', 'motivo' => 'Placa do CRLV nao confere com a placa do atendimento', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
 
         // RNTC/tipo de veiculo — obrigatorios pelo Talent (veiculo.rntc/
@@ -279,10 +281,10 @@ class DocumentoRn
         // (exercicio -> placeholder -> UF -> placa -> RNTC -> tipo) dos
         // demais campos.
         if ($rntc === '') {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'RNTC do CRLV nao informado/invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'rntrc_ausente', 'motivo' => 'RNTC do CRLV nao informado/invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
         if ($tipoVeiculo === '') {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo' => 'Tipo de veiculo do CRLV nao informado/invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
+            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'tipo_ausente', 'motivo' => 'Tipo de veiculo do CRLV nao informado/invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
 
         $statusRevisao = $origem === 'MANUAL' ? 'PENDENTE_REVISAO' : 'OK';
@@ -707,8 +709,9 @@ class DocumentoRn
      */
     public function avaliarResultadoVioApiBrCnh(array $atendimento, array $resultado): array
     {
-        if (!$this->respostaVioApiBrAprovavel($resultado, null)) {
-            return $this->respostaVioApiBrNaoAprovada($atendimento, 'cnh');
+        $motivoCodigo = null;
+        if (!$this->respostaVioApiBrAprovavel($resultado, null, $motivoCodigo)) {
+            return $this->respostaVioApiBrNaoAprovada($atendimento, 'cnh', $motivoCodigo ?? 'leitura_failed');
         }
 
         $dados = $resultado['dados_leitura'];
@@ -719,7 +722,7 @@ class DocumentoRn
             $dataValidade = $this->normalizarData($this->extrairCampoTexto($dados, 'cnh_vio_api', self::CAMPO_REAL_CNH_VALIDADE));
         } catch (DocumentoVioTipoInvalidoException $e) {
             error_log($e->getMessage());
-            return $this->respostaVioApiBrNaoAprovada($atendimento, 'cnh');
+            return $this->respostaVioApiBrNaoAprovada($atendimento, 'cnh', 'tipo_invalido_campo');
         }
 
         $avaliacao = $this->avaliarCnh($atendimento, $nome, (string) $cpf, (string) $dataValidade, 'VIO_API_BR', false);
@@ -757,24 +760,28 @@ class DocumentoRn
      */
     public function avaliarResultadoVioApiBrCrlv(array $atendimento, array $resultado): array
     {
-        if (!$this->respostaVioApiBrAprovavel($resultado, null)) {
-            return $this->respostaVioApiBrNaoAprovada($atendimento, 'crlv');
+        $motivoCodigo = null;
+        if (!$this->respostaVioApiBrAprovavel($resultado, null, $motivoCodigo)) {
+            return $this->respostaVioApiBrNaoAprovada($atendimento, 'crlv', $motivoCodigo ?? 'leitura_failed');
         }
 
         $dados = $resultado['dados_leitura'];
 
+        $codigoExcecao = 'tipo_invalido_campo';
         try {
             $placaBruta = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_PLACA);
+            $codigoExcecao = 'exercicio_invalido';
             $exercicioBruto = $this->extrairCampoNumerico($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_EXERCICIO);
             $exercicioBruto = $this->validarExercicioInteiroExato('crlv_vio_api', self::CAMPO_REAL_CRLV_EXERCICIO, $exercicioBruto);
             $exercicioBruto = $this->validarExercicioDentroDaFaixaArmazenavel('crlv_vio_api', self::CAMPO_REAL_CRLV_EXERCICIO, $exercicioBruto);
+            $codigoExcecao = 'tipo_invalido_campo';
             $ufBruta = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_UF);
             $rntcBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_RNTRC);
             $tipoBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_TIPO);
             $renavamBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_RENAVAM);
         } catch (DocumentoVioTipoInvalidoException $e) {
             error_log($e->getMessage());
-            return $this->respostaVioApiBrNaoAprovada($atendimento, 'crlv');
+            return $this->respostaVioApiBrNaoAprovada($atendimento, 'crlv', $codigoExcecao);
         }
 
         $placa = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $placaBruta ?? ''));
@@ -831,15 +838,18 @@ class DocumentoRn
      * nao ha prova de presenca/liveness alem da resposta VIO e dos controles
      * locais de captura. Nenhum dado diagnostico bruto e persistido ou logado.
      */
-    private function respostaVioApiBrAprovavel(array $resultado, ?int $paginasEsperadas): bool
+    private function respostaVioApiBrAprovavel(array $resultado, ?int $paginasEsperadas, ?string &$motivoCodigo = null): bool
     {
         if (($resultado['estado_leitura'] ?? null) !== 'completed') {
+            $motivoCodigo = 'leitura_failed';
             return false;
         }
         if (($resultado['qr_type'] ?? null) !== 'vio') {
+            $motivoCodigo = 'qr_type_inesperado';
             return false;
         }
         if (!is_array($resultado['dados_leitura'] ?? null)) {
+            $motivoCodigo = 'vio_result_ausente';
             return false;
         }
 
@@ -852,6 +862,7 @@ class DocumentoRn
             $paginasTotais = $resultado['total_pages'] ?? null;
             if ($paginasProcessadas !== null || $paginasTotais !== null) {
                 if ($paginasProcessadas !== $paginasEsperadas || $paginasTotais !== $paginasEsperadas) {
+                    $motivoCodigo = 'paginas_divergentes';
                     return false;
                 }
             }
@@ -860,11 +871,12 @@ class DocumentoRn
         return true;
     }
 
-    private function respostaVioApiBrNaoAprovada(array $atendimento, string $tipo): array
+    private function respostaVioApiBrNaoAprovada(array $atendimento, string $tipo, string $motivoCodigo = 'persistencia_nao_vigente'): array
     {
         return [
             'ok' => false,
             'pode_avancar' => false,
+            'motivo_codigo' => $motivoCodigo,
             'motivo' => $tipo === 'cnh' ? self::MENSAGEM_NAO_APROVADO_CNH : self::MENSAGEM_NAO_APROVADO_CRLV,
             'aviso_trial' => false,
             'origem' => $atendimento["{$tipo}_origem_validacao"] ?? 'NAO_VALIDADO',

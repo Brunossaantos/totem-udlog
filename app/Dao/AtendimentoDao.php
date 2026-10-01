@@ -487,6 +487,8 @@ class AtendimentoDao
             'enviado_em' => 'cnh_vio_api_enviado_em',
             'fingerprint' => 'cnh_vio_api_fingerprint',
             'fingerprint_versao' => 'cnh_vio_api_fingerprint_versao',
+            'origem' => 'cnh_origem_validacao',
+            'validado_em' => 'cnh_validado_em',
         ],
         'crlv' => [
             'status' => 'crlv_status_processamento',
@@ -496,6 +498,8 @@ class AtendimentoDao
             'enviado_em' => 'crlv_vio_api_enviado_em',
             'fingerprint' => 'crlv_vio_api_fingerprint',
             'fingerprint_versao' => 'crlv_vio_api_fingerprint_versao',
+            'origem' => 'crlv_origem_validacao',
+            'validado_em' => 'crlv_validado_em',
         ],
     ];
 
@@ -507,15 +511,21 @@ class AtendimentoDao
 
     /**
      * CAS: adquire o direito de ENVIAR (POST /api/qrcode/read) — so tem
-     * efeito se o status atual for PENDENTE ou ERRO (nunca reabre
+     * efeito se o status atual for PENDENTE ou ERRO, OU se o documento
+     * estiver em estado terminal REPROVADO (re-escaneio): status CONCLUIDO
+     * com origem NAO_VALIDADO e *_validado_em NULO (por documento; so a
+     * aprovacao automatica/manual grava origem != NAO_VALIDADO e
+     * validado_em, entao documento aprovado nunca e reaberto). Nunca reabre
      * ENVIANDO/PROCESSANDO_LEITURA/PROCESSANDO_COMPARACAO/INDETERMINADO
      * automaticamente; ver marcarProcessamentoVioApiBrExpiradoComoIndeterminado
-     * para o unico caminho de saida desses estados). So o vencedor deste CAS
+     * para o unico caminho de saida desses estados. So o vencedor deste CAS
      * pode chamar App\Rn\VioApiBrClient::enviarParaLeitura() — concorrencia
-     * nunca gera 2 POSTs. Grava tambem o fingerprint/versao do HMAC do
-     * cache (calculados a partir do QR, nunca o QR em si), necessarios mais
-     * tarde para o cache-write assincrono quando a comparacao responder
-     * (o QR bruto nunca sobrevive alem do calculo do fingerprint).
+     * nunca gera 2 POSTs (o UPDATE move o status para ENVIANDO, entao um
+     * segundo CAS concorrente nao casa mais o WHERE). A cada aquisicao o
+     * *_tentativa_id e substituido, entao resultado tardio da tentativa
+     * anterior e descartado por gravarResultadoFinalVioApiBr(). Limpa o ID
+     * externo, o instante de envio e o fingerprint/versao (legados, sempre
+     * NULL no fluxo QR-only) da tentativa anterior.
      */
     public function iniciarEnvioVioApiBr(int $id, string $documento, string $tentativaId): bool
     {
@@ -526,7 +536,11 @@ class AtendimentoDao
             SET {$c['status']} = 'ENVIANDO', {$c['tentativa']} = :tentativa, {$c['iniciado_em']} = NOW(),
                 {$c['vio_api_id']} = NULL, {$c['enviado_em']} = NULL,
                 {$c['fingerprint']} = NULL, {$c['fingerprint_versao']} = NULL
-            WHERE id_atendimento = :id AND {$c['status']} IN ('PENDENTE', 'ERRO')
+            WHERE id_atendimento = :id
+              AND (
+                    {$c['status']} IN ('PENDENTE', 'ERRO')
+                    OR ({$c['status']} = 'CONCLUIDO' AND {$c['origem']} = 'NAO_VALIDADO' AND {$c['validado_em']} IS NULL)
+                  )
         ");
         $stmt->execute(['tentativa' => $tentativaId, 'id' => $id]);
 

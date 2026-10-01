@@ -39,7 +39,7 @@ casAfirmar('envio QR-only tem uma unica chamada de POST no controller', substr_c
 casAfirmar('falha ambigua segue para INDETERMINADO', str_contains($inicioQrOnly, 'marcarEnvioComoIndeterminado'));
 casAfirmar('controller nao grava cache apos o POST', !str_contains($inicioQrOnly, 'gravarCacheVioApiBr'));
 
-casAfirmar('CAS do DAO aceita apenas PENDENTE ou ERRO', str_contains($daoFonte, "IN ('PENDENTE', 'ERRO')"));
+casAfirmar('CAS do DAO aceita PENDENTE, ERRO ou CONCLUIDO reprovado (NAO_VALIDADO sem validado_em)', str_contains($daoFonte, "IN ('PENDENTE', 'ERRO')") && str_contains($daoFonte, "= 'CONCLUIDO' AND {\$c['origem']} = 'NAO_VALIDADO' AND {\$c['validado_em']} IS NULL"));
 casAfirmar('CAS limpa colunas historicas de fingerprint sem reutiliza-las', str_contains($daoFonte, "fingerprint']} = NULL") && str_contains($daoFonte, "fingerprint_versao']} = NULL"));
 casAfirmar('resultado final exige tentativa vigente e atendimento em andamento', str_contains($daoFonte, 'AND {$c[\'tentativa\']} = :tentativa AND status = \'em_andamento\''));
 casAfirmar('timeout do DAO termina em INDETERMINADO, sem reabrir PENDENTE', str_contains($daoFonte, 'SET {$c[\'status\']} = \'INDETERMINADO\''));

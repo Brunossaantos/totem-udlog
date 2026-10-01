@@ -731,8 +731,13 @@ PHP;
     // MESMOS atendimentos 35/36 e rejeitada (ainda ha uma tentativa vigente
     // em andamento, nunca "livre" so por causa da falha nesta transicao).
     // ------------------------------------------------------------
+    // Cenario 35 terminou CONCLUIDO sem aprovacao (reprovado: origem
+    // NAO_VALIDADO e validado_em nulo) -- estado elegivel a RE-ESCANEIO:
+    // exatamente UMA nova tentativa e aceita; a seguinte (ja ENVIANDO) e
+    // rejeitada pelo CAS, nunca dois POSTs.
+    $casReescaneio35 = $dao->iniciarEnvioVioApiBr($id35, 'crlv', bin2hex(random_bytes(16)), 'fingerprint-35-dup', 1);
     $casDuplicado35 = $dao->iniciarEnvioVioApiBr($id35, 'crlv', bin2hex(random_bytes(16)), 'fingerprint-35-dup', 1);
-    afirmar('Cenario 38: nenhuma duplicacao de POST -- novo envio para o atendimento do Cenario 35 (ainda PROCESSANDO_LEITURA) e rejeitado pelo CAS', $casDuplicado35 === false);
+    afirmar('Cenario 38: atendimento do Cenario 35 (CONCLUIDO reprovado) aceita exatamente um re-escaneio e rejeita o segundo envio concorrente pelo CAS', $casReescaneio35 === true && $casDuplicado35 === false);
     $casDuplicado36 = $dao->iniciarEnvioVioApiBr($id36, 'crlv', bin2hex(random_bytes(16)), 'fingerprint-36-dup', 1);
     afirmar('Cenario 38: idem para o atendimento do Cenario 36', $casDuplicado36 === false);
 

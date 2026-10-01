@@ -117,8 +117,13 @@ class DocumentoController
      *    qualquer polling — o polling real acontece depois, em
      *    statusProcessamento(), nunca aqui.
      *
+     * Re-escaneio: documento terminal REPROVADO (CONCLUIDO + origem
+     * NAO_VALIDADO, sem validado_em) tambem pode adquirir o CAS (nova
+     * tentativa_id, 1 novo POST). Aprovado continua idempotente (retorno
+     * antecipado acima), e PROCESSANDO em andamento, ENVIANDO e INDETERMINADO nunca reabrem.
+     *
      * Concorrencia: perdedor do CAS (ou documento ja em qualquer estado nao
-     * PENDENTE/ERRO) recebe resposta idempotente com o estado atual, sem
+     * elegivel) recebe resposta idempotente com o estado atual, sem
      * reprocessar — nunca gera um segundo POST.
      */
     public function iniciarProcessamento(array $entrada, int $idTotem): void
@@ -303,6 +308,8 @@ class DocumentoController
             && is_string($vioApiId) && $vioApiId !== ''
             && $this->documentoRn !== null;
 
+        $motivoUsuario = null;
+
         if ($precisaConsultar) {
             try {
                 $vio = $this->criarVioClient();
@@ -321,13 +328,22 @@ class DocumentoController
                 $statusFinal = (!empty($resultado['ambiguo']) || !empty($resultado['nao_encontrado'])) ? 'INDETERMINADO' : 'ERRO';
                 $this->atendimentoDao->gravarResultadoFinalVioApiBr($idAtendimento, $tipo, $tentativaAtual, $statusFinal);
             } else {
-                $this->processarResultadoVioApiBrObtido($idAtendimento, $tipo, $tentativaAtual, $atendimentoAtual, $resultado);
+                $motivoInterno = $this->processarResultadoVioApiBrObtido($idAtendimento, $tipo, $tentativaAtual, $atendimentoAtual, $resultado);
+                $motivoUsuario = self::motivoUsuarioDeCodigoInterno($motivoInterno);
             }
 
             $atendimentoAtual = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
         }
 
-        Resposta::sucesso($this->respostaStatusAtual($atendimentoAtual, $tipo));
+        $resposta = $this->respostaStatusAtual($atendimentoAtual, $tipo);
+        $resposta['motivo_usuario'] = null;
+        // motivo_usuario so no payload da chamada que efetivou a transicao
+        // terminal reprovada (CAS de gravarResultadoFinalVioApiBr ganho).
+        if (!empty($resposta['terminal']) && empty($resposta['pode_avancar'])
+            && ($atendimentoAtual["{$tipo}_status_processamento"] ?? null) === 'CONCLUIDO') {
+            $resposta['motivo_usuario'] = $motivoUsuario;
+        }
+        Resposta::sucesso($resposta);
     }
 
     /**
@@ -337,17 +353,18 @@ class DocumentoController
      * continua exclusivo de App\Rn\DocumentoRn::avaliarResultadoVioApiBrCnh/
      * Crlv), so o status_processamento.
      */
-    private function processarResultadoVioApiBrObtido(int $idAtendimento, string $tipo, ?string $tentativaId, array $atendimento, array $resultado): void
+    private function processarResultadoVioApiBrObtido(int $idAtendimento, string $tipo, ?string $tentativaId, array $atendimento, array $resultado): ?string
     {
         if ($resultado['estado_leitura'] === 'processing') {
-            return; // continua PROCESSANDO_LEITURA, nada a gravar ainda
+            return null; // continua PROCESSANDO_LEITURA, nada a gravar ainda
         }
 
         if ($resultado['estado_leitura'] === 'failed') {
             // Resposta DEFINITIVA do fornecedor (nao aprovado) -- CONCLUIDO,
             // nunca ERRO/INDETERMINADO (nao e falha tecnica nem ambiguidade).
-            $this->atendimentoDao->gravarResultadoFinalVioApiBr($idAtendimento, $tipo, $tentativaId, 'CONCLUIDO');
-            return;
+            $this->logVioReprovado($idAtendimento, $tipo, $resultado, 'leitura_failed');
+            $gravou = $this->atendimentoDao->gravarResultadoFinalVioApiBr($idAtendimento, $tipo, $tentativaId, 'CONCLUIDO');
+            return $gravou ? 'leitura_failed' : null;
         }
 
         // estado_leitura === 'completed' daqui em diante. A comparacao
@@ -356,17 +373,77 @@ class DocumentoController
         // sobrescrevem a decisao da leitura VIO. Esta chamada de polling ja
         // possui o resultado principal; nunca faz GET adicional so para
         // esperar a comparacao.
+        $motivoReprovacao = null;
         if ($this->documentoRn !== null) {
             try {
-                $tipo === 'cnh'
+                $avaliacao = $tipo === 'cnh'
                     ? $this->documentoRn->avaliarResultadoVioApiBrCnh($atendimento, $resultado)
                     : $this->documentoRn->avaliarResultadoVioApiBrCrlv($atendimento, $resultado);
+                // Observabilidade apenas: nao altera aprovacao, persistencia nem resposta.
+                if (($avaliacao['pode_avancar'] ?? null) !== true) {
+                    $motivoReprovacao = $avaliacao['motivo_codigo'] ?? 'motivo_indisponivel';
+                    $this->logVioReprovado($idAtendimento, $tipo, $resultado, $motivoReprovacao);
+                }
             } catch (\Throwable $e) {
+                $motivoReprovacao = 'excecao_avaliacao';
+                $this->logVioReprovado($idAtendimento, $tipo, $resultado, 'excecao_avaliacao', false);
                 $this->logFalhaTecnica("status-processamento (avaliar resultado) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
             }
         }
 
-        $this->atendimentoDao->gravarResultadoFinalVioApiBr($idAtendimento, $tipo, $tentativaId, 'CONCLUIDO');
+        $gravou = $this->atendimentoDao->gravarResultadoFinalVioApiBr($idAtendimento, $tipo, $tentativaId, 'CONCLUIDO');
+
+        return $gravou ? $motivoReprovacao : null;
+    }
+
+    /**
+     * Allowlist FECHADA de apresentacao: converte o codigo interno de
+     * reprovacao (DocumentoRn / log) em um dos 5 codigos que o front pode
+     * mostrar ao motorista. Qualquer outro valor (incluindo
+     * persistencia_nao_vigente e motivo_indisponivel) vira null. Nunca
+     * devolve valor do documento nem mensagem crua.
+     */
+    private static function motivoUsuarioDeCodigoInterno(?string $codigo): ?string
+    {
+        return match ($codigo) {
+            'placa_divergente' => 'placa_divergente',
+            'rntrc_ausente' => 'rntrc_ausente',
+            'cnh_vencida' => 'cnh_vencida',
+            'leitura_failed', 'vio_result_ausente', 'qr_type_inesperado', 'paginas_divergentes', 'excecao_avaliacao' => 'documento_ilegivel',
+            'placeholder', 'uf_invalida', 'exercicio_invalido', 'tipo_ausente', 'tipo_invalido_campo', 'campos_cnh_invalidos' => 'dados_invalidos',
+            default => null,
+        };
+    }
+
+    /**
+     * Log de UMA linha para diagnostico de reprovacao VIO. Somente valores de
+     * allowlist (estado, qr_type, codigo) e NOMES de chaves do vio_result
+     * (sanitizados, max. 20) -- nunca valores do documento, QR, Base64, API
+     * key nem mensagem de excecao.
+     */
+    private function logVioReprovado(int $idAtendimento, string $tipo, array $resultado, string $motivoCodigo, bool $comChaves = true): void
+    {
+        $estado = $resultado['estado_leitura'] ?? null;
+        $estado = in_array($estado, ['completed', 'processing', 'failed'], true) ? $estado : ($estado === null ? 'ausente' : 'outro');
+        $qrType = $resultado['qr_type'] ?? null;
+        $qrType = $qrType === 'vio' ? 'vio' : ($qrType === null ? 'ausente' : 'outro');
+        $tipoLog = $tipo === 'cnh' ? 'cnh' : 'crlv';
+        if (!preg_match('/\A[a-z_]{1,40}\z/', $motivoCodigo)) {
+            $motivoCodigo = 'motivo_indisponivel';
+        }
+
+        $linha = "[DocumentoController] vio_reprovado id={$idAtendimento} tipo={$tipoLog} estado_leitura={$estado} qr_type={$qrType} motivo={$motivoCodigo}";
+
+        if ($comChaves && is_array($resultado['dados_leitura'] ?? null)) {
+            $chaves = [];
+            foreach (array_slice(array_keys($resultado['dados_leitura']), 0, 20) as $chave) {
+                $limpa = preg_replace('/[^A-Za-z0-9_ çÇãÃéÉíóúâêôà.\-]/u', '', (string) $chave);
+                $chaves[] = mb_substr($limpa ?? '', 0, 40);
+            }
+            $linha .= ' chaves_vio_result=' . implode(',', $chaves);
+        }
+
+        error_log($linha);
     }
 
     /**
