@@ -793,3 +793,12 @@ input.campo-texto {
 }
 .rev-sem-foto, .nota-modal-sem-foto { flex: 0 0 72px; width: 72px; height: 96px; font-size: 13px; line-height: 1.2; padding: 2px; box-sizing: border-box; overflow-wrap: anywhere; }
 .miniatura-sem-foto { background: #FFFFFF; border: 2px dashed #878789; box-sizing: border-box; }
+
+/* modal de reprovacao de CNH/CRLV (fluxo QR): mensagem ao motorista + re-escaneio.
+   Reusa #modalFundo/#modalCaixa; so amplia texto e alvos de toque (>= 64px). */
+#modalCaixa.modal-caixa-reprovacao { max-width: min(560px, 100%); width: 100%; }
+.modal-reprovacao-doc { display: flex; flex-direction: column; gap: 18px; }
+.modal-reprovacao-doc .titulo { font-size: 24px; }
+.modal-reprovacao-doc .subtitulo { font-size: 20px; line-height: 1.4; }
+.modal-reprovacao-botoes { display: flex; flex-direction: column; gap: 14px; }
+.modal-reprovacao-botoes button { width: 100%; min-height: 64px; }

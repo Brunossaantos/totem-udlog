@@ -97,6 +97,71 @@ async function exercitarQr(page) {
     });
 }
 
+async function exercitarModalReprovacao(page) {
+    return page.evaluate(async () => {
+        const r = {};
+        const orig = { ir: window.ir };
+        const destinos = [];
+        window.ir = tela => { destinos.push(tela); };
+        iniciarApp(); // restaura a estrutura (modais) apagada pelos testes anteriores
+        state.idAtendimento = 99; state.tipo = 'expedicao'; state.tela = 'exp_aguarde_documentos'; state.placa = 'ABC1D23';
+        state.exp = estadoExpVazio();
+        const motivos = ['placa_divergente', 'rntrc_ausente', 'cnh_vencida', 'documento_ilegivel', 'dados_invalidos'];
+        r.mensagens = [];
+        for (const m of motivos) {
+            state.exp.motivos.cnh = null;
+            registrarMotivosReprovacao('exp', { cnh: { terminal: true, pode_avancar: false, status_processamento: 'CONCLUIDO', motivo_usuario: m } });
+            const registrou = state.exp.motivos.cnh === m;
+            fecharModal();
+            abrirModalReprovacaoDocumento('exp', 'cnh');
+            const caixa = document.getElementById('modalCaixa');
+            const botoes = [...caixa.querySelectorAll('button')].map(b => ({ t: b.textContent.trim(), h: Math.round(b.getBoundingClientRect().height) }));
+            const cr = caixa.getBoundingClientRect();
+            r.mensagens.push({
+                m, registrou, texto: caixa.querySelector('.subtitulo').textContent, botoes,
+                dentro: cr.left >= 0 && cr.right <= innerWidth && cr.top >= 0 && cr.bottom <= innerHeight && caixa.scrollWidth <= caixa.clientWidth,
+            });
+        }
+        // motivo null / fora da allowlist nao registra nem abre modal
+        state.exp.motivos.cnh = null; fecharModal();
+        registrarMotivosReprovacao('exp', { cnh: { terminal: true, pode_avancar: false, status_processamento: 'CONCLUIDO', motivo_usuario: null } });
+        registrarMotivosReprovacao('exp', { cnh: { terminal: true, pode_avancar: false, status_processamento: 'CONCLUIDO', motivo_usuario: 'x_tecnico' } });
+        r.nuloSemModal = state.exp.motivos.cnh === null && abrirModalReprovacaoDocumento('exp', 'cnh') === false && !modalReprovacaoAberto();
+        // sem duplo modal
+        state.exp.motivos.crlv = 'cnh_vencida';
+        abrirModalReprovacaoDocumento('exp', 'crlv'); abrirModalReprovacaoDocumento('exp', 'crlv');
+        r.modais = document.querySelectorAll('#modalCaixa .modal-reprovacao-doc').length;
+        // escanear novamente: conta tentativa, limpa e volta a tela QR do mesmo documento
+        destinos.length = 0;
+        reescanearDocumento('exp', 'crlv');
+        r.reescanear = { destino: destinos[0], tent: state.exp.qrTentativas.crlv, motivo: state.exp.motivos.crlv, flag: state.exp.reescaneio.crlv };
+        // terceira reprovacao: sem botao de re-escaneio; ao chegar a 3 vai ao manual
+        state.exp.qrTentativas.cnh = 2; state.exp.motivos.cnh = 'cnh_vencida'; fecharModal();
+        abrirModalReprovacaoDocumento('exp', 'cnh');
+        r.terceira = [...document.querySelectorAll('#modalCaixa button')].map(b => b.textContent.trim());
+        destinos.length = 0; reescanearDocumento('exp', 'cnh');
+        r.aoTres = destinos[0];
+        // preencher manualmente
+        state.exp = estadoExpVazio(); state.exp.motivos.cnh = 'dados_invalidos'; destinos.length = 0;
+        preencherDocumentoManualmente('exp', 'cnh');
+        r.manual = { destino: destinos[0], motivo: state.exp.motivos.cnh };
+        // recebimento
+        state.tipo = 'recebimento'; state.tela = 'rec_aguarde_documentos'; state.rec = estadoRecVazio();
+        state.rec.motivos.crlv = 'rntrc_ausente'; fecharModal();
+        r.recAbre = abrirModalReprovacaoDocumento('rec', 'crlv') && modalReprovacaoAberto();
+        destinos.length = 0; reescanearDocumento('rec', 'crlv'); r.recDestino = destinos[0];
+        // tela fora do fluxo (ex.: cancelou) nao abre modal
+        state.tela = 'lgpd'; fecharModal(); state.rec.motivos.crlv = 'rntrc_ausente';
+        r.foraDoFluxo = abrirModalReprovacaoDocumento('rec', 'crlv') === false;
+        // tela de espera com indicador e texto de progresso
+        document.getElementById('app').innerHTML = telaExpAguardeDocumentos();
+        r.spinner = !!document.querySelector('.impr-spinner');
+        r.rotulo = rotuloStatusProcessamento('PROCESSANDO_LEITURA');
+        window.ir = orig.ir;
+        return r;
+    });
+}
+
 async function main() {
     await new Promise(resolve => servidor.listen(0, '127.0.0.1', resolve));
     porta = servidor.address().port;
@@ -126,6 +191,25 @@ async function main() {
             ok(r.duasFalhas.chamadasBackend === 0 && r.duasFalhas.tentativas === 2 && r.duasFalhas.telaManual === null, `${viewport.width}: duas falhas locais nao chamam backend nem avancam`);
             ok(r.tresFalhas.chamadasBackend === 0 && r.tresFalhas.telaManual === 'exp_cnh_manual', `${viewport.width}: terceira falha leva ao preenchimento manual sem backend`);
             ok(r.qrValido.chamadasInicio === 1 && r.qrValido.tipo === 'cnh' && r.qrValido.jpeg === 'data:image/jpeg;base64,QUJD' && !r.qrValido.temBinaryData && r.qrValido.tentativas === 0, `${viewport.width}: QR valido inicia uma vez com JPEG e sem binaryData`);
+            const m = await exercitarModalReprovacao(page);
+            const esperado = {
+                placa_divergente: 'A placa do documento é diferente da placa informada no atendimento.',
+                rntrc_ausente: 'O documento não possui RNTRC. Escaneie outro documento ou preencha manualmente.',
+                cnh_vencida: 'A CNH está vencida.',
+                documento_ilegivel: 'Não foi possível ler os dados do documento.',
+                dados_invalidos: 'Os dados lidos do documento estão incompletos ou inválidos.',
+            };
+            ok(m.mensagens.every(x => x.registrou && x.texto === esperado[x.m]), `${viewport.width}: modal mostra a mensagem exata de cada motivo`);
+            ok(m.mensagens.every(x => x.botoes.map(b => b.t).join('|') === 'Escanear novamente|Preencher manualmente|Cancelar atendimento' && x.botoes.every(b => b.h >= 64)), `${viewport.width}: botoes do modal presentes e com alvo >= 64px`);
+            ok(m.mensagens.every(x => x.dentro), `${viewport.width}: modal sem overflow no viewport`);
+            ok(m.nuloSemModal, `${viewport.width}: motivo null/fora da allowlist nao abre modal (mantem manual)`);
+            ok(m.modais === 1, `${viewport.width}: sem modal duplicado`);
+            ok(m.reescanear.destino === 'exp_crlv_qr' && m.reescanear.tent === 1 && m.reescanear.motivo === null && m.reescanear.flag === true, `${viewport.width}: Escanear novamente volta a tela QR do mesmo documento e conta tentativa`);
+            ok(m.terceira.join('|') === 'Preencher manualmente|Cancelar atendimento' && m.aoTres === 'exp_cnh_manual', `${viewport.width}: na terceira tentativa vai ao manual`);
+            ok(m.manual.destino === 'exp_cnh_manual' && m.manual.motivo === null, `${viewport.width}: Preencher manualmente vai a tela manual`);
+            ok(m.recAbre && m.recDestino === 'rec_crlv_qr', `${viewport.width}: Recebimento abre modal e re-escaneia`);
+            ok(m.foraDoFluxo, `${viewport.width}: nao abre modal fora do fluxo`);
+            ok(m.spinner && m.rotulo === 'Lendo documento... trazendo os dados.', `${viewport.width}: progresso com indicador e texto claro`);
             ok(erros.length === 0, `${viewport.width}: sem pageerror`);
             await page.close();
         }
@@ -133,6 +217,12 @@ async function main() {
         await browser.close();
         await new Promise(resolve => servidor.close(resolve));
     }
+    const fonte = fs.readFileSync(APPJS, 'utf8');
+    const semComentarios = fonte.replace(/^\s*\/\/.*$/gm, '');
+    ok(fonte.includes('Lendo documento... trazendo os dados.') && !semComentarios.includes('QR lido. Enviando'), 'texto de progresso novo presente e antigo removido');
+    ok(['Escanear novamente', 'Preencher manualmente', 'A CNH está vencida.', 'Não foi possível ler os dados do documento.', 'O documento não possui RNTRC.'].every(t => fonte.includes(t)), 'strings do modal presentes em UTF-8');
+    ok(!/Ã[\u0080-¿]|â€|�/.test(fonte), 'app.js sem mojibake');
+    ok(!/binaryData|FormData|cnh_frente|cnh_verso|\bfrente\b|\bverso\b/.test(semComentarios), 'sem legado (binaryData, upload, frente/verso)');
     ok(externos === 0, 'zero requisicoes externas');
     console.log(`vio_captura_layout: ${passou} verificacoes, ${falhou} falhas`);
     process.exitCode = falhou ? 1 : 0;

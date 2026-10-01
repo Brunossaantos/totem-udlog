@@ -345,20 +345,20 @@ const state = {
     // motorista navega entre a captura do CRLV e a tela de espera) — demanda
     // migracao-vio-api-br-com-cache, 2026-09-25, ver
     // atualizarStatusDocumento()/rotuloStatusProcessamento().
-    exp: { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
+    exp: { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, motivos: { cnh: null, crlv: null }, reescaneio: { cnh: false, crlv: false }, reprovacaoAberta: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
     // mesmo padrao para Recebimento (REPLANEJAMENTO 2026-09-09 estendeu a
     // validacao VIO Decode tambem para o Recebimento) — telas/estado NOVOS E
     // DEDICADOS, nao compartilhados com a Expedicao nem com o fluxo antigo
     // de rec_cnh/rec_crlv (semantica diferente, sem QR).
-    rec: { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
+    rec: { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, motivos: { cnh: null, crlv: null }, reescaneio: { cnh: false, crlv: false }, reprovacaoAberta: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
 };
 
 function estadoExpVazio() {
-    return { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
+    return { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, motivos: { cnh: null, crlv: null }, reescaneio: { cnh: false, crlv: false }, reprovacaoAberta: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
 }
 
 function estadoRecVazio() {
-    return { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
+    return { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, motivos: { cnh: null, crlv: null }, reescaneio: { cnh: false, crlv: false }, reprovacaoAberta: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
 }
 
 // -------------------- comunicacao com a API --------------------
@@ -635,12 +635,14 @@ function limparCaixaModal(id) {
 
 function abrirModal(html) {
     limparCaixaModal('modalCaixa'); // troca de modal com o anterior ainda aberto (ex.: Corrigir)
+    document.getElementById('modalCaixa').classList.remove('modal-caixa-reprovacao');
     document.getElementById('modalCaixa').innerHTML = html;
     document.getElementById('modalFundo').classList.add('aberto');
 }
 function fecharModal() {
     document.getElementById('modalFundo').classList.remove('aberto');
     limparCaixaModal('modalCaixa');
+    document.getElementById('modalCaixa').classList.remove('modal-caixa-reprovacao');
 }
 
 function confirmarCancelar() {
@@ -1357,15 +1359,20 @@ async function expCapturarQr(tipo) {
         const imagemQr = canvas.toDataURL('image/jpeg', 0.85);
         expLimparFrameQr();
         canvas = null;
-        state.exp.qrTentativas[tipo] = 0;
-        expCamMostrarStatus('QR lido. Enviando para validação...');
+        // Em re-escaneio apos reprovacao o contador acumula (3 tentativas por documento).
+        if (!state.exp.reescaneio[tipo]) state.exp.qrTentativas[tipo] = 0;
+        expCamMostrarStatus(TEXTO_LENDO_DOCUMENTO);
         state.exp[tipo + 'Promise'] = iniciarProcessamentoDocumento(
             state.idAtendimento,
             tipo,
             imagemQr,
             (status) => atualizarStatusDocumento('exp', tipo, status),
         );
-        await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
+        if (state.exp.reescaneio[tipo]) {
+            ir('exp_aguarde_documentos');
+        } else {
+            await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
+        }
     } catch (e) {
         expCamMostrarStatus('Não foi possível iniciar a validação agora.', true);
     } finally {
@@ -1397,7 +1404,7 @@ function exibirIndicadorProcessamentoCnh() {
     if (state.exp.cnhUltimoStatus) {
         state.exp.cnhAoAtualizar(state.exp.cnhUltimoStatus);
     } else {
-        el.textContent = 'Enviando documento...';
+        el.textContent = TEXTO_LENDO_DOCUMENTO;
         el.style.display = 'block';
     }
     state.exp.cnhPromise.then(resultado => {
@@ -1418,6 +1425,7 @@ function exibirIndicadorProcessamentoCnh() {
 // 2026-09-25, item 4 do escopo (nunca inferidos no front).
 function telaExpAguardeDocumentos() {
     return `<div class="titulo">Estamos validando seus documentos. Aguarde.</div>
+        <div class="impr-spinner" aria-hidden="true"></div>
         <div class="status-leitura" id="expAguardeCnhStatus"></div>
         <div class="status-leitura" id="expAguardeCrlvStatus"></div>`;
 }
@@ -1445,6 +1453,7 @@ async function processarAguardeDocumentosExp() {
     if (resultado.cnh.pode_avancar) state.exp.cnhOrigem = resultado.cnh.origem || 'VIO_VALIDADO';
     if (resultado.crlv.pode_avancar) state.exp.crlvOrigem = resultado.crlv.origem || 'VIO_VALIDADO';
     if (state.tela !== 'exp_aguarde_documentos') return; // usuario ja saiu da tela (ex.: cancelou)
+    registrarMotivosReprovacao('exp', resultado);
     await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
 }
 
@@ -1622,7 +1631,7 @@ function lerQrDoCanvas(canvas) {
 // reaproveitamento ja usado para obterQrWorker().
 // ===================================================================
 
-const PROCESSAMENTO_TIMEOUT_MS = 45000;
+const PROCESSAMENTO_TIMEOUT_MS = 125000; // backend marca INDETERMINADO em 120 s (DURACAO_MAXIMA_PROCESSAMENTO_VIO_API_BR_SEGUNDOS) + margem
 const PROCESSAMENTO_POLL_INTERVAL_MS = 2000;
 
 // Geracao de polling (demanda migracao-vio-api-br-com-cache, 2026-09-25) —
@@ -1637,20 +1646,23 @@ const PROCESSAMENTO_POLL_INTERVAL_MS = 2000;
 // escopo desta rodada).
 let pollGeracao = 0;
 
+const TEXTO_LENDO_DOCUMENTO = 'Lendo documento... trazendo os dados.';
+
 // Traduz o status_processamento EXPLICITO retornado por documento.php (nunca
 // inferido no front — mesma divida tecnica ja identificada e corrigida nesta
 // demanda para o campo `origem`) num texto SEMPRE generico para o motorista.
 // Nunca inclui detalhe tecnico/motivo de reprovacao (item 9 do escopo).
 function rotuloStatusProcessamento(status) {
     switch (status) {
-        case 'ENVIANDO': return 'Enviando documento...';
-        case 'PROCESSANDO_LEITURA': return 'Lendo documento...';
+        case 'ENVIANDO':
+        case 'PROCESSANDO_LEITURA':
+            return TEXTO_LENDO_DOCUMENTO;
         case 'PROCESSANDO_COMPARACAO': return 'Conferindo dados...';
         case 'CONCLUIDO': return 'Documento validado';
         case 'ERRO':
         case 'INDETERMINADO':
             return 'Não foi possível concluir a validação automática';
-        default: return 'Aguardando envio...';
+        default: return TEXTO_LENDO_DOCUMENTO;
     }
 }
 
@@ -1699,7 +1711,7 @@ function iniciarProcessamentoDocumento(idAtendimento, tipo, imagemQrBase64, aoAt
 
 async function consultarStatusProcessamento(idAtendimento, tipo) {
     try {
-        return await api('documento.php', 'status-processamento', { id_atendimento: idAtendimento, tipo });
+        return await api('documento.php', 'status-processamento', { id_atendimento: idAtendimento, tipo }, { timeoutMs: 20000 });
     } catch (e) {
         // Mensagem SEMPRE generica aqui — nunca propaga e.message (detalhe
         // tecnico do backend) para o motorista; caminho tratado separado do
@@ -1722,7 +1734,7 @@ function comTimeout(promise, ms) {
 
 // Faz polling em status-processamento a cada 2s (nunca dispara nova chamada
 // de iniciar-processamento) ate o documento chegar a estado terminal ou o
-// timeout de 45s esgotar. `geracao` e o valor de pollGeracao capturado no
+// timeout de 125s esgotar. `geracao` e o valor de pollGeracao capturado no
 // INICIO da tentativa (ver iniciarProcessamentoDocumento) — se o atendimento
 // for cancelado/encerrado enquanto este loop roda (pollGeracao mudou), o
 // loop para IMEDIATAMENTE, sem nenhuma nova chamada de rede solta (item 11
@@ -1757,7 +1769,7 @@ async function pollarAteTerminal(idAtendimento, tipo, geracao, aoAtualizar) {
 
 // Aguarda CNH E CRLV chegarem a estado terminal — usa a Promise viva em
 // memoria de cada documento, se existir (caminho normal, sem reload), com
-// timeout de 45s; senao recorre a polling (ver pollarAteTerminal). Cada
+// timeout de 125s; senao recorre a polling (ver pollarAteTerminal). Cada
 // documento e resolvido de forma independente (um pode ter Promise viva
 // enquanto o outro depende de polling, embora isso normalmente nao ocorra na
 // pratica, ja que um reload de pagina perde as duas Promises ao mesmo tempo).
@@ -1781,18 +1793,164 @@ async function aguardarDocumentos(idAtendimento, cnhPromiseViva, crlvPromiseViva
 // recapturar/reprocessar o que ja passou (item 5 do escopo). Generico o
 // suficiente para Expedicao e Recebimento (so recebe os nomes de tela manual
 // de cada fluxo).
+// O backend devolve o nome da ETAPA/tela logica (exp_cnh, exp_crlv, rec_cnh,
+// rec_crlv...), mas no fluxo QR-only as telas do front sao *_qr. Sem esta
+// traducao, ir('exp_crlv') nao casava nenhum case de renderTela() e a tela
+// ficava parada em "QR lido. Enviando para validacao..." (bug 2026-10-01).
+const TELA_BACKEND_PARA_FRONT = {
+    exp_cnh: 'exp_cnh_qr',
+    exp_crlv: 'exp_crlv_qr',
+    rec_cnh: 'rec_cnh_qr',
+    rec_crlv: 'rec_crlv_qr',
+    impressao: telaImpressaoDoTipo,
+};
+function telaImpressaoDoTipo() {
+    return state.tipo === 'recebimento' ? 'rec_impressao' : 'exp_impressao';
+}
+const TELAS_DOCUMENTOS_VALIDAS = [
+    'exp_cnh_qr', 'exp_crlv_qr', 'exp_aguarde_documentos', 'exp_confirma', 'exp_impressao',
+    'rec_cnh_qr', 'rec_crlv_qr', 'rec_aguarde_documentos', 'rec_confirma', 'rec_impressao',
+];
+function resolverTelaDocumentos(proximaTela) {
+    const destino = TELA_BACKEND_PARA_FRONT[proximaTela] || proximaTela;
+    const tela = typeof destino === 'function' ? destino() : destino;
+    return TELAS_DOCUMENTOS_VALIDAS.includes(tela) ? tela : null;
+}
+
+// -------------------- reprovacao de CNH/CRLV: modal com motivo e re-escaneio --------------------
+// `motivo_usuario` (allowlist do backend) so vem na resposta do poll que efetivou o
+// terminal reprovado; por isso e guardado aqui assim que o resultado chega. Valor
+// fora da allowlist ou null mantem o fluxo manual anterior.
+const MENSAGENS_REPROVACAO_DOCUMENTO = {
+    placa_divergente: 'A placa do documento é diferente da placa informada no atendimento.',
+    rntrc_ausente: 'O documento não possui RNTRC. Escaneie outro documento ou preencha manualmente.',
+    cnh_vencida: 'A CNH está vencida.',
+    documento_ilegivel: 'Não foi possível ler os dados do documento.',
+    dados_invalidos: 'Os dados lidos do documento estão incompletos ou inválidos.',
+};
+const MAX_TENTATIVAS_DOCUMENTO = 3;
+
+function prefixoFluxoDocumentos() {
+    return state.tipo === 'recebimento' ? 'rec' : 'exp';
+}
+
+function registrarMotivosReprovacao(prefixo, resultado) {
+    const est = state[prefixo];
+    if (!est || !resultado) return;
+    ['cnh', 'crlv'].forEach((doc) => {
+        const r = resultado[doc];
+        if (!r) return;
+        if (r.pode_avancar) { est.motivos[doc] = null; return; }
+        if (r.terminal === true && r.status_processamento === 'CONCLUIDO'
+            && Object.prototype.hasOwnProperty.call(MENSAGENS_REPROVACAO_DOCUMENTO, r.motivo_usuario)) {
+            est.motivos[doc] = r.motivo_usuario;
+        }
+    });
+}
+
+function modalReprovacaoAberto() {
+    const fundo = document.getElementById('modalFundo');
+    const caixa = document.getElementById('modalCaixa');
+    return !!fundo && fundo.classList.contains('aberto') && !!caixa && !!caixa.querySelector('.modal-reprovacao-doc');
+}
+
+// Abre o modal do documento reprovado. Devolve false (sem abrir) se nao houver
+// motivo conhecido, se o atendimento/tela nao for mais do fluxo ou se ja ha
+// modal de reprovacao aberto (evita duplicidade).
+function abrirModalReprovacaoDocumento(prefixo, doc) {
+    const est = state[prefixo];
+    const msg = est && MENSAGENS_REPROVACAO_DOCUMENTO[est.motivos[doc]];
+    if (!msg || !state.idAtendimento || typeof state.tela !== 'string' || state.tela.indexOf(prefixo + '_') !== 0) return false;
+    if (modalReprovacaoAberto()) return true;
+    est.reprovacaoAberta = doc;
+    const nome = doc === 'cnh' ? 'CNH não aprovada' : 'CRLV não aprovado';
+    const podeReescanear = est.qrTentativas[doc] + 1 < MAX_TENTATIVAS_DOCUMENTO;
+    abrirModal(`
+        <div class="modal-reprovacao-doc" data-doc="${doc}">
+            <div class="titulo">${nome}</div>
+            <div class="subtitulo">${msg}</div>
+            <div class="modal-reprovacao-botoes">
+                ${podeReescanear ? `<button type="button" class="btn-primario" onclick="reescanearDocumento('${prefixo}', '${doc}')">Escanear novamente</button>` : ''}
+                <button type="button" class="${podeReescanear ? 'btn-fantasma' : 'btn-primario'}" onclick="preencherDocumentoManualmente('${prefixo}', '${doc}')">Preencher manualmente</button>
+                <button type="button" class="btn-alerta" onclick="cancelarPelaReprovacao('${prefixo}', '${doc}')">Cancelar atendimento</button>
+            </div>
+        </div>`);
+    document.getElementById('modalCaixa').classList.add('modal-caixa-reprovacao');
+    return true;
+}
+
+function reescanearDocumento(prefixo, doc) {
+    const est = state[prefixo];
+    if (!est || est.emAndamento) return;
+    est.motivos[doc] = null;
+    est.reprovacaoAberta = null;
+    est[doc + 'Promise'] = null;
+    est[doc + 'UltimoStatus'] = null;
+    est[doc + 'AoAtualizar'] = null;
+    est.previewImg = null;
+    est.previewCanvas = null;
+    est.reescaneio[doc] = true;
+    const tentativa = ++est.qrTentativas[doc];
+    if (tentativa >= MAX_TENTATIVAS_DOCUMENTO) {
+        ir(prefixo + '_' + doc + '_manual');
+        return;
+    }
+    ir(prefixo + '_' + doc + '_qr');
+}
+
+function preencherDocumentoManualmente(prefixo, doc) {
+    const est = state[prefixo];
+    if (!est) return;
+    est.motivos[doc] = null;
+    est.reprovacaoAberta = null;
+    ir(prefixo + '_' + doc + '_manual');
+}
+
+// "Cancelar atendimento" dentro do modal (o overlay cobre a barra fixa). Reusa a
+// confirmacao padrao; "Continuar" devolve o motorista ao mesmo modal de reprovacao.
+function cancelarPelaReprovacao(prefixo, doc) {
+    abrirModal(`
+        <div class="titulo">Cancelar atendimento?</div>
+        <div class="subtitulo">Os dados digitados serão perdidos.</div>
+        <button class="btn-alerta" onclick="fecharModal(); cancelarESair();">Sim, cancelar</button>
+        <button class="btn-fantasma" onclick="abrirModalReprovacaoDocumento('${prefixo}', '${doc}')">Continuar atendimento</button>
+    `);
+}
+
+// Destino de um documento nao aprovado: modal (se ha motivo conhecido) ou manual.
+function destinoDocumentoPendente(doc, telaManual) {
+    const prefixo = prefixoFluxoDocumentos();
+    if (state[prefixo].motivos[doc] && abrirModalReprovacaoDocumento(prefixo, doc)) return;
+    ir(telaManual);
+}
+
 async function tentarAvancarEtapaDocumentos(telaManualCnh, telaManualCrlv) {
     try {
-        const avanco = await api('atendimento.php', 'avancar-etapa-documentos', { id_atendimento: state.idAtendimento });
-        ir(avanco.proxima_tela);
+        const avanco = await api('atendimento.php', 'avancar-etapa-documentos', { id_atendimento: state.idAtendimento }, { timeoutMs: 30000 });
+        const destino = resolverTelaDocumentos(avanco.proxima_tela);
+        if (!destino) {
+            mostrarErroTela('Não foi possível avançar agora.');
+            return false;
+        }
+        if (avanco.dados_confirmacao && typeof avanco.dados_confirmacao === 'object') {
+            // fonte de verdade = dados persistidos no atendimento (VIO ou manual);
+            // so sobrescreve com valor nao vazio (preserva ex.: numero da ordem)
+            const vindos = {};
+            Object.keys(avanco.dados_confirmacao).forEach((k) => {
+                if (k !== 'placa' && avanco.dados_confirmacao[k] !== '') vindos[k] = avanco.dados_confirmacao[k];
+            });
+            state.dados = Object.assign({}, state.dados, vindos);
+            if (!state.placa && avanco.dados_confirmacao.placa) state.placa = avanco.dados_confirmacao.placa;
+        }
+        ir(destino);
         return true;
     } catch (e) {
         const [cnh, crlv] = await Promise.all([
             consultarStatusProcessamento(state.idAtendimento, 'cnh'),
             consultarStatusProcessamento(state.idAtendimento, 'crlv'),
         ]);
-        if (!cnh.pode_avancar) { ir(telaManualCnh); return false; }
-        if (!crlv.pode_avancar) { ir(telaManualCrlv); return false; }
+        if (!cnh.pode_avancar) { destinoDocumentoPendente('cnh', telaManualCnh); return false; }
+        if (!crlv.pode_avancar) { destinoDocumentoPendente('crlv', telaManualCrlv); return false; }
         mostrarErroTela(e.message || 'Não foi possível avançar agora.');
         return false;
     }
@@ -4413,15 +4571,19 @@ async function recCapturarQr(tipo) {
         const imagemQr = canvas.toDataURL('image/jpeg', 0.85);
         recLimparFrameQr();
         canvas = null;
-        state.rec.qrTentativas[tipo] = 0;
-        recCamMostrarStatus('QR lido. Enviando para validação...');
+        if (!state.rec.reescaneio[tipo]) state.rec.qrTentativas[tipo] = 0;
+        recCamMostrarStatus(TEXTO_LENDO_DOCUMENTO);
         state.rec[tipo + 'Promise'] = iniciarProcessamentoDocumento(
             state.idAtendimento,
             tipo,
             imagemQr,
             (status) => atualizarStatusDocumento('rec', tipo, status),
         );
-        await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
+        if (state.rec.reescaneio[tipo]) {
+            ir('rec_aguarde_documentos');
+        } else {
+            await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
+        }
     } catch (e) {
         recCamMostrarStatus('Não foi possível iniciar a validação agora.', true);
     } finally {
@@ -4449,7 +4611,7 @@ function exibirIndicadorProcessamentoCnhRec() {
     if (state.rec.cnhUltimoStatus) {
         state.rec.cnhAoAtualizar(state.rec.cnhUltimoStatus);
     } else {
-        el.textContent = 'Enviando documento...';
+        el.textContent = TEXTO_LENDO_DOCUMENTO;
         el.style.display = 'block';
     }
     state.rec.cnhPromise.then(resultado => {
@@ -4588,6 +4750,7 @@ async function recConfirmarCrlvManual() {
 // usado em telaExpAguardeDocumentos().
 function telaRecAguardeDocumentos() {
     return `<div class="titulo">Estamos validando seus documentos. Aguarde.</div>
+        <div class="impr-spinner" aria-hidden="true"></div>
         <div class="status-leitura" id="recAguardeCnhStatus"></div>
         <div class="status-leitura" id="recAguardeCrlvStatus"></div>`;
 }
@@ -4614,6 +4777,7 @@ async function processarAguardeDocumentosRec() {
     if (resultado.cnh.pode_avancar) state.rec.cnhOrigem = resultado.cnh.origem || 'VIO_VALIDADO';
     if (resultado.crlv.pode_avancar) state.rec.crlvOrigem = resultado.crlv.origem || 'VIO_VALIDADO';
     if (state.tela !== 'rec_aguarde_documentos') return; // usuario ja saiu da tela (ex.: cancelou)
+    registrarMotivosReprovacao('rec', resultado);
     await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
 }
 
