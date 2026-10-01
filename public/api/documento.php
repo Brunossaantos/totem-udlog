@@ -7,7 +7,6 @@ use Util\Auth;
 use Util\Resposta;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Dao\RateLimitVioStatusDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
@@ -34,25 +33,26 @@ $totem = Auth::validarTotem($pdo);
 // nunca expõe getMessage()/trace/SQL/payload/credencial, mesmo padrao
 // sanitizado ja usado em Util\Bootstrap/DocumentoController::logFalhaTecnica().
 try {
-    $documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo), new VioApiBrCacheDao($pdo));
+    $documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo));
     $controller = new DocumentoController(new AtendimentoDao($pdo), $documentoRn, $pdo, new RateLimitVioStatusDao($pdo));
-    $entrada = json_decode(file_get_contents('php://input'), true) ?? [];
+    $corpo = file_get_contents('php://input');
+    if ($corpo === false || strlen($corpo) > 8 * 1024 * 1024) {
+        Resposta::erro('Dados incompletos');
+    }
+    $entrada = json_decode($corpo, true);
+    if (!is_array($entrada)) {
+        Resposta::erro('Dados incompletos');
+    }
     $idTotem = (int) $totem['id_totem'];
 
     switch ($_GET['acao'] ?? '') {
-        case 'definir-modo-cnh':
-            $controller->definirModoCnh($entrada, $idTotem);
-            break;
-        case 'upload':
-            $controller->upload($entrada, $idTotem);
-            break;
         case 'iniciar-processamento':
             $controller->iniciarProcessamento($entrada, $idTotem);
             break;
         case 'validar-qr':
-            // Alias de compatibilidade do ciclo sincrono anterior — mesma logica
-            // de iniciar-processamento (ver DocumentoController::validarQr).
-            $controller->validarQr($entrada, $idTotem);
+            // Acao legada removida do fluxo QR-only: responde 404 'Acao invalida'
+            // sem escrita, assim como 'upload' e 'definir-modo-cnh'.
+            Resposta::erro('Acao invalida', 404);
             break;
         case 'status-processamento':
             $controller->statusProcessamento($entrada, $idTotem);

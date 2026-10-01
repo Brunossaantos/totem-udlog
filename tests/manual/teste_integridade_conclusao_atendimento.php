@@ -218,7 +218,6 @@ $corpoVioIndisponivelItg = <<<PHP
 use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
 
@@ -234,10 +233,6 @@ unset(\$_ENV['VIO_API_BR_BASE_URL'], \$_ENV['VIO_API_BR_API_KEY']);
 putenv('VIO_API_BR_BASE_URL');
 putenv('VIO_API_BR_API_KEY');
 
-// HMAC do fingerprint do cache -- chave FIXA/sintetica, nunca a real.
-\$_ENV['VIO_API_BR_CACHE_HMAC_VERSION'] = '1';
-\$_ENV['VIO_API_BR_CACHE_HMAC_KEY_V1'] = str_repeat('ab', 32);
-
 \$pdo = Conexao::obter();
 
 \$idTotem = (int) (\$argv[1] ?? 0);
@@ -245,10 +240,14 @@ putenv('VIO_API_BR_API_KEY');
 \$tipo = 'crlv';
 
 \$atendimentoDao = new AtendimentoDao(\$pdo);
-\$documentoRn = new DocumentoRn(new \App\Dao\VioCacheDao(\$pdo), \$atendimentoDao, new VioApiBrCacheDao(\$pdo));
+\$documentoRn = new DocumentoRn(new \App\Dao\VioCacheDao(\$pdo), \$atendimentoDao);
 \$controller = new DocumentoController(\$atendimentoDao, \$documentoRn, \$pdo);
 
-\$bytesGarbage = random_bytes(40);
+\$qaGd = imagecreatetruecolor(32, 32);
+ob_start();
+imagejpeg(\$qaGd, null, 80);
+\$bytesGarbage = (string) ob_get_clean();
+imagedestroy(\$qaGd);
 
 register_shutdown_function(function () {
     echo "\\nHTTP_CODE:" . http_response_code() . "\\n";
@@ -257,7 +256,7 @@ register_shutdown_function(function () {
 \$controller->iniciarProcessamento([
     'id_atendimento' => \$idAtendimento,
     'tipo' => \$tipo,
-    'qr_bytes_base64' => base64_encode(\$bytesGarbage),
+    'imagem_qr_base64' => 'data:image/jpeg;base64,' . base64_encode(\$bytesGarbage),
 ], \$idTotem);
 PHP;
 
@@ -265,7 +264,6 @@ $corpoFalhaDuranteValidacaoItg = <<<PHP
 use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
 
@@ -281,8 +279,6 @@ use App\Controller\DocumentoController;
 putenv('VIO_API_BR_BASE_URL=https://127.0.0.1:1');
 putenv('VIO_API_BR_API_KEY=chave-teste-nao-real');
 
-\$_ENV['VIO_API_BR_CACHE_HMAC_VERSION'] = '1';
-\$_ENV['VIO_API_BR_CACHE_HMAC_KEY_V1'] = str_repeat('ab', 32);
 
 \$pdo = Conexao::obter();
 
@@ -291,10 +287,14 @@ putenv('VIO_API_BR_API_KEY=chave-teste-nao-real');
 \$tipo = 'crlv';
 
 \$atendimentoDao = new AtendimentoDao(\$pdo);
-\$documentoRn = new DocumentoRn(new \App\Dao\VioCacheDao(\$pdo), \$atendimentoDao, new VioApiBrCacheDao(\$pdo));
+\$documentoRn = new DocumentoRn(new \App\Dao\VioCacheDao(\$pdo), \$atendimentoDao);
 \$controller = new DocumentoController(\$atendimentoDao, \$documentoRn, \$pdo);
 
-\$bytesGarbage = random_bytes(40);
+\$qaGd = imagecreatetruecolor(32, 32);
+ob_start();
+imagejpeg(\$qaGd, null, 80);
+\$bytesGarbage = (string) ob_get_clean();
+imagedestroy(\$qaGd);
 
 register_shutdown_function(function () {
     echo "\\nHTTP_CODE:" . http_response_code() . "\\n";
@@ -303,7 +303,7 @@ register_shutdown_function(function () {
 \$controller->iniciarProcessamento([
     'id_atendimento' => \$idAtendimento,
     'tipo' => \$tipo,
-    'qr_bytes_base64' => base64_encode(\$bytesGarbage),
+    'imagem_qr_base64' => 'data:image/jpeg;base64,' . base64_encode(\$bytesGarbage),
 ], \$idTotem);
 PHP;
 
@@ -530,19 +530,12 @@ echo "\n=== Item 9: erro na inicializacao do client de validacao e erro durante 
 // Reescrito na rodada corretiva de migracao-vio-api-br-com-cache
 // (2026-09-26): o fluxo real de iniciarProcessamento() hoje e via
 // App\Rn\VioApiBrClient, nunca mais App\Rn\VioDecodeClient. Usa tipo='crlv'
-// de proposito (ver docblock dos 2 subprocessos abaixo) -- exige um arquivo
-// crlv.jpg REAL em disco (a montagem da imagem acontece ANTES de
-// instanciar/chamar o cliente), criado aqui pelo teste pai e removido na
-// limpeza final.
-$storagePath9 = rtrim($_ENV['STORAGE_PATH'] ?? '', '/');
+// de proposito (ver docblock dos 2 subprocessos abaixo). Entrada QR-only:
+// JPEG valido em memoria, sem arquivo em storage.
 
 $id9a = $atendimentoDao->criar($idTotem, 'expedicao', 'ITG009A');
 $idsAtendimentoLimpar[] = $id9a;
 $atendimentoDao->atualizarEtapa($id9a, 'exp_crlv');
-$pasta9a = 'teste_integridade_' . bin2hex(random_bytes(4));
-$atendimentoDao->definirPasta($id9a, $pasta9a);
-@mkdir("{$storagePath9}/{$pasta9a}", 0750, true);
-file_put_contents("{$storagePath9}/{$pasta9a}/crlv.jpg", 'FIXTURE_NAO_E_JPEG_REAL_SEM_VALIDACAO_DE_FORMATO');
 
 $saida9a = dispararSequencial($scriptVioIndisponivelItg, [(string) $idTotem, (string) $id9a, 'crlv']);
 echo "--- Item 9a (falha na inicializacao do client VioApiBrClient) ---\n{$saida9a}\n";
@@ -554,10 +547,6 @@ afirmar('Item 9a: crlv_status_processamento gravado como ERRO (falha sem ambigui
 $id9b = $atendimentoDao->criar($idTotem, 'expedicao', 'ITG009B');
 $idsAtendimentoLimpar[] = $id9b;
 $atendimentoDao->atualizarEtapa($id9b, 'exp_crlv');
-$pasta9b = 'teste_integridade_' . bin2hex(random_bytes(4));
-$atendimentoDao->definirPasta($id9b, $pasta9b);
-@mkdir("{$storagePath9}/{$pasta9b}", 0750, true);
-file_put_contents("{$storagePath9}/{$pasta9b}/crlv.jpg", 'FIXTURE_NAO_E_JPEG_REAL_SEM_VALIDACAO_DE_FORMATO');
 
 $saida9b = dispararSequencial($scriptFalhaDuranteValidacaoItg, [(string) $idTotem, (string) $id9b, 'crlv']);
 echo "--- Item 9b (falha durante o envio -- conexao recusada, sem ambiguidade) ---\n{$saida9b}\n";
@@ -565,12 +554,6 @@ afirmar('Item 9b: HTTP 502 (ramo de falha de envio ao fornecedor, ver DocumentoC
 afirmar('Item 9b: mensagem "Nao foi possivel validar o documento agora"', str_contains($saida9b, 'Nao foi possivel validar o documento agora'));
 $estado9b = $atendimentoDao->buscarPorId($id9b);
 afirmar('Item 9b: crlv_status_processamento gravado como ERRO (falha de conexao SEM ambiguidade, nunca INDETERMINADO)', $estado9b['crlv_status_processamento'] === 'ERRO');
-
-// Limpeza das fixtures fisicas de imagem criadas para o Item 9.
-@unlink("{$storagePath9}/{$pasta9a}/crlv.jpg");
-@rmdir("{$storagePath9}/{$pasta9a}");
-@unlink("{$storagePath9}/{$pasta9b}/crlv.jpg");
-@rmdir("{$storagePath9}/{$pasta9b}");
 
 echo "\n=== Item 10: GET_LOCK e liberado explicitamente apos erro (IS_USED_LOCK) ===\n";
 // Chave do lock adicional atualizada para o prefixo do fluxo NOVO

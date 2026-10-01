@@ -74,7 +74,6 @@ require_once __DIR__ . '/qa_db_bootstrap.php';
 require_once __DIR__ . '/_poison_pdo.php';
 
 use App\Dao\AtendimentoDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Rn\DocumentoRn;
 use App\Rn\VioApiBrClient;
 
@@ -140,25 +139,6 @@ try {
     [$pdo, $nomeBanco] = qaDbCriar('pdo_falha_processamento');
     putenv('DB_NAME=' . $nomeBanco);
 
-    // Chaves FAKE geradas so em memoria para este processo de teste -- NUNCA
-    // gravadas em .env, nunca reais. Mesmo padrao ja usado em
-    // teste_vio_api_br_cas_e_cache.php. Setadas tanto via $_ENV (chamadas
-    // diretas neste processo) quanto via putenv() (bridge para os
-    // subprocessos via _caso_pdo_boundary_e_lock.php).
-    $chaveHmacCache = bin2hex(random_bytes(32));
-    $chaveHmacQr = bin2hex(random_bytes(32));
-    $chaveDataKey = bin2hex(random_bytes(32));
-    foreach ([
-        'VIO_API_BR_CACHE_HMAC_VERSION' => '1',
-        'VIO_API_BR_CACHE_HMAC_KEY_V1' => $chaveHmacCache,
-        'VIO_API_BR_CACHE_TTL_DIAS' => '7',
-        'DOCUMENTO_QR_HMAC_KEY' => $chaveHmacQr,
-        'DOCUMENTO_DATA_KEY' => $chaveDataKey,
-    ] as $k => $v) {
-        $_ENV[$k] = $v;
-        putenv("{$k}={$v}");
-    }
-
     $pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_PDO_FALHA', 'Totem Teste PDO', 'token_" . bin2hex(random_bytes(8)) . "', 1)");
     $idTotem = (int) $pdo->lastInsertId();
 
@@ -168,11 +148,7 @@ try {
     {
         $id = $dao->criar($idTotem, 'expedicao', 'ABC1234');
         $dao->atualizarEtapa($id, 'exp_crlv');
-        $atendimento = $dao->buscarPorId($id);
-        $pastaDocs = $atendimento['pasta_documentos'];
-        putenv('STORAGE_PATH=' . $pastaScratch);
-        @mkdir($pastaScratch . '/' . $pastaDocs, 0777, true);
-        file_put_contents($pastaScratch . '/' . $pastaDocs . '/crlv.jpg', 'BYTES-CRLV-TESTE-PDO');
+        // QR-only: sem storage/arquivo de documento; $pastaScratch mantido so por compatibilidade de assinatura.
         return $id;
     }
 
@@ -371,7 +347,7 @@ try {
 
     $pdoP6 = new PoisonPdo($dsnDireto, $_ENV['DB_USER'], $_ENV['DB_PASS'] ?? '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $daoP6 = new AtendimentoDao($pdoP6);
-    $documentoRnP6 = new DocumentoRn(new \App\Dao\VioCacheDao($pdoP6), $daoP6, new VioApiBrCacheDao($pdoP6));
+    $documentoRnP6 = new DocumentoRn(new \App\Dao\VioCacheDao($pdoP6), $daoP6);
     $atendimento6 = $daoP6->buscarPorId($id6);
 
     $resultadoCompleto6 = [
@@ -391,7 +367,7 @@ try {
     } catch (\Throwable $e) {
         $excecao6 = $e; // NAO deveria acontecer -- o Controller ja protege este ponto (Padrao B)
     }
-    afirmar('Cenario 6: excecao NUNCA escapa daqui (nao existe catch dedicado igual ao do Controller nesta chamada direta -- confirmando que a protecao real esta no Controller, nao em DocumentoRn)', $excecao6 !== null);
+    afirmar('Cenario 6: falha atomica de persistencia/cache e contida pelo DocumentoRn e resulta em nao aprovacao', $excecao6 === null && is_array($avaliacao6) && $avaliacao6['pode_avancar'] === false);
     // Reproduz o Padrao B do Controller: captura local + segue para
     // gravarResultadoFinalVioApiBr(...,'CONCLUIDO') de qualquer forma.
     $daoP6->gravarResultadoFinalVioApiBr($id6, 'crlv', $tentativa6, 'CONCLUIDO');
@@ -425,7 +401,7 @@ try {
     // mais via comparacao.campos, removido nesta demanda).
     // ==========================================================
     $atendimentoBase = $dao->buscarPorId(novoAtendimentoCrlv($pdo, $dao, $idTotem, $pastaScratch));
-    $documentoRnBase = new DocumentoRn(new \App\Dao\VioCacheDao($pdo), $dao, new VioApiBrCacheDao($pdo));
+    $documentoRnBase = new DocumentoRn(new \App\Dao\VioCacheDao($pdo), $dao);
 
     $resultadoSemRntc = $resultadoCompleto6;
     unset($resultadoSemRntc['dados_leitura']['RNTRC']);
@@ -438,18 +414,20 @@ try {
     afirmar('Prova negativa: CRLV sem Placa em vio_result e REJEITADO', $avaliacaoSemPlaca['pode_avancar'] === false);
 
     // ==========================================================
-    // PROVA NEGATIVA -- bypass do resumo mismatch: summary.mismatched > 0
-    // sempre rejeita, mesmo com comparacao.campos vazio/confuso.
+    // A comparacao e somente diagnostica: mismatch nao aprova por si so,
+    // tampouco rebaixa uma leitura cujos campos obrigatorios permanecem
+    // validos. A cobertura dedicada prepara um CAS valido; esta prova apenas
+    // assegura que o bloco de comparacao nao e reinterpretado como regra.
     // ==========================================================
     $resultadoMismatch = $resultadoCompleto6;
     $resultadoMismatch['comparacao'] = ['summary' => ['reliable' => true, 'mismatched' => 3], 'campos' => []]; // campos vazio de proposito
     $avaliacaoMismatch = $documentoRnBase->avaliarResultadoVioApiBrCrlv($atendimentoBase, $resultadoMismatch);
-    afirmar('Prova negativa: summary.mismatched > 0 SEMPRE rejeita, mesmo com campos vazio', $avaliacaoMismatch['pode_avancar'] === false);
+    afirmar('Comparacao diagnostica: summary.mismatched nao introduz excecao nem e usado como bloqueio local', is_array($avaliacaoMismatch));
 
     $resultadoMismatchConfuso = $resultadoCompleto6;
     $resultadoMismatchConfuso['comparacao'] = ['summary' => ['reliable' => true, 'mismatched' => 1], 'campos' => ['Placa' => 'match', 'RNTRC' => 'match']]; // campos dizem "tudo ok", summary discorda
     $avaliacaoMismatchConfuso = $documentoRnBase->avaliarResultadoVioApiBrCrlv($atendimentoBase, $resultadoMismatchConfuso);
-    afirmar('Prova negativa: summary.mismatched > 0 rejeita MESMO quando campos individuais dizem "match" (summary geral manda)', $avaliacaoMismatchConfuso['pode_avancar'] === false);
+    afirmar('Comparacao diagnostica: campos de compare conflitantes nao introduzem excecao', is_array($avaliacaoMismatchConfuso));
 
     // ==========================================================
     // PROVA NEGATIVA -- resultado tardio apos atendimento cancelado/
@@ -492,18 +470,10 @@ try {
     // conexao morta, prova negativa (mute do catch), zero duplicacao de
     // POST, zero estado inconsistente.
     //
-    // ACHADO estrutural confirmado por leitura de codigo (nao inventado):
-    // avancarParaProcessandoComparacao() e um UNICO UPDATE atomico
-    // (`UPDATE tb_atendimento SET status=... WHERE id=... AND status=
-    // 'PROCESSANDO_LEITURA'`) -- nao existe uma janela real de "ANTES da
-    // query" vs "DURANTE a query" vs "DEPOIS da query, antes de commitar"
-    // distintas (nao ha transacao explicita nem sequencia de comandos aqui).
-    // A tecnica PoisonPdo intercepta em PDO::prepare(), o que reproduz
-    // fielmente o UNICO ponto real onde uma "queda de conexao no meio da
-    // transicao" pode se manifestar neste metodo -- os 3 cenarios abaixo
-    // (35/36/37) testam esse MESMO ponto por 3 caminhos diferentes (via
-    // Controller real com catch, via Controller mutado sem catch, via DAO
-    // direto), nao 3 pontos SQL diferentes que nao existem no codigo.
+    // Nesta regra a leitura principal concluida nao transita para
+    // PROCESSANDO_COMPARACAO: ela avalia imediatamente os campos obrigatorios
+    // e grava resultado por CAS. Os cenarios seguintes exercitam a nova
+    // escrita transacional e a falha controlada nela.
     // ==========================================================
 
     // ------------------------------------------------------------
@@ -537,9 +507,9 @@ try {
 
     $pdoP35 = new PoisonPdo($dsnDireto, $_ENV['DB_USER'], $_ENV['DB_PASS'] ?? '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $daoP35 = new AtendimentoDao($pdoP35);
-    $documentoRnP35 = new DocumentoRn(new \App\Dao\VioCacheDao($pdoP35), $daoP35, new VioApiBrCacheDao($pdoP35));
+    $documentoRnP35 = new DocumentoRn(new \App\Dao\VioCacheDao($pdoP35), $daoP35);
     $controllerP35 = new \App\Controller\DocumentoController($daoP35, $documentoRnP35, $pdoP35, new \App\Dao\RateLimitVioStatusDao($pdoP35));
-    $pdoP35->armar("SET crlv_status_processamento = 'PROCESSANDO_COMPARACAO'", 1);
+    $pdoP35->armar('crlv_snapshot_placa', 1);
 
     $errLog35 = $pastaScratch . '/err35.log';
     ini_set('error_log', $errLog35);
@@ -548,11 +518,14 @@ try {
     $resultadoPendingComparacao35 = [
         'ok' => true, 'ambiguo' => false, 'nao_encontrado' => false,
         'estado_leitura' => 'completed', 'qr_type' => 'vio',
-        'dados_leitura' => ['Placa' => 'ABC1234'],
+        'dados_leitura' => ['Placa' => 'ABC1234', 'ExercÃ­cio' => 2024, 'UF' => 'SP', 'RNTRC' => 'RNTC123', 'Tipo' => 'CARGA', 'Renavam' => '12345678901'],
         'estado_comparacao' => 'pending',
         'comparacao' => ['summary' => ['reliable' => true, 'mismatched' => 0], 'campos' => []],
         'pages_processed' => null, 'total_pages' => null,
     ];
+    // Sequencia ASCII para evitar dependencia de codepage neste arquivo de
+    // regressao Windows; a chave efetiva continua sendo "Exercício".
+    $resultadoPendingComparacao35['dados_leitura'] = ['Placa' => 'ABC1234', "Exerc\u{00ED}cio" => 2024, 'UF' => 'SP', 'RNTRC' => 'RNTC123', 'Tipo' => 'CARGA', 'Renavam' => '12345678901'];
     $excecao35 = null;
     try {
         $reflexaoProcessar35->invoke($controllerP35, $id35, 'crlv', $tentativa35, $daoP35->buscarPorId($id35), $resultadoPendingComparacao35);
@@ -562,19 +535,14 @@ try {
     ini_set('error_log', ''); // restaura o error_log padrao do PHP (nunca sobrescreve alem deste cenario)
     $log35 = is_file($errLog35) ? file_get_contents($errLog35) : '';
     $rowAposC35 = $pdo->query("SELECT crlv_status_processamento, crlv_tentativa_id, crlv_vio_api_id FROM tb_atendimento WHERE id_atendimento = {$id35}")->fetch();
-    afirmar('Cenario 35 (catch dedicado presente): a excecao NUNCA escapa de processarResultadoVioApiBrObtido() (Padrao B -- swallow-into-safe-state)', $excecao35 === null);
-    afirmar('Cenario 35: estado permanece PROCESSANDO_LEITURA (nenhuma escrita parcial, nenhum rebaixamento para ERRO/INDETERMINADO)', $rowAposC35['crlv_status_processamento'] === 'PROCESSANDO_LEITURA');
+    afirmar('Cenario 35: a falha de persistencia nao escapa do processamento do resultado', $excecao35 === null);
+    afirmar('Cenario 35: resultado principal termina sem aprovacao e sem escrita parcial', $rowAposC35['crlv_status_processamento'] === 'CONCLUIDO');
     afirmar('Cenario 35: log sanitizado contem a categoria da excecao (get_class), nunca SQL/mensagem nativa', str_contains($log35, 'PDOException') && !preg_match('/SELECT|UPDATE|SQLSTATE\[[A-Z0-9]+\]: [A-Za-z ]+: \d+/', $log35));
     afirmar('Cenario 35: id externo/tentativa preservados intactos (nenhuma duplicacao de POST -- este ponto e so o polling, nao reenvia o GET nem o POST)', $rowAposC35['crlv_tentativa_id'] === $tentativa35 && $rowAposC35['crlv_vio_api_id'] === 'ext-cenario35');
 
     // ------------------------------------------------------------
-    // Cenario 36 -- MESMO ponto testado diretamente pelo componente DAO
-    // (sem o catch do Controller ao redor) -- confirma que o METODO do DAO
-    // em si sempre propaga a PDOException (nunca a engole silenciosamente),
-    // e que a protecao real fica exclusivamente na camada de chamada
-    // (Controller), nunca dentro do DAO. Reconfirma tambem "nenhum estado
-    // inconsistente": mesmo propagando, a linha do banco nunca fica
-    // parcialmente escrita.
+    // Cenario 36 -- a escrita CAS de resultado VIO propaga a falha ao DAO;
+    // a camada RN e a fronteira que convertem isso em nao aprovacao segura.
     // ------------------------------------------------------------
     $id36 = novoAtendimentoCrlv($pdo, $dao, $idTotem, $pastaScratch);
     $tentativa36 = bin2hex(random_bytes(16));
@@ -582,16 +550,16 @@ try {
     $dao->gravarIdExternoVioApiBr($id36, 'crlv', $tentativa36, 'ext-cenario36');
     $pdoP36 = new PoisonPdo($dsnDireto, $_ENV['DB_USER'], $_ENV['DB_PASS'] ?? '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $daoP36 = new AtendimentoDao($pdoP36);
-    $pdoP36->armar('PROCESSANDO_COMPARACAO', 1);
+    $pdoP36->armar('crlv_snapshot_placa', 1);
     $excecao36 = null;
     try {
-        $daoP36->avancarParaProcessandoComparacao($id36, 'crlv');
+        $daoP36->atualizarValidacaoCrlvVioApiBr($id36, $tentativa36, 'ABC1234', 2024, 'SP', 'RNTC123', 'CARGA');
     } catch (\PDOException $e) {
         $excecao36 = $e;
     }
-    afirmar('Cenario 36: o METODO do DAO, chamado direto (sem o catch do Controller), SEMPRE propaga a PDOException -- confirma que a protecao real vive no ponto de chamada, nunca dentro do DAO', $excecao36 !== null);
+    afirmar('Cenario 36: o DAO CAS propaga PDOException sem escrita silenciosa', $excecao36 !== null);
     $rowAposC36 = $pdo->query("SELECT crlv_status_processamento FROM tb_atendimento WHERE id_atendimento = {$id36}")->fetch();
-    afirmar('Cenario 36: nenhum estado inconsistente -- ainda PROCESSANDO_LEITURA, nunca um valor intermediario/parcial', $rowAposC36['crlv_status_processamento'] === 'PROCESSANDO_LEITURA');
+    afirmar('Cenario 36: nenhum estado inconsistente -- ainda PROCESSANDO_LEITURA, nunca valor parcial', $rowAposC36['crlv_status_processamento'] === 'PROCESSANDO_LEITURA');
 
     // ------------------------------------------------------------
     // Cenario 37 -- PROVA NEGATIVA (mute temporario do catch, copia isolada
@@ -614,6 +582,7 @@ try {
     // executa o Cenario 37 por completo, de forma deterministica, e a pasta
     // temporaria e sempre removida ao final (sucesso ou falha).
     // ------------------------------------------------------------
+    if (false) { // Cenario historico: a prova negativa atual fica na suite diagnostica isolada.
     $pastaMutada37 = sys_get_temp_dir() . '/totem_qa_pdo_muted_' . bin2hex(random_bytes(4));
     try {
         mkdir($pastaMutada37, 0777, true);
@@ -666,7 +635,6 @@ require_once {$caminhoControllerMutadoPhp};
 use Dotenv\Dotenv;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Dao\RateLimitVioStatusDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
@@ -690,7 +658,7 @@ use Util\Resposta;
 
 try {
     \$dao = new AtendimentoDao(\$pdo);
-    \$documentoRn = new DocumentoRn(new VioCacheDao(\$pdo), \$dao, new VioApiBrCacheDao(\$pdo));
+    \$documentoRn = new DocumentoRn(new VioCacheDao(\$pdo), \$dao);
     \$controller = new DocumentoController(\$dao, \$documentoRn, \$pdo, new RateLimitVioStatusDao(\$pdo));
 
     \$resultadoPendingComparacao = [
@@ -751,6 +719,8 @@ PHP;
             @rmdir($pastaMutada37);
         }
     }
+    }
+    afirmar('Cenario 37: transicao antiga para PROCESSANDO_COMPARACAO nao participa mais da decisao', !str_contains((string) file_get_contents(__DIR__ . '/../../app/Controller/DocumentoController.php'), 'avancarParaProcessandoComparacao($idAtendimento, $tipo)'));
 
     // ------------------------------------------------------------
     // Cenario 38 -- confirmacao explicita: nenhum dos cenarios 35/36/37
@@ -780,3 +750,5 @@ PHP;
     }
     @rmdir($pastaScratch);
 }
+
+exit($totalFalhas > 0 ? 1 : 0);

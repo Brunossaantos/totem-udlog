@@ -107,39 +107,6 @@ register_shutdown_function(function () use (&$nomeBancoLock0920) {
 });
 
 $raizProjeto = dirname(__DIR__, 2);
-$storagePathLock0920 = rtrim($_ENV['STORAGE_PATH'] ?? '', '/');
-
-/**
- * Cria uma fixture MINIMA de crlv.jpg em disco (App\Controller\
- * DocumentoController::montarImagemCrlv() so faz is_file()+
- * file_get_contents(), sem validar assinatura/dimensao) — necessaria porque,
- * no fluxo NOVO (vio.api.br), a montagem da imagem acontece ANTES de
- * qualquer chamada/instanciacao de App\Rn\VioApiBrClient, inclusive nos
- * cenarios desta suite que so querem exercitar o LOCK adicional (GET_LOCK/
- * RELEASE_LOCK), nao a validacao em si.
- */
-function criarFixtureCrlvLock0920(AtendimentoDao $dao, int $idAtendimento, string $storagePath): string
-{
-    $pasta = 'teste_lock0920_' . bin2hex(random_bytes(4));
-    $dao->definirPasta($idAtendimento, $pasta);
-    @mkdir("{$storagePath}/{$pasta}", 0750, true);
-    file_put_contents("{$storagePath}/{$pasta}/crlv.jpg", 'FIXTURE_NAO_E_JPEG_REAL_SEM_VALIDACAO_DE_FORMATO');
-    return $pasta;
-}
-
-function removerFixtureCrlvLock0920(string $storagePath, string $pasta): void
-{
-    @unlink("{$storagePath}/{$pasta}/crlv.jpg");
-    @rmdir("{$storagePath}/{$pasta}");
-}
-
-// HMAC do fingerprint do cache vio.api.br — precisa estar presente no
-// ambiente de TODOS os subprocessos desta suite (herdado via proc_open() a
-// partir deste processo pai) para que App\Rn\DocumentoRn::
-// calcularFingerprintVioApiBr() suceda ANTES do ponto sob teste em cada
-// cenario (chave FIXA/sintetica, nunca a chave real).
-putenv('VIO_API_BR_CACHE_HMAC_VERSION=1');
-putenv('VIO_API_BR_CACHE_HMAC_KEY_V1=' . str_repeat('ab', 32));
 
 // ============================================================
 // Infra de scripts temporarios de subprocesso (substitui os antigos
@@ -268,17 +235,12 @@ SPYCODE;
 // Corpo antes em _caso_iniciar_processamento_vio_indisponivel.php. Reescrito
 // na rodada corretiva de migracao-vio-api-br-com-cache (2026-09-26): forca
 // App\Rn\VioApiBrClient (NUNCA mais App\Rn\VioDecodeClient) a falhar no
-// construtor. Requer, no ambiente do subprocesso, HMAC do fingerprint do
-// cache configurado (para o calculo do fingerprint suceder ANTES do ponto
-// sob teste) e um crlv.jpg ja presente em disco (montagem da imagem
-// acontece ANTES da instanciacao do cliente) — ambos providos pelo processo
-// pai via putenv()/criarFixtureCrlvLock0920().
+// construtor. Entrada QR-only (JPEG valido em memoria, sem storage).
 $corpoVioIndisponivel = <<<'CORPOVIO'
 use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
 
@@ -305,10 +267,14 @@ $idAtendimento = (int) ($argv[2] ?? 0);
 $tipo = 'crlv';
 
 $atendimentoDao = new AtendimentoDao($pdo);
-$documentoRn = new DocumentoRn(new VioCacheDao($pdo), $atendimentoDao, new VioApiBrCacheDao($pdo));
+$documentoRn = new DocumentoRn(new VioCacheDao($pdo), $atendimentoDao);
 $controller = new DocumentoController($atendimentoDao, $documentoRn, $pdo);
 
-$bytesGarbage = random_bytes(40);
+$qaGd = imagecreatetruecolor(32, 32);
+ob_start();
+imagejpeg($qaGd, null, 80);
+$bytesGarbage = (string) ob_get_clean();
+imagedestroy($qaGd);
 
 register_shutdown_function(function () {
     echo "\nHTTP_CODE:" . http_response_code() . "\n";
@@ -317,7 +283,7 @@ register_shutdown_function(function () {
 $controller->iniciarProcessamento([
     'id_atendimento' => $idAtendimento,
     'tipo' => $tipo,
-    'qr_bytes_base64' => base64_encode($bytesGarbage),
+    'imagem_qr_base64' => 'data:image/jpeg;base64,' . base64_encode($bytesGarbage),
 ], $idTotem);
 CORPOVIO;
 
@@ -333,7 +299,6 @@ use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
 
@@ -373,10 +338,14 @@ EstatisticasLockEspiao::resetar(); // a query acima nao e GET_LOCK/RELEASE_LOCK,
 $pdoBom->exec('KILL ' . $idConexaoLock);
 
 $atendimentoDao = new AtendimentoDao($pdoBom);
-$documentoRn = new DocumentoRn(new VioCacheDao($pdoBom), $atendimentoDao, new VioApiBrCacheDao($pdoBom));
+$documentoRn = new DocumentoRn(new VioCacheDao($pdoBom), $atendimentoDao);
 $controller = new DocumentoController($atendimentoDao, $documentoRn, $pdoLockEspiao);
 
-$bytesGarbage = random_bytes(40);
+$qaGd = imagecreatetruecolor(32, 32);
+ob_start();
+imagejpeg($qaGd, null, 80);
+$bytesGarbage = (string) ob_get_clean();
+imagedestroy($qaGd);
 
 register_shutdown_function(function () {
     echo "\nHTTP_CODE:" . http_response_code() . "\n";
@@ -388,7 +357,7 @@ try {
     $controller->iniciarProcessamento([
         'id_atendimento' => $idAtendimento,
         'tipo' => $tipo,
-        'qr_bytes_base64' => base64_encode($bytesGarbage),
+        'imagem_qr_base64' => 'data:image/jpeg;base64,' . base64_encode($bytesGarbage),
     ], $idTotem);
 } catch (\Throwable $e) {
     echo "EXCECAO_NAO_TRATADA_PROPAGOU: " . get_class($e) . "\n";
@@ -404,7 +373,6 @@ use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
 
@@ -444,10 +412,14 @@ StatementEspiaoLock::$matador = $pdoBom;
 StatementEspiaoLock::$idConexaoParaMatarAposGetLock = $idConexaoLock;
 
 $atendimentoDao = new AtendimentoDao($pdoBom);
-$documentoRn = new DocumentoRn(new VioCacheDao($pdoBom), $atendimentoDao, new VioApiBrCacheDao($pdoBom));
+$documentoRn = new DocumentoRn(new VioCacheDao($pdoBom), $atendimentoDao);
 $controller = new DocumentoController($atendimentoDao, $documentoRn, $pdoLockEspiao);
 
-$bytesGarbage = random_bytes(40);
+$qaGd = imagecreatetruecolor(32, 32);
+ob_start();
+imagejpeg($qaGd, null, 80);
+$bytesGarbage = (string) ob_get_clean();
+imagedestroy($qaGd);
 
 register_shutdown_function(function () {
     echo "\nHTTP_CODE:" . http_response_code() . "\n";
@@ -459,7 +431,7 @@ try {
     $controller->iniciarProcessamento([
         'id_atendimento' => $idAtendimento,
         'tipo' => $tipo,
-        'qr_bytes_base64' => base64_encode($bytesGarbage),
+        'imagem_qr_base64' => 'data:image/jpeg;base64,' . base64_encode($bytesGarbage),
     ], $idTotem);
 } catch (\Throwable $e) {
     // Se este catch disparar, uma excecao propagou sem tratamento de
@@ -544,7 +516,6 @@ $dao1 = new AtendimentoDao($pdo);
 $idAt1 = $dao1->criar($idTotem1, 'expedicao', 'LCK0001');
 $idsAtendimentoLimpar[] = $idAt1;
 $dao1->atualizarEtapa($idAt1, 'exp_crlv');
-$pasta1 = criarFixtureCrlvLock0920($dao1, $idAt1, $storagePathLock0920);
 
 $chaveLock1 = "vio_api_br_validar_{$idAt1}_crlv";
 // Confirma estado inicial: lock livre.
@@ -558,7 +529,6 @@ afirmar('Item 1: lock livre antes de qualquer chamada (IS_USED_LOCK = NULL)', $a
 // torno de uma execucao real completa, com PDO UNICO compartilhado (mesma
 // arquitetura de producao).
 $saida1 = dispararSequencial($scriptVioIndisponivel, [(string) $idTotem1, (string) $idAt1, 'crlv']);
-removerFixtureCrlvLock0920($storagePathLock0920, $pasta1);
 
 afirmar('Item 1: resposta HTTP 503 (mesmo comportamento de sempre)', str_contains($saida1, 'HTTP_CODE:503'));
 $depoisUso1 = $pdo->query("SELECT IS_USED_LOCK('{$chaveLock1}')")->fetchColumn();
@@ -579,7 +549,6 @@ $dao2 = new AtendimentoDao($pdo);
 $idAt2 = $dao2->criar($idTotem2, 'expedicao', 'LCK0002');
 $idsAtendimentoLimpar[] = $idAt2;
 $dao2->atualizarEtapa($idAt2, 'exp_crlv');
-$pasta2 = criarFixtureCrlvLock0920($dao2, $idAt2, $storagePathLock0920);
 
 $chaveLock2 = "vio_api_br_validar_{$idAt2}_crlv";
 
@@ -594,7 +563,6 @@ $resItem2 = dispararComLogDedicado(
     [(string) $idTotem2, (string) $idAt2, 'crlv'],
     $arquivoLog2
 );
-removerFixtureCrlvLock0920($storagePathLock0920, $pasta2);
 
 afirmar('Item 2: processamento PROSSEGUE normalmente mesmo com lock ocupado (mesmo HTTP 503 do fluxo sem contencao)', str_contains($resItem2['stdout'], 'HTTP_CODE:503'));
 afirmar(
@@ -632,7 +600,6 @@ $dao4 = new AtendimentoDao($pdo);
 $idAt4 = $dao4->criar($idTotem4, 'expedicao', 'LCK0004');
 $idsAtendimentoLimpar[] = $idAt4;
 $dao4->atualizarEtapa($idAt4, 'exp_crlv');
-$pasta4 = criarFixtureCrlvLock0920($dao4, $idAt4, $storagePathLock0920);
 
 $arquivoLog4 = __DIR__ . '/lock0920_item4_' . bin2hex(random_bytes(3)) . '.log';
 $resItem4 = dispararComLogDedicado(
@@ -640,7 +607,6 @@ $resItem4 = dispararComLogDedicado(
     [(string) $idTotem4, (string) $idAt4, 'crlv'],
     $arquivoLog4
 );
-removerFixtureCrlvLock0920($storagePathLock0920, $pasta4);
 
 afirmar('Item 4: nenhuma excecao propaga sem tratamento (sem "EXCECAO_NAO_TRATADA_PROPAGOU")', !str_contains($resItem4['stdout'], 'EXCECAO_NAO_TRATADA_PROPAGOU'));
 afirmar('Item 4: resposta HTTP 503 (VioApiBrClient falha no construtor, mesmo comportamento de sempre)', str_contains($resItem4['stdout'], 'HTTP_CODE:503'));
@@ -668,7 +634,6 @@ $dao5 = new AtendimentoDao($pdo);
 $idAt5 = $dao5->criar($idTotem5, 'expedicao', 'LCK0005');
 $idsAtendimentoLimpar[] = $idAt5;
 $dao5->atualizarEtapa($idAt5, 'exp_crlv');
-$pasta5 = criarFixtureCrlvLock0920($dao5, $idAt5, $storagePathLock0920);
 
 $arquivoLog5 = __DIR__ . '/lock0920_item5_' . bin2hex(random_bytes(3)) . '.log';
 $resItem5 = dispararComLogDedicado(
@@ -676,7 +641,6 @@ $resItem5 = dispararComLogDedicado(
     [(string) $idTotem5, (string) $idAt5, 'crlv'],
     $arquivoLog5
 );
-removerFixtureCrlvLock0920($storagePathLock0920, $pasta5);
 
 afirmar('Item 5: GET_LOCK foi de fato executado e adquirido com sucesso nesta conexao', str_contains($resItem5['stdout'], 'GET_LOCK_CHAMADAS:1'));
 afirmar('Item 7: nenhuma excecao propaga sem tratamento de iniciarProcessamento() (sem "EXCECAO_NAO_TRATADA_PROPAGOU")', !str_contains($resItem5['stdout'], 'EXCECAO_NAO_TRATADA_PROPAGOU'));
@@ -725,7 +689,6 @@ if (!str_contains($conteudoOriginalDc, $trechoProtegido)) {
     $idAtNeg = $daoNeg->criar($idTotemNeg, 'expedicao', 'LCKNEG');
     $idsAtendimentoLimpar[] = $idAtNeg;
     $daoNeg->atualizarEtapa($idAtNeg, 'exp_crlv');
-    $pastaNeg = criarFixtureCrlvLock0920($daoNeg, $idAtNeg, $storagePathLock0920);
 
     $arquivoLogNeg = __DIR__ . '/lock0920_negativo_' . bin2hex(random_bytes(3)) . '.log';
     $resNegativo = dispararComLogDedicado(
@@ -733,7 +696,6 @@ if (!str_contains($conteudoOriginalDc, $trechoProtegido)) {
         [(string) $idTotemNeg, (string) $idAtNeg, 'crlv'],
         $arquivoLogNeg
     );
-    removerFixtureCrlvLock0920($storagePathLock0920, $pastaNeg);
 
     afirmar(
         'Prova negativa: sem o guard/try-catch, a PDOException de liberarLock() ESCAPA de iniciarProcessamento() (confirma que a protecao real esta sendo testada)',

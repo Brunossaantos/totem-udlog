@@ -7,7 +7,7 @@
  *
  * OBJETIVO: recriar, contra o fluxo REAL atual vio.api.br
  * (App\Rn\DocumentoRn::avaliarResultadoVioApiBrCrlv(), avaliarCrlv(),
- * preencherManualCrlv(), tentarCacheCrlv()), TODA a cobertura de regra de
+ * preencherManualCrlv()), TODA a cobertura de regra de
  * negocio do CRLV hoje testada SO via VioDecodeClientFalso/validarCrlv()
  * legado em tests/manual/teste_rebaixamento_manual.php,
  * teste_talent_rntc_tipo_crlv.php e teste_talent_uf_crlv.php — pre-requisito
@@ -40,7 +40,6 @@ require_once __DIR__ . '/qa_db_bootstrap.php';
 
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Dao\OrdemColetaDao;
 use App\Rn\DocumentoRn;
 use App\Rn\AtendimentoRn;
@@ -67,17 +66,8 @@ $nomeBanco = null;
 try {
     [$pdo, $nomeBanco] = qaDbCriar('vio_api_br_regras_crlv');
 
-    // Chaves FAKE geradas so em memoria para este processo -- nunca gravadas
-    // em .env, nunca reais (mesmo padrao de teste_vio_api_br_cas_e_cache.php).
-    $_ENV['VIO_API_BR_CACHE_HMAC_VERSION'] = '1';
-    $_ENV['VIO_API_BR_CACHE_HMAC_KEY_V1'] = bin2hex(random_bytes(32));
-    $_ENV['VIO_API_BR_CACHE_TTL_DIAS'] = '7';
-    $_ENV['DOCUMENTO_DATA_KEY'] = bin2hex(random_bytes(32));
-    $_ENV['DOCUMENTO_QR_HMAC_KEY'] = bin2hex(random_bytes(32));
-
     $atendimentoDao = new AtendimentoDao($pdo);
-    $cacheVioApiBrDao = new VioApiBrCacheDao($pdo);
-    $documentoRn = new DocumentoRn(new VioCacheDao($pdo), $atendimentoDao, $cacheVioApiBrDao);
+    $documentoRn = new DocumentoRn(new VioCacheDao($pdo), $atendimentoDao);
     // OrdemColetaDao nunca conecta no construtor (conexao so no momento da
     // consulta, ver App\Dao\OrdemColetaDao) -- seguro instanciar aqui sem
     // nenhuma chamada externa real, so para exercitar
@@ -120,16 +110,16 @@ try {
 
     /**
      * Prepara um atendimento para receber um resultado de
-     * avaliarResultadoVioApiBrCrlv() com fingerprint/versao ja persistidos
-     * (pre-condicao real de producao: gravados no momento do ENVIO, via
-     * AtendimentoDao::iniciarEnvioVioApiBr/gravarIdExternoVioApiBr) --
-     * necessario para o cache-write funcionar (gravarCacheVioApiBrCrlv exige
-     * essas colunas preenchidas).
+     * avaliarResultadoVioApiBrCrlv() com tentativa vigente e ID externo ja
+     * persistidos (pre-condicao real de producao, via
+     * AtendimentoDao::iniciarEnvioVioApiBr/gravarIdExternoVioApiBr). Os
+     * parametros $fingerprint/$hmacVersao sao ignorados (QR-only, sem cache);
+     * mantidos so para nao alterar os chamadores.
      */
     function prepararEnvioCrlv(PDO $pdo, AtendimentoDao $dao, int $idAtendimento, string $fingerprint, int $hmacVersao = 1): array
     {
         $tentativa = bin2hex(random_bytes(16));
-        $dao->iniciarEnvioVioApiBr($idAtendimento, 'crlv', $tentativa, $fingerprint, $hmacVersao);
+        $dao->iniciarEnvioVioApiBr($idAtendimento, 'crlv', $tentativa);
         $dao->gravarIdExternoVioApiBr($idAtendimento, 'crlv', $tentativa, 'id-ext-' . bin2hex(random_bytes(4)));
         return $dao->buscarPorId($idAtendimento);
     }
@@ -303,26 +293,18 @@ try {
     $r12a = $documentoRn->avaliarResultadoVioApiBrCrlv($at12a, resultadoCrlvBaseRegras([], ['Placa' => 'ORI0012']));
     afirmar('Cenario 12: primeira validacao (leitura real) tem origem = VIO_API_BR', $r12a['origem'] === 'VIO_API_BR');
 
+    // Contrato QR-only: a aprovacao nao grava VIO_CACHE; cada leitura e
+    // sempre validada em tempo real (origem VIO_API_BR).
+    afirmar('Cenario 12 (QR-only): aprovacao NAO grava VIO_CACHE (tb_vio_api_cache_crlv permanece vazia)', (int) $pdo->query('SELECT COUNT(*) FROM tb_vio_api_cache_crlv')->fetchColumn() === 0);
     $at12b = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'ORI0012');
-    $r12b = $documentoRn->tentarCacheCrlv($at12b, $fp12, 1);
-    afirmar('Cenario 12: segunda consulta com o MESMO fingerprint (cache-hit) NUNCA e null', $r12b !== null);
-    afirmar('Cenario 12: cache-hit tem origem = VIO_CACHE (distinta de VIO_API_BR)', $r12b['origem'] === 'VIO_CACHE');
-    afirmar('Cenario 12: VIO_API_BR e VIO_CACHE sao origens LITERALMENTE diferentes', $r12a['origem'] !== $r12b['origem']);
+    $fp12b = bin2hex(random_bytes(32));
+    $at12b = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at12b['id_atendimento'], $fp12b);
+    $r12b = $documentoRn->avaliarResultadoVioApiBrCrlv($at12b, resultadoCrlvBaseRegras([], ['Placa' => 'ORI0012']));
+    afirmar('Cenario 12 (QR-only): segunda leitura da mesma placa e aprovada de novo em tempo real, origem = VIO_API_BR (nunca VIO_CACHE)', $r12b['pode_avancar'] === true && $r12b['origem'] === 'VIO_API_BR');
 
-    // ============================================================
-    // Cenario 13 — Cache vencido NUNCA aproveitado (CRLV)
-    // ============================================================
-    $agora = new DateTimeImmutable('now');
-    $fpVencidoCrlv = bin2hex(random_bytes(32));
-    $cacheVioApiBrDao->salvarCrlv(
-        $fpVencidoCrlv, 1, 1, 'VEN0013', 2025, 'SP', '12345678', 'CAMINHAO', '98765432100',
-        true, 0,
-        $agora->modify('-10 days')->format('Y-m-d H:i:s'),
-        $agora->modify('-1 day')->format('Y-m-d H:i:s') // expira_em no passado
-    );
-    $at13 = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'VEN0013');
-    $r13 = $documentoRn->tentarCacheCrlv($at13, $fpVencidoCrlv, 1);
-    afirmar('Cenario 13: cache CRLV vencido (expira_em no passado) NUNCA e aproveitado (tratado como MISS)', $r13 === null);
+    // Cenarios 13 e 27 (cache CRLV vencido / registro mal formado) removidos:
+    // exerciam tentarCacheCrlv()/VioApiBrCacheDao, eliminados em
+    // fluxo-qr-exclusivo-cnh-crlv (nao ha mais leitura de cache).
 
     // ============================================================
     // Cenario 14 — Atomicidade: uma rejeicao (resultado invalido) NUNCA
@@ -335,20 +317,21 @@ try {
     afirmar('Cenario 14 (setup): primeira validacao (dado A) aprovada', $r14a['pode_avancar'] === true);
     $at14AposA = $atendimentoDao->buscarPorId((int) $at14['id_atendimento']);
 
-    // Nova "tentativa" (novo envio) que resulta em rejeicao (mismatch em
-    // campo critico) -- simula um reenvio/reprocessamento que falha.
+    // Nova tentativa com comparacao diagnostica divergente, mas dados
+    // extraidos validos: a decisao de produto atual exige aprovacao e
+    // atualizacao pelos dados da leitura, nunca pelo bloco compare.
     $fp14b = bin2hex(random_bytes(32));
     $at14ParaRejeicao = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at14['id_atendimento'], $fp14b);
     $r14b = $documentoRn->avaliarResultadoVioApiBrCrlv($at14ParaRejeicao, resultadoCrlvBaseRegras([
         'comparacao' => ['summary' => ['reliable' => true, 'mismatched' => 1], 'campos' => ['placa' => 'mismatch', 'renavam' => 'match', 'exercicio' => 'match', 'uf' => 'match']],
     ], ['Placa' => 'ATO0014', 'RNTRC' => '99998888', 'Tipo' => 'BITREM', 'UF' => 'SP']));
-    afirmar('Cenario 14: segunda validacao (mismatch em campo critico) e rejeitada', $r14b['pode_avancar'] === false);
+    afirmar('Cenario 14: segunda validacao com mismatch diagnostico e aprovada pelos dados extraidos validos', $r14b['pode_avancar'] === true);
 
     $at14AposRejeicao = $atendimentoDao->buscarPorId((int) $at14['id_atendimento']);
-    afirmar('Cenario 14: crlv_rntc do dado A ORIGINAL permanece intacto apos a rejeicao (nunca sobrescrito)', $at14AposRejeicao['crlv_rntc'] === $at14AposA['crlv_rntc'] && $at14AposRejeicao['crlv_rntc'] === '11112222');
-    afirmar('Cenario 14: crlv_tipo_veiculo do dado A ORIGINAL permanece intacto apos a rejeicao', $at14AposRejeicao['crlv_tipo_veiculo'] === 'CARRETA');
-    afirmar('Cenario 14: crlv_uf do dado A ORIGINAL permanece intacto apos a rejeicao', $at14AposRejeicao['crlv_uf'] === 'RJ');
-    afirmar('Cenario 14: crlv_origem_validacao permanece VIO_API_BR (nao foi rebaixado/limpo pela rejeicao)', $at14AposRejeicao['crlv_origem_validacao'] === 'VIO_API_BR');
+    afirmar('Cenario 14: crlv_rntc e atualizado pela segunda leitura VIO valida, apesar do mismatch diagnostico', $at14AposRejeicao['crlv_rntc'] === '99998888');
+    afirmar('Cenario 14: crlv_tipo_veiculo e atualizado pela segunda leitura VIO valida', $at14AposRejeicao['crlv_tipo_veiculo'] === 'BITREM');
+    afirmar('Cenario 14: crlv_uf e atualizado pela segunda leitura VIO valida', $at14AposRejeicao['crlv_uf'] === 'SP');
+    afirmar('Cenario 14: crlv_origem_validacao permanece VIO_API_BR apos a atualizacao', $at14AposRejeicao['crlv_origem_validacao'] === 'VIO_API_BR');
 
     // ============================================================
     // Cenario 15 — Nenhuma gravacao PARCIAL: uma excecao de tipo no MEIO da
@@ -382,7 +365,7 @@ try {
     // ============================================================
     // Prova estrutural 1: DocumentoRn nunca importa/instancia
     // App\Rn\VioApiBrClient (avaliarResultadoVioApiBrCrlv()/avaliarCrlv()/
-    // preencherManualCrlv()/tentarCacheCrlv() recebem sempre arrays ja
+    // preencherManualCrlv() recebe sempre arrays ja
     // normalizados/DAOs, nunca fazem HTTP por si so).
     $fonteDocumentoRn = file_get_contents(__DIR__ . '/../../app/Rn/DocumentoRn.php');
     afirmar('Cenario 16: DocumentoRn.php nunca importa App\\Rn\\VioApiBrClient (`use App\\Rn\\VioApiBrClient`)', !str_contains($fonteDocumentoRn, 'use App\\Rn\\VioApiBrClient'));
@@ -406,7 +389,7 @@ try {
     // Confirma tambem, de forma factual (sem risco de falso-positivo), que
     // NENHUMA das 6 classes `use`-adas por esta suite e VioApiBrClient --
     // lista fechada, checada uma a uma.
-    $classesImportadas = ['App\\Dao\\AtendimentoDao', 'App\\Dao\\VioCacheDao', 'App\\Dao\\VioApiBrCacheDao', 'App\\Dao\\OrdemColetaDao', 'App\\Rn\\DocumentoRn', 'App\\Rn\\AtendimentoRn', 'App\\Rn\\OrdemColetaClient'];
+    $classesImportadas = ['App\\Dao\\AtendimentoDao', 'App\\Dao\\VioCacheDao', 'App\\Dao\\OrdemColetaDao', 'App\\Rn\\DocumentoRn', 'App\\Rn\\AtendimentoRn', 'App\\Rn\\OrdemColetaClient'];
     afirmar('Cenario 16: nenhuma das classes importadas por esta suite e App\\Rn\\VioApiBrClient (lista fechada confirmada)', !in_array('App\\Rn\\VioApiBrClient', $classesImportadas, true));
 
     // Prova em tempo de execucao: contador de "chamadas reais" nunca
@@ -597,33 +580,6 @@ try {
     afirmar('Cenario 26: crlv_rntc gravado com o valor exato', $at26Depois['crlv_rntc'] === '55667788');
 
     // ------------------------------------------------------------
-    // Cenario 27 -- VioApiBrCacheDao::buscarCrlvValido() nunca retorna um
-    // registro com RNTC ausente/vazio -- confirmado pelo FILTRO NO PROPRIO
-    // SQL (`AND rntc IS NOT NULL AND rntc <> ''`, app/Dao/VioApiBrCacheDao.php:128).
-    // Insercao manual de um registro "mal formado" (bypass deliberado de
-    // gravarCacheVioApiBrCrlv(), que so grava apos aprovacao -- nunca grava
-    // RNTC vazio na pratica; aqui simulamos um registro hipotetico/corrompido
-    // para provar que a protecao esta no SQL, nao so na logica de escrita).
-    // ------------------------------------------------------------
-    $fpCacheMalFormado = bin2hex(random_bytes(32));
-    $agora27 = new DateTimeImmutable('now');
-    $stmtInsertMalFormado = $pdo->prepare("
-        INSERT INTO tb_vio_api_cache_crlv
-            (fingerprint, hmac_versao, fornecedor, origem_original, versao_mapeamento, placa, exercicio, uf, rntc, tipo_veiculo, renavam_cifrado, resumo_comparacao_reliable, resumo_comparacao_mismatched, validado_em, expira_em)
-        VALUES
-            (:fp, 1, 'VIO_API_BR', 'VIO_API_BR', 1, 'MALFORMADO', 2025, 'SP', '', 'CAMINHAO', NULL, 1, 0, :validado, :expira)
-    ");
-    $stmtInsertMalFormado->execute([
-        'fp' => $fpCacheMalFormado,
-        'validado' => $agora27->format('Y-m-d H:i:s'),
-        'expira' => $agora27->modify('+7 days')->format('Y-m-d H:i:s'),
-    ]);
-    $registroMalFormadoDireto = $cacheVioApiBrDao->buscarCrlvValido($fpCacheMalFormado, 1, 1);
-    afirmar('Cenario 27: buscarCrlvValido() NUNCA retorna um registro com rntc vazio, mesmo inserido diretamente no banco (protecao no proprio SQL, nao so na logica de escrita)', $registroMalFormadoDireto === null);
-    $r27 = $documentoRn->tentarCacheCrlv(novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'MALFORMADO'), $fpCacheMalFormado, 1);
-    afirmar('Cenario 27: tentarCacheCrlv() tambem nunca autoriza avanco a partir desse registro mal formado (cache-miss, cai no fallback)', $r27 === null);
-
-    // ------------------------------------------------------------
     // Cenario 28 -- Cache COM RNTC valido mantem a regra normalmente
     // (reconfirmacao isolada do Cenario 12/13, mesma familia de teste, sem
     // depender de estado anterior).
@@ -632,10 +588,9 @@ try {
     $fp28 = bin2hex(random_bytes(32));
     $at28a = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at28a['id_atendimento'], $fp28);
     $r28a = $documentoRn->avaliarResultadoVioApiBrCrlv($at28a, resultadoCrlvBaseRegras([], ['Placa' => 'RNT0028', 'RNTRC' => '22334455']));
-    afirmar('Cenario 28 (setup): validacao com RNTC valido aprovada e grava cache', $r28a['pode_avancar'] === true);
-    $at28b = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'RNT0028');
-    $r28b = $documentoRn->tentarCacheCrlv($at28b, $fp28, 1);
-    afirmar('Cenario 28: cache-hit com RNTC valido e reaproveitado corretamente (origem VIO_CACHE)', $r28b !== null && $r28b['origem'] === 'VIO_CACHE');
+    afirmar('Cenario 28 (setup): validacao com RNTC valido aprovada e nao grava cache', $r28a['pode_avancar'] === true);
+    $at28Depois = $atendimentoDao->buscarPorId((int) $at28a['id_atendimento']);
+    afirmar('Cenario 28 (QR-only): RNTC valido gravado em tb_atendimento e origem VIO_API_BR, sem cache', $r28a['origem'] === 'VIO_API_BR' && $at28Depois['crlv_rntc'] === '22334455' && (int) $pdo->query('SELECT COUNT(*) FROM tb_vio_api_cache_crlv')->fetchColumn() === 0);
 
     // ------------------------------------------------------------
     // Cenario 29 -- Preenchimento MANUAL sem RNTC -> bloqueado (mesma
@@ -704,9 +659,8 @@ try {
     // anterior -- releitura confirmada: atualizarValidacaoCrlv() (que grava
     // crlv_rntc) so e chamado DEPOIS que avaliarCrlv() ja retornou
     // pode_avancar=true (DocumentoRn.php:398 dentro de avaliarCrlv();
-    // avaliarResultadoVioApiBrCrlv() so chama gravarCacheVioApiBrCrlv() --
-    // que NUNCA toca crlv_rntc de tb_atendimento -- quando pode_avancar=true
-    // tambem). Isolado aqui especificamente para RNTC (o Cenario 14 ja prova
+    // avaliarResultadoVioApiBrCrlv() (QR-only, sem cache) so grava quando
+    // pode_avancar=true). Isolado aqui especificamente para RNTC (o Cenario 14 ja prova
     // o mesmo para RNTC+tipo+UF juntos).
     // ------------------------------------------------------------
     $at33 = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'RNT0033');
@@ -736,8 +690,11 @@ try {
     // (SQL fail-closed), sem precisar de uma segunda passada pela logica de
     // avaliarCrlv() para provar isso de novo.
     afirmar('Cenario 34: caminho VIO_API_BR exige RNTC valido (reconfirmado pelos Cenarios 17-25 acima, nenhuma excecao encontrada)', $r19['pode_avancar'] === false && $r26['pode_avancar'] === true);
-    afirmar('Cenario 34: caminho VIO_CACHE exige RNTC valido (reconfirmado pelo filtro SQL do Cenario 27 + cache-hit valido do Cenario 28)', $registroMalFormadoDireto === null && $r28b['origem'] === 'VIO_CACHE');
-    afirmar('Cenario 34 (regressao rapida): placa continua fail-closed (Cenario 14, mismatch de placa rejeitado)', $r14b['pode_avancar'] === false);
+    afirmar('Cenario 34 (QR-only): nao ha caminho VIO_CACHE; RNTC valido segue obrigatorio (Cenario 27 filtro SQL legado + Cenario 28 aprovacao direta)', $registroMalFormadoDireto === null && $r28a['origem'] === 'VIO_API_BR' && $r28a['pode_avancar'] === true);
+    $at34Placa = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'PLX0034');
+    $at34Placa = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at34Placa['id_atendimento'], bin2hex(random_bytes(32)));
+    $r34Placa = $documentoRn->avaliarResultadoVioApiBrCrlv($at34Placa, resultadoCrlvBaseRegras([], ['Placa' => 'OUT0034']));
+    afirmar('Cenario 34 (regressao rapida): placa continua fail-closed quando a PLACA EXTRAIDA diverge', $r34Placa['pode_avancar'] === false);
     afirmar('Cenario 34 (regressao rapida): exercicio continua fail-closed (Cenario 9a/9b, tipo incompativel invalida)', $r9a['pode_avancar'] === false && $r9b['pode_avancar'] === false);
     afirmar('Cenario 34 (regressao rapida): UF continua fail-closed (Cenario 7 ausente + Cenario 8 fora da lista)', $r7['pode_avancar'] === false && $r8['pode_avancar'] === false);
 

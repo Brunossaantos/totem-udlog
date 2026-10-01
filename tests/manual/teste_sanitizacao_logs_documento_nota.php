@@ -14,12 +14,9 @@
  * deste projeto). NUNCA chama VIO/Talent/Serpro/vio.api.br real. Marcador
  * desta rodada: MARCADOR_SANIT_0920_* (ver mocks inlinados abaixo).
  *
- * Pontos 1/2 reescritos na rodada corretiva de migracao-vio-api-br-com-cache
- * (2026-09-26) para refletir o fluxo NOVO (App\Rn\VioApiBrClient) — Ponto 1
- * agora cobre o catch em torno de `new VioApiBrClient()` (era
- * `VioDecodeClient`), Ponto 2 agora cobre o catch em torno de
- * App\Rn\DocumentoRn::calcularFingerprintVioApiBr() (era validarCnh/
- * validarCrlv, metodos que o fluxo novo nunca mais chama).
+ * Ponto 1 cobre o catch em torno de `new VioApiBrClient()`. O antigo Ponto 2
+ * (catch em torno do calculo de fingerprint/HMAC do cache VIO_CACHE) foi
+ * removido com o codigo que testava (fluxo-qr-exclusivo-cnh-crlv, 2026-10-01).
  *
  * IMPORTANTE (rodada curta de /01-implementacao de 2026-09-25, achado
  * bloqueante de reprodutibilidade de /02-testes de 24/09 e 25/09): este
@@ -135,15 +132,8 @@ function todosOsMarcadores(): array
 }
 
 // ---------------------------------------------------------------------
-// Catch 2 (DocumentoController::iniciarProcessamento, catch em torno de
-// App\Rn\DocumentoRn::calcularFingerprintVioApiBr() — reescrito na rodada
-// corretiva de migracao-vio-api-br-com-cache, 2026-09-26: o fluxo novo
-// NUNCA mais chama validarCnh()/validarCrlv() dentro de iniciarProcessamento
-// — esses metodos permanecem intocados so para o fluxo antigo/rollback do
-// Serpro, nunca mais exercitados por este caminho) e Catch 3
-// (DocumentoController::preencherManual, INALTERADO — preencherManualCnh/
-// Crlv continuam sendo os mesmos metodos de sempre) — subclasse de
-// DocumentoRn.
+// Catch 3 (DocumentoController::preencherManual) — subclasse de DocumentoRn
+// que lanca excecao com marcador sintetico nos pontos sob teste.
 // ---------------------------------------------------------------------
 final class DocumentoRnMarcadorThrow extends \App\Rn\DocumentoRn
 {
@@ -155,11 +145,6 @@ final class DocumentoRnMarcadorThrow extends \App\Rn\DocumentoRn
     public function crlvAprovado(array $atendimento): bool
     {
         return false;
-    }
-
-    public function calcularFingerprintVioApiBr(string $bytesQrBrutos): array
-    {
-        throw new \RuntimeException(mensagemMarcadaCompleta('calcularFingerprintVioApiBr'));
     }
 
     public function preencherManualCnh(array $atendimento, string $nome, string $cpfBruto, string $dataValidadeBruta): array
@@ -243,16 +228,13 @@ function gerarScriptTemporario(string $corpo, string $raizProjeto, string $prefi
 // Corpo antes em _caso_iniciar_processamento_vio_indisponivel.php. Reescrito
 // na rodada corretiva de migracao-vio-api-br-com-cache (2026-09-26): forca
 // App\Rn\VioApiBrClient (NUNCA mais App\Rn\VioDecodeClient) a falhar no
-// construtor. Usa tipo='crlv' fixo (dispensa JPEG estruturalmente valido —
-// ver docblock de _caso_iniciar_processamento_vio_indisponivel.php para o
-// mesmo raciocinio) com um crlv.jpg de fixture ja presente em disco (criado
-// pelo teste pai) e HMAC do fingerprint configurado via putenv() herdado.
+// construtor. Entrada QR-only: imagem_qr_base64 com JPEG valido gerado em
+// memoria (nenhum arquivo em disco/storage).
 $corpoVioIndisponivel = <<<'CORPOVIO'
 use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
-use App\Dao\VioApiBrCacheDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
 
@@ -279,10 +261,14 @@ $idAtendimento = (int) ($argv[2] ?? 0);
 $tipo = 'crlv';
 
 $atendimentoDao = new AtendimentoDao($pdo);
-$documentoRn = new DocumentoRn(new VioCacheDao($pdo), $atendimentoDao, new VioApiBrCacheDao($pdo));
+$documentoRn = new DocumentoRn(new VioCacheDao($pdo), $atendimentoDao);
 $controller = new DocumentoController($atendimentoDao, $documentoRn, $pdo);
 
-$bytesGarbage = random_bytes(40);
+$qaGd = imagecreatetruecolor(32, 32);
+ob_start();
+imagejpeg($qaGd, null, 80);
+$bytesGarbage = (string) ob_get_clean();
+imagedestroy($qaGd);
 
 register_shutdown_function(function () {
     echo "\nHTTP_CODE:" . http_response_code() . "\n";
@@ -291,56 +277,9 @@ register_shutdown_function(function () {
 $controller->iniciarProcessamento([
     'id_atendimento' => $idAtendimento,
     'tipo' => $tipo,
-    'qr_bytes_base64' => base64_encode($bytesGarbage),
+    'imagem_qr_base64' => 'data:image/jpeg;base64,' . base64_encode($bytesGarbage),
 ], $idTotem);
 CORPOVIO;
-
-// Corpo antes em _caso_iniciar_processamento_marcador.php. Reescrito na
-// rodada corretiva de migracao-vio-api-br-com-cache (2026-09-26): o alvo
-// agora e o catch em torno de
-// App\Rn\DocumentoRn::calcularFingerprintVioApiBr() (ponto MAIS CEDO do
-// fluxo novo que ainda delega a DocumentoRn — nunca mais
-// validarCnh()/validarCrlv(), que o fluxo novo nao chama). Nenhuma env de
-// VIO e necessaria aqui (a excecao acontece antes de qualquer uso real
-// delas).
-$corpoMarcadorValidar = <<<'CORPOMARCADOR'
-use Dotenv\Dotenv;
-use Util\Conexao;
-use App\Dao\AtendimentoDao;
-use App\Dao\VioCacheDao;
-use App\Controller\DocumentoController;
-
-foreach (getenv() as $qaChaveHerdada => $qaValorHerdado) {
-    if (!array_key_exists($qaChaveHerdada, $_ENV)) {
-        $_ENV[$qaChaveHerdada] = $qaValorHerdado;
-    }
-}
-
-$dotenv = Dotenv::createImmutable(%%RAIZ%%);
-$dotenv->load();
-
-$pdo = Conexao::obter();
-
-$idTotem = (int) ($argv[1] ?? 0);
-$idAtendimento = (int) ($argv[2] ?? 0);
-$tipo = $argv[3] ?? 'cnh';
-
-$atendimentoDao = new AtendimentoDao($pdo);
-$documentoRn = new DocumentoRnMarcadorThrow(new VioCacheDao($pdo), $atendimentoDao);
-$controller = new DocumentoController($atendimentoDao, $documentoRn, $pdo);
-
-$bytesGarbage = random_bytes(40);
-
-register_shutdown_function(function () {
-    echo "\nHTTP_CODE:" . http_response_code() . "\n";
-});
-
-$controller->iniciarProcessamento([
-    'id_atendimento' => $idAtendimento,
-    'tipo' => $tipo,
-    'qr_bytes_base64' => base64_encode($bytesGarbage),
-], $idTotem);
-CORPOMARCADOR;
 
 // Corpo antes em _caso_preencher_manual_marcador.php.
 $corpoPreencherManual = <<<'CORPOPREENCHER'
@@ -476,7 +415,6 @@ $controller->definirNumero([
 CORPODEFNUM;
 
 $arquivosTemporariosLimpar[] = $scriptVioIndisponivel = gerarScriptTemporario($corpoVioIndisponivel, $raizProjeto, 'vio_indisponivel');
-$arquivosTemporariosLimpar[] = $scriptMarcadorValidar = gerarScriptTemporario($codigoMocksSanitizacao . "\n" . $corpoMarcadorValidar, $raizProjeto, 'marcador_validar');
 $arquivosTemporariosLimpar[] = $scriptPreencherManual = gerarScriptTemporario($codigoMocksSanitizacao . "\n" . $corpoPreencherManual, $raizProjeto, 'preencher_manual');
 $arquivosTemporariosLimpar[] = $scriptIdentificarCliente = gerarScriptTemporario($codigoMocksSanitizacao . "\n" . $corpoIdentificarCliente, $raizProjeto, 'identificar_cliente');
 $arquivosTemporariosLimpar[] = $scriptDefinirNumero = gerarScriptTemporario($codigoMocksSanitizacao . "\n" . $corpoDefinirNumero, $raizProjeto, 'definir_numero');
@@ -587,15 +525,6 @@ function verificarPontoSanitizado(
 $idsAtendimentoLimpar = [];
 $idsTotemLimpar = [];
 
-// HMAC do fingerprint do cache vio.api.br — precisa estar presente no
-// ambiente dos subprocessos que exercitam o fluxo NOVO de
-// iniciarProcessamento() ate o ponto do CAS/montagem (Ponto 1), herdado via
-// proc_open() a partir deste processo pai (chave FIXA/sintetica, nunca a
-// chave real).
-putenv('VIO_API_BR_CACHE_HMAC_VERSION=1');
-putenv('VIO_API_BR_CACHE_HMAC_KEY_V1=' . str_repeat('ab', 32));
-$storagePathSanit0920 = rtrim($_ENV['STORAGE_PATH'] ?? '', '/');
-
 // ============================================================
 // Ponto 1 — DocumentoController::iniciarProcessamento, catch em torno de
 // `new VioApiBrClient()` (reescrito na rodada corretiva de
@@ -608,10 +537,6 @@ $idTotemP1 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P1_' . bin2hex(random_b
 $idsTotemLimpar[] = $idTotemP1;
 $idP1 = talentCriarAtendimentoExpedicaoEtapa($atendimentoDaoGlobal, $idTotemP1, 'exp_crlv');
 $idsAtendimentoLimpar[] = $idP1;
-$pastaP1 = 'sanit0920_p1_' . bin2hex(random_bytes(4));
-$atendimentoDaoGlobal->definirPasta($idP1, $pastaP1);
-@mkdir("{$storagePathSanit0920}/{$pastaP1}", 0750, true);
-file_put_contents("{$storagePathSanit0920}/{$pastaP1}/crlv.jpg", 'FIXTURE_NAO_E_JPEG_REAL_SEM_VALIDACAO_DE_FORMATO');
 
 $mensagemCruaP1 = 'VIO_API_BR_BASE_URL/VIO_API_BR_API_KEY ausentes';
 $resP1 = verificarPontoSanitizado(
@@ -623,30 +548,6 @@ $resP1 = verificarPontoSanitizado(
     [$mensagemCruaP1]
 );
 afirmar('Ponto1: HTTP 503 preservado', str_contains($resP1['stdout'], 'HTTP_CODE:503'));
-@unlink("{$storagePathSanit0920}/{$pastaP1}/crlv.jpg");
-@rmdir("{$storagePathSanit0920}/{$pastaP1}");
-
-// ============================================================
-// Ponto 2 — DocumentoController::iniciarProcessamento, catch em torno de
-// App\Rn\DocumentoRn::calcularFingerprintVioApiBr() (DocumentoRnMarcadorThrow
-// injetado) — reescrito na rodada corretiva de migracao-vio-api-br-com-cache
-// (2026-09-26): o fluxo novo nunca mais chama validarCnh()/validarCrlv().
-// ============================================================
-echo "\n=== Ponto 2: DocumentoController::iniciarProcessamento (calcularFingerprintVioApiBr) ===\n";
-$idTotemP2 = talentCriarTotemComEmpresa($pdo, 'SANIT0920_P2_' . bin2hex(random_bytes(3)), $idEmpresaQaSanit0920);
-$idsTotemLimpar[] = $idTotemP2;
-$idP2 = talentCriarAtendimentoExpedicaoEtapa($atendimentoDaoGlobal, $idTotemP2, 'exp_cnh');
-$idsAtendimentoLimpar[] = $idP2;
-
-$resP2 = verificarPontoSanitizado(
-    'Ponto2-iniciarProcessamento-fingerprint',
-    $scriptMarcadorValidar,
-    [(string) $idTotemP2, (string) $idP2, 'cnh'],
-    "iniciar-processamento (fingerprint) id_atendimento={$idP2} tipo=cnh",
-    'RuntimeException',
-    todosOsMarcadores()
-);
-afirmar('Ponto2: HTTP 500 preservado', str_contains($resP2['stdout'], 'HTTP_CODE:500'));
 
 // ============================================================
 // Ponto 3 — DocumentoController::preencherManual (DocumentoRnMarcadorThrow).
@@ -709,22 +610,21 @@ $resP5 = verificarPontoSanitizado(
 afirmar('Ponto5: HTTP 500 preservado', str_contains($resP5['stdout'], 'HTTP_CODE:500'));
 
 // ============================================================
-// Prova negativa — reverte temporariamente o Ponto 2 (DocumentoController.php)
+// Prova negativa — reverte temporariamente o Ponto 1 (DocumentoController.php)
 // para o formato antigo (getMessage() cru) e confirma que a mesma bateria de
 // assercoes DETECTA o vazamento. Reverte em seguida e confirma hash MD5
 // identico ao original (arquivo intocado ao final).
 // ============================================================
-echo "\n=== Prova negativa: reverter Ponto 2 para getMessage() cru ===\n";
+echo "\n=== Prova negativa: reverter Ponto 1 para getMessage() cru ===\n";
 $arquivoDocumentoController = __DIR__ . '/../../app/Controller/DocumentoController.php';
 $conteudoOriginal = file_get_contents($arquivoDocumentoController);
 $md5Original = md5($conteudoOriginal);
 
-// Alvo atualizado na rodada corretiva de migracao-vio-api-br-com-cache
-// (2026-09-26) — a linha sanitizada original (catch de validarCnh/
-// validarCrlv) nao existe mais no fluxo novo; o equivalente hoje e o catch
-// em torno de calcularFingerprintVioApiBr() (mesmo Ponto 2 acima).
-$trechoSanitizado = '$this->logFalhaTecnica("iniciar-processamento (fingerprint) id_atendimento={$idAtendimento} tipo={$tipo}", $e);';
-$trechoCru = "error_log('iniciar-processamento (fingerprint): falha nao prevista: ' . \$e->getMessage());";
+// Alvo da prova negativa: catch em torno da inicializacao de
+// App\Rn\VioApiBrClient (Ponto 1). O Ponto 2 antigo (fingerprint/HMAC) foi
+// removido junto com o cache VIO_CACHE (fluxo-qr-exclusivo-cnh-crlv).
+$trechoSanitizado = '$this->logFalhaTecnica("iniciar-processamento (inicializar VioApiBrClient) id_atendimento={$idAtendimento} tipo={$tipo}", $e);';
+$trechoCru = "error_log('iniciar-processamento (inicializar VioApiBrClient): falha nao prevista: ' . \$e->getMessage());";
 
 if (!str_contains($conteudoOriginal, $trechoSanitizado)) {
     afirmar('Prova negativa: trecho sanitizado esperado encontrado no arquivo original (pre-condicao)', false);
@@ -736,11 +636,11 @@ if (!str_contains($conteudoOriginal, $trechoSanitizado)) {
     // filho -- cada subprocesso php é novo, entao basta a escrita em disco.
     $resNegativo = dispararComLogDedicado(
         ['display_errors' => '1', 'error_reporting' => 'E_ALL', 'html_errors' => '0'],
-        $scriptMarcadorValidar,
-        [(string) $idTotemP2, (string) $idP2, 'cnh'],
+        $scriptVioIndisponivel,
+        [(string) $idTotemP1, (string) $idP1, 'crlv'],
         __DIR__ . '/sanit0920_provanegativa_' . bin2hex(random_bytes(3)) . '.log'
     );
-    $detectouVazamentoNoLog = contemAlgumMarcador($resNegativo['log'], todosOsMarcadores()) !== null;
+    $detectouVazamentoNoLog = contemAlgumMarcador($resNegativo['log'], [$mensagemCruaP1]) !== null;
     afirmar(
         'Prova negativa: com o codigo revertido para getMessage() cru, a suite DETECTA marcador vazado no log (confirma que a checagem funciona de verdade)',
         $detectouVazamentoNoLog

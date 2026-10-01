@@ -23,6 +23,44 @@ class UploadHelper
     private const JPEG_AREA_MAXIMA_PX = 13000000;
 
     /**
+     * Decodifica e valida JPEG de data URL sem criar diretorio ou arquivo.
+     * Usado pelo fluxo QR-only: os bytes retornados vivem somente na chamada
+     * que os entrega a VIO.
+     */
+    public static function decodificarJpegBase64Seguro(string $base64): string
+    {
+        if (!preg_match('#^data:image/jpeg;base64,([A-Za-z0-9+/]*={0,2})$#D', $base64, $partes)) {
+            throw new \RuntimeException('Formato de imagem nao suportado');
+        }
+        $binario = base64_decode($partes[1], true);
+        $maxBytes = isset($_ENV['NOTA_IMAGEM_MAX_BYTES']) && $_ENV['NOTA_IMAGEM_MAX_BYTES'] !== ''
+            ? (int) $_ENV['NOTA_IMAGEM_MAX_BYTES'] : 5 * 1024 * 1024;
+        if ($binario === false || $binario === '' || strlen($binario) > $maxBytes
+            || substr($binario, 0, 3) !== "\xFF\xD8\xFF" || substr($binario, -2) !== "\xFF\xD9") {
+            throw new \RuntimeException('Conteudo da imagem nao e um JPEG valido');
+        }
+        $info = @getimagesizefromstring($binario);
+        if ($info === false || $info[2] !== IMAGETYPE_JPEG || $info[0] <= 0 || $info[1] <= 0
+            || $info[0] > self::JPEG_DIMENSAO_MAXIMA_PX || $info[1] > self::JPEG_DIMENSAO_MAXIMA_PX
+            || $info[0] > self::JPEG_AREA_MAXIMA_PX / $info[1]
+            || !extension_loaded('gd') || !function_exists('imagecreatefromstring')) {
+            throw new \RuntimeException('Conteudo da imagem nao e um JPEG valido');
+        }
+        $aviso = false;
+        set_error_handler(static function () use (&$aviso): bool { $aviso = true; return true; });
+        try {
+            $imagem = imagecreatefromstring($binario);
+            if ($imagem === false || $aviso) {
+                throw new \RuntimeException('Conteudo da imagem nao e um JPEG valido');
+            }
+            imagedestroy($imagem);
+        } finally {
+            restore_error_handler();
+        }
+        return $binario;
+    }
+
+    /**
      * Pasta do atendimento: AAAA-MM-DD/PLACA_HHMMSS — nunca eh usada pra localizar
      * o registro no banco, so serve pra navegacao humana no File Manager.
      */

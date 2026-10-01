@@ -811,50 +811,23 @@ class AtendimentoController
     }
 
     /**
-     * Avalia o "gate" de uma transicao: null = sem restricao; upload_* =
-     * confere que o ARQUIVO da foto foi de fato salvo em disco (nao exige
-     * que a validacao VIO ja tenha terminado — e o que viabiliza liberar a
-     * etapa seguinte imediatamente, com a validacao rodando em segundo
-     * plano); ambos_aprovados = CNH E CRLV precisam estar em estado terminal
-     * ACEITAVEL (VIO_TRIAL/VIO_VALIDADO/MANUAL com dados validos — mesma
-     * checagem ja usada no gate final de impressao, sem nenhuma
-     * flexibilizacao).
+     * Avalia o "gate" de uma transicao: null = sem restricao; upload_cnh/
+     * upload_crlv = sempre liberados (fluxo QR-only: nao ha foto/arquivo de
+     * documento em disco; a validacao VIO roda em segundo plano e nao
+     * bloqueia a etapa seguinte); ambos_aprovados = CNH E CRLV precisam estar
+     * em estado terminal ACEITAVEL (mesma checagem do gate final de
+     * impressao, sem nenhuma flexibilizacao).
      */
     private function gateDeTransicaoLiberado(array $atendimento, ?string $gate): bool
     {
         return match ($gate) {
             null => true,
-            // Usado por exp_cnh (Expedicao, upload frente+verso na mesma
-            // chamada) E por rec_cnh (Recebimento, upload frente/verso em
-            // chamadas separadas mas na mesma etapa desde a rodada
-            // corretiva de 2026-09-26) — em ambos os casos so libera a
-            // transicao quando os 2 arquivos ja estao salvos em disco.
-            'upload_cnh' => $this->arquivoDoDocumentoExiste($atendimento, 'cnh_frente.jpg')
-                && $this->arquivoDoDocumentoExiste($atendimento, 'cnh_verso.jpg'),
-            'upload_crlv' => $this->arquivoDoDocumentoExiste($atendimento, 'crlv.jpg'),
+            // Usado por exp_cnh/exp_crlv e rec_cnh/rec_crlv.
+            // QR-only inicia a validacao sem persistir fotos de documento.
+            'upload_cnh', 'upload_crlv' => true,
             'ambos_aprovados' => $this->documentoRn->cnhAprovada($atendimento) && $this->documentoRn->crlvAprovado($atendimento),
             default => false,
         };
-    }
-
-    /**
-     * Confere no sistema de arquivos (STORAGE_PATH + pasta_documentos, fora
-     * do webroot publico) se a foto do documento ja foi salva por
-     * DocumentoController::upload() — usado so para o gate de "upload
-     * feito", nunca para decidir aprovacao (isso e sempre
-     * App\Rn\DocumentoRn::cnhAprovada/crlvAprovado, calculado a partir de
-     * tb_atendimento).
-     */
-    private function arquivoDoDocumentoExiste(array $atendimento, string $nomeArquivo): bool
-    {
-        $pasta = $atendimento['pasta_documentos'] ?? null;
-        $storagePath = rtrim($_ENV['STORAGE_PATH'] ?? '', '/');
-
-        if (!$pasta || $storagePath === '') {
-            return false;
-        }
-
-        return is_file($storagePath . '/' . $pasta . '/' . $nomeArquivo);
     }
 
     /**

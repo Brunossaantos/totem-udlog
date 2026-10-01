@@ -265,40 +265,20 @@ class TalentRn
     }
 
     /**
-     * Monta os anexos em PDF (item 4 do escopo) — CNH (frente+verso, 2
-     * paginas; fallback para o legado cnh.jpg de 1 pagina), CRLV (1 pagina)
-     * e uma nota fiscal por PDF (1 pagina cada, ordem preservada). SEMPRE a
-     * partir das imagens JPEG ja validadas em disco pelo scanner/leitor do
-     * totem — NUNCA a partir de image.base64 da resposta da VIO Decode.
-     *
-     * CNH/CRLV ausentes ou corrompidos IMPEDEM a finalizacao (excecao
-     * propagada, tratada pelo chamador como ERRO_REPROCESSAVEL, nunca chega
-     * a chamar o Talent). Nota fiscal ausente no disco (registrada no banco
-     * mas arquivo sumiu) e pulada silenciosamente — nao trava CNH/CRLV, mas
-     * tambem nunca inventa um anexo para ela.
+     * Monta os anexos em PDF — fluxo QR-only: CNH e CRLV NAO geram anexo
+     * (nao ha foto/PDF desses documentos em storage; so doctos[] estruturado).
+     * Gera apenas uma nota fiscal por PDF (1 pagina cada, ordem preservada),
+     * a partir dos JPEGs das notas ja validados em disco. Nota fiscal ausente
+     * no disco (registrada no banco mas arquivo sumiu) e pulada
+     * silenciosamente, sem inventar anexo para ela.
      */
     private function montarAnexos(array $atendimento, array $notas): array
     {
         $pasta = rtrim($this->caminhoBase, '/') . '/' . $atendimento['pasta_documentos'];
         $anexos = [];
 
-        $cnhFrente = $pasta . '/cnh_frente.jpg';
-        $cnhVerso = $pasta . '/cnh_verso.jpg';
-        $cnhLegado = $pasta . '/cnh.jpg';
-
-        if (is_file($cnhFrente) && is_file($cnhVerso)) {
-            $anexos[] = $this->anexarPdf([$cnhFrente, $cnhVerso], 'CNH');
-        } elseif (is_file($cnhLegado)) {
-            $anexos[] = $this->anexarPdf([$cnhLegado], 'CNH');
-        } else {
-            throw new \RuntimeException('anexo_cnh_ausente');
-        }
-
-        $crlv = $pasta . '/crlv.jpg';
-        if (!is_file($crlv)) {
-            throw new \RuntimeException('anexo_crlv_ausente');
-        }
-        $anexos[] = $this->anexarPdf([$crlv], 'CRLV');
+        // QR-only: CNH/CRLV nao sao armazenados nem enviados ao Talent.
+        // doctos[] e anexos de notas permanecem inalterados.
 
         foreach ($notas as $nota) {
             $arquivoNota = $pasta . '/' . $nota['arquivo'];

@@ -253,6 +253,41 @@ class AtendimentoDao
     }
 
     /**
+     * Equivalente CAS da persistencia automatica VIO. Resultado tardio nunca
+     * grava dados documentais se a tentativa foi substituida/cancelada ou o
+     * atendimento saiu de andamento entre o GET e a decisao.
+     */
+    public function atualizarValidacaoCnhVioApiBr(int $id, string $tentativaId, string $nome, string $cpf, string $dataValidade): bool
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET motorista_nome = :nome, motorista_cpf = :cpf, cnh_validade = :cnh_validade,
+                cnh_origem_validacao = 'VIO_API_BR', cnh_status_revisao = 'OK', cnh_validado_em = NOW(),
+                cnh_snapshot_nome = :snapshot_nome, cnh_snapshot_cpf = :snapshot_cpf,
+                cnh_snapshot_validade = :snapshot_validade
+            WHERE id_atendimento = :id AND status = 'em_andamento'
+              AND cnh_tentativa_id = :tentativa
+              AND cnh_status_processamento IN ('PROCESSANDO_LEITURA', 'PROCESSANDO_COMPARACAO')
+        ");
+        $stmt->execute([
+            'nome' => $nome, 'cpf' => $cpf, 'cnh_validade' => $dataValidade,
+            'snapshot_nome' => $nome, 'snapshot_cpf' => $cpf, 'snapshot_validade' => $dataValidade,
+            'id' => $id, 'tentativa' => $tentativaId,
+        ]);
+
+        if ($stmt->rowCount() > 0) {
+            return true;
+        }
+
+        // MySQL pode devolver 0 quando o resultado identico e recebido no
+        // mesmo segundo. Isso nao significa CAS perdido; revalida a mesma
+        // guarda sem ler nenhum dado documental.
+        $vigente = $this->pdo->prepare("SELECT 1 FROM tb_atendimento WHERE id_atendimento = :id AND status = 'em_andamento' AND cnh_tentativa_id = :tentativa AND cnh_status_processamento IN ('PROCESSANDO_LEITURA', 'PROCESSANDO_COMPARACAO')");
+        $vigente->execute(['id' => $id, 'tentativa' => $tentativaId]);
+        return $vigente->fetchColumn() !== false;
+    }
+
+    /**
      * Persiste o resultado aprovado da validacao de CRLV. A placa NAO e
      * regravada em tb_atendimento.placa aqui (ja existe e e a fonte de
      * comparacao, nunca sobrescrita pelo CRLV lido) — mas E gravada no
@@ -288,6 +323,60 @@ class AtendimentoDao
             'snapshot_tipo_veiculo' => $ehOrigemVio ? $tipoVeiculo : null,
             'id' => $id,
         ]);
+    }
+
+    /** @see atualizarValidacaoCnhVioApiBr() */
+    public function atualizarValidacaoCrlvVioApiBr(int $id, string $tentativaId, string $placa, int $exercicio, string $uf, string $rntc, string $tipoVeiculo): bool
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET crlv_ano = :crlv_ano, crlv_uf = :crlv_uf, crlv_rntc = :crlv_rntc,
+                crlv_tipo_veiculo = :crlv_tipo_veiculo, crlv_origem_validacao = 'VIO_API_BR',
+                crlv_status_revisao = 'OK', crlv_validado_em = NOW(),
+                crlv_snapshot_placa = :snapshot_placa, crlv_snapshot_exercicio = :snapshot_exercicio,
+                crlv_snapshot_uf = :snapshot_uf, crlv_snapshot_rntc = :snapshot_rntc,
+                crlv_snapshot_tipo_veiculo = :snapshot_tipo_veiculo
+            WHERE id_atendimento = :id AND status = 'em_andamento'
+              AND crlv_tentativa_id = :tentativa
+              AND crlv_status_processamento IN ('PROCESSANDO_LEITURA', 'PROCESSANDO_COMPARACAO')
+        ");
+        $stmt->execute([
+            'crlv_ano' => $exercicio, 'crlv_uf' => $uf, 'crlv_rntc' => $rntc,
+            'crlv_tipo_veiculo' => $tipoVeiculo, 'snapshot_placa' => $placa,
+            'snapshot_exercicio' => $exercicio, 'snapshot_uf' => $uf,
+            'snapshot_rntc' => $rntc, 'snapshot_tipo_veiculo' => $tipoVeiculo,
+            'id' => $id, 'tentativa' => $tentativaId,
+        ]);
+
+        if ($stmt->rowCount() > 0) {
+            return true;
+        }
+
+        $vigente = $this->pdo->prepare("SELECT 1 FROM tb_atendimento WHERE id_atendimento = :id AND status = 'em_andamento' AND crlv_tentativa_id = :tentativa AND crlv_status_processamento IN ('PROCESSANDO_LEITURA', 'PROCESSANDO_COMPARACAO')");
+        $vigente->execute(['id' => $id, 'tentativa' => $tentativaId]);
+        return $vigente->fetchColumn() !== false;
+    }
+
+    /** Executa escrita documental e cache no mesmo PDO, com rollback total. */
+    public function executarEmTransacao(callable $operacao): mixed
+    {
+        $propria = !$this->pdo->inTransaction();
+        if ($propria) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $resultado = $operacao();
+            if ($propria) {
+                $this->pdo->commit();
+            }
+            return $resultado;
+        } catch (\Throwable $e) {
+            if ($propria && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -369,21 +458,6 @@ class AtendimentoDao
         $stmt->execute(['id' => $id]);
     }
 
-    /**
-     * Grava o modo de captura escolhido pelo motorista para a CNH (FISICA
-     * fotografada frente+verso, ou DIGITAL do app do Detran/Senatran, so
-     * frente) ANTES de qualquer upload — coluna nova cnh_modo_captura
-     * (migration 017, demanda suporte-cnh-digital). Posse/status/etapa ja
-     * validados pelo chamador (App\Controller\DocumentoController::
-     * definirModoCnh()); $modo ja validado como 'FISICA'|'DIGITAL' pelo
-     * chamador (fail-closed, nunca gravado fora do enum).
-     */
-    public function definirModoCnh(int $id, string $modo): void
-    {
-        $stmt = $this->pdo->prepare('UPDATE tb_atendimento SET cnh_modo_captura = :modo WHERE id_atendimento = :id');
-        $stmt->execute(['modo' => $modo, 'id' => $id]);
-    }
-
     // ============================================================
     // Fluxo assincrono vio.api.br (demanda migracao-vio-api-br-com-cache,
     // 2026-09-25) — unico fluxo de processamento assincrono de CNH/CRLV
@@ -443,7 +517,7 @@ class AtendimentoDao
      * tarde para o cache-write assincrono quando a comparacao responder
      * (o QR bruto nunca sobrevive alem do calculo do fingerprint).
      */
-    public function iniciarEnvioVioApiBr(int $id, string $documento, string $tentativaId, string $fingerprint, int $hmacVersao): bool
+    public function iniciarEnvioVioApiBr(int $id, string $documento, string $tentativaId): bool
     {
         $c = $this->colunasVioApiBr($documento);
 
@@ -451,10 +525,10 @@ class AtendimentoDao
             UPDATE tb_atendimento
             SET {$c['status']} = 'ENVIANDO', {$c['tentativa']} = :tentativa, {$c['iniciado_em']} = NOW(),
                 {$c['vio_api_id']} = NULL, {$c['enviado_em']} = NULL,
-                {$c['fingerprint']} = :fingerprint, {$c['fingerprint_versao']} = :fp_versao
+                {$c['fingerprint']} = NULL, {$c['fingerprint_versao']} = NULL
             WHERE id_atendimento = :id AND {$c['status']} IN ('PENDENTE', 'ERRO')
         ");
-        $stmt->execute(['tentativa' => $tentativaId, 'fingerprint' => $fingerprint, 'fp_versao' => $hmacVersao, 'id' => $id]);
+        $stmt->execute(['tentativa' => $tentativaId, 'id' => $id]);
 
         return $stmt->rowCount() > 0;
     }

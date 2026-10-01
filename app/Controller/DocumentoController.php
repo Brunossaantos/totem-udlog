@@ -5,7 +5,6 @@ namespace App\Controller;
 use PDO;
 use Util\UploadHelper;
 use Util\Resposta;
-use Util\AnexoPdfHelper;
 use App\Dao\AtendimentoDao;
 use App\Dao\RateLimitVioStatusDao;
 use App\Rn\DocumentoRn;
@@ -19,20 +18,42 @@ use App\Rn\VioApiBrClient;
 
 /**
  * Documentos de CNH/CRLV — Expedicao E Recebimento (demanda
- * expedicao-vio-cnh-crlv, REPLANEJAMENTO de 2026-09-09: VIO Decode passa a
- * valer para os dois tipos de atendimento). Processamento ASSINCRONO do
- * ponto de vista do navegador: upload() salva a foto e libera a etapa
- * seguinte imediatamente; iniciarProcessamento()/statusProcessamento() sao
- * chamados pelo front-end sem bloquear a navegacao (fire-and-forget + poll).
+ * expedicao-vio-cnh-crlv). Fluxo QR-only: sem upload de fotos/PDF, sem
+ * frente/verso e sem modo fisico/digital. Processamento ASSINCRONO do ponto
+ * de vista do navegador: iniciarProcessamento() recebe o JPEG do QR e
+ * statusProcessamento() faz o polling, ambos sem bloquear a navegacao
+ * (fire-and-forget + poll).
  */
 class DocumentoController
 {
+    /** @var callable|null */
+    private $vioFactory;
+
     public function __construct(
         private AtendimentoDao $atendimentoDao,
         private ?DocumentoRn $documentoRn = null,
         private ?PDO $pdo = null,
-        private ?RateLimitVioStatusDao $rateLimitVioStatusDao = null
-    ) {}
+        private ?RateLimitVioStatusDao $rateLimitVioStatusDao = null,
+        ?callable $vioFactory = null
+    ) {
+        $this->vioFactory = $vioFactory;
+    }
+
+    /** Factory interna de composição; nunca é recebida do request. */
+    private function criarVioClient(): object
+    {
+        $cliente = $this->vioFactory !== null
+            ? ($this->vioFactory)()
+            : new VioApiBrClient();
+
+        if (!is_object($cliente)
+            || !method_exists($cliente, 'enviarParaLeitura')
+            || !method_exists($cliente, 'consultarResultado')) {
+            throw new \LogicException('Factory VIO invalida');
+        }
+
+        return $cliente;
+    }
 
     /**
      * Limite de DURACAO MAXIMA de processamento assincrono via vio.api.br,
@@ -41,9 +62,8 @@ class DocumentoController
      * resolucao, o documento vira INDETERMINADO (nunca dispara novo POST
      * automatico; fallback manual continua sempre disponivel). Constante de
      * classe (nao .env) por decisao explicita desta implementacao — a lista
-     * de variaveis de ambiente novas desta demanda foi fechada pelo usuario
-     * (VIO_API_BR_BASE_URL/API_KEY/CACHE_TTL_DIAS/CACHE_HMAC_KEY_V1/
-     * CACHE_HMAC_VERSION); alterar este limite exige nova rodada de codigo,
+     * de variaveis de ambiente da integracao vio.api.br foi fechada pelo
+     * usuario (VIO_API_BR_BASE_URL/VIO_API_BR_API_KEY); alterar este limite exige nova rodada de codigo,
      * mesmo padrao ja usado para TIMEOUT_PROCESSAMENTO_SEGUNDOS acima. Este
      * mesmo valor tambem limita, na pratica, a QUANTIDADE de GETs de
      * polling que o front-end pode gerar para um mesmo documento (cada
@@ -60,45 +80,6 @@ class DocumentoController
      */
     private const RATE_LIMIT_STATUS_JANELA_SEGUNDOS = 5;
     private const RATE_LIMIT_STATUS_MAX_CHAMADAS = 20;
-
-    /**
-     * Etapa exigida por (tipo_atendimento, tipo_documento) para UPLOAD — a
-     * unica acao que continua exigindo etapa EXATA (uploads seguem
-     * estritamente ordenados, sem chamada fire-and-forget concorrente).
-     * Expedicao: CNH frente+verso na MESMA chamada/etapa (exp_cnh).
-     * Recebimento (unificado na rodada corretiva de 2026-09-26 — a
-     * assimetria anterior foi uma decisao de uma demanda ANTERIOR, revogada
-     * explicitamente pelo usuario nesta rodada): CNH frente e verso
-     * continuam em CHAMADAS de upload separadas (2 fotos capturadas em
-     * momentos distintos pela camera do totem), mas agora na MESMA etapa
-     * unica 'rec_cnh' (mesmo padrao ja usado por 'exp_cnh' na Expedicao) —
-     * o segundo upload (verso) nao exige mais uma transicao de etapa entre
-     * um e outro.
-     */
-    private const ETAPAS_UPLOAD = [
-        'expedicao' => [
-            'cnh' => 'exp_cnh',
-            'crlv' => 'exp_crlv',
-        ],
-        'recebimento' => [
-            'cnh_frente' => 'rec_cnh',
-            'cnh_verso' => 'rec_cnh',
-            'crlv' => 'rec_crlv',
-        ],
-    ];
-
-    /**
-     * Etapa exigida por tipo_atendimento para definirModoCnh() — a mesma
-     * etapa onde a captura de CNH comecaria (ver ETAPAS_UPLOAD acima:
-     * 'exp_cnh' para Expedicao, 'rec_cnh' para Recebimento), reaproveitada
-     * aqui em vez de duplicada, ja que o modo precisa ser escolhido ANTES do
-     * primeiro upload de imagem da CNH (demanda suporte-cnh-digital,
-     * 2026-09-27).
-     */
-    private const ETAPA_DEFINIR_MODO_CNH = [
-        'expedicao' => 'exp_cnh',
-        'recebimento' => 'rec_cnh',
-    ];
 
     /**
      * Allowlist EXPLICITA e FECHADA de etapas permitidas para
@@ -122,140 +103,16 @@ class DocumentoController
     ];
 
     /**
-     * Define o modo de captura da CNH (FISICA fotografada frente+verso, ou
-     * DIGITAL do app do Detran/Senatran, so frente) escolhido pelo motorista
-     * ANTES de qualquer upload de imagem — grava cnh_modo_captura (migration
-     * 017, demanda suporte-cnh-digital, 2026-09-27). Fail-closed: valor fora
-     * do enum e rejeitado sem gravar nada. Mesma validacao de posse/tipo/
-     * status/etapa das demais acoes deste Controller (etapa EXATA, mesma
-     * onde a captura de CNH comecaria — ver ETAPA_DEFINIR_MODO_CNH).
-     */
-    public function definirModoCnh(array $entrada, int $idTotem): void
-    {
-        $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
-        $modo = $entrada['modo'] ?? null;
-
-        if (!$idAtendimento || !in_array($modo, ['FISICA', 'DIGITAL'], true)) {
-            Resposta::erro('Dados incompletos');
-        }
-
-        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
-
-        if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
-            Resposta::erro('Atendimento nao encontrado', 404);
-        }
-        if ($atendimento['status'] !== 'em_andamento') {
-            Resposta::erro('Atendimento nao esta em andamento');
-        }
-
-        $etapaEsperada = self::ETAPA_DEFINIR_MODO_CNH[$atendimento['tipo']] ?? null;
-        if ($etapaEsperada === null || $atendimento['etapa_atual'] !== $etapaEsperada) {
-            Resposta::erro('Atendimento nao esta na etapa esperada para definir o modo de captura da CNH');
-        }
-
-        $this->atendimentoDao->definirModoCnh($idAtendimento, $modo);
-
-        Resposta::sucesso(['ok' => true, 'cnh_modo_captura' => $modo]);
-    }
-
-    /**
-     * Upload das fotos de CNH/CRLV — Expedicao (cnh: frente+verso numa unica
-     * chamada) e Recebimento (cnh_frente/cnh_verso em chamadas SEPARADAS,
-     * mas ambas dentro da MESMA etapa 'rec_cnh' desde a rodada corretiva de
-     * 2026-09-26 — ver ETAPAS_UPLOAD; crlv continua em chamada unica). IDOR
-     * corrigido nesta demanda: valida posse/tipo/status/etapa antes de
-     * salvar (antes so verificava que o atendimento existia por ID).
-     */
-    public function upload(array $entrada, int $idTotem): void
-    {
-        $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
-        $tipo = $entrada['tipo'] ?? null; // 'cnh' | 'cnh_frente' | 'cnh_verso' | 'crlv'
-
-        if (!$idAtendimento || !in_array($tipo, ['cnh', 'cnh_frente', 'cnh_verso', 'crlv'], true)) {
-            Resposta::erro('Dados incompletos');
-        }
-
-        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
-
-        if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
-            Resposta::erro('Atendimento nao encontrado', 404);
-        }
-        if ($atendimento['status'] !== 'em_andamento') {
-            Resposta::erro('Atendimento nao esta em andamento');
-        }
-
-        $etapaEsperada = self::ETAPAS_UPLOAD[$atendimento['tipo']][$tipo] ?? null;
-        if ($etapaEsperada === null || $atendimento['etapa_atual'] !== $etapaEsperada) {
-            Resposta::erro('Atendimento nao esta na etapa esperada para envio desse documento');
-        }
-
-        try {
-            if ($tipo === 'cnh') {
-                $frente = $entrada['imagem_frente'] ?? null;
-                $verso = $entrada['imagem_verso'] ?? null;
-                // Fail-safe: NULL (modo ainda nao definido) trata como
-                // FISICA, mesmo comportamento de antes desta mudanca
-                // (demanda suporte-cnh-digital, 2026-09-27).
-                $modoCaptura = $atendimento['cnh_modo_captura'] ?? 'FISICA';
-
-                if ($modoCaptura === 'DIGITAL') {
-                    if (!$frente) {
-                        Resposta::erro('Imagem de frente da CNH e obrigatoria');
-                    }
-
-                    UploadHelper::salvarImagemBase64($frente, $atendimento['pasta_documentos'], 'cnh_frente.jpg');
-                } else {
-                    if (!$frente || !$verso) {
-                        Resposta::erro('Imagens de frente e verso da CNH sao obrigatorias');
-                    }
-
-                    UploadHelper::salvarImagemBase64($frente, $atendimento['pasta_documentos'], 'cnh_frente.jpg');
-                    UploadHelper::salvarImagemBase64($verso, $atendimento['pasta_documentos'], 'cnh_verso.jpg');
-                }
-            } elseif ($tipo === 'cnh_frente' || $tipo === 'cnh_verso') {
-                $imagem = $entrada['imagem'] ?? null;
-
-                if (!$imagem) {
-                    Resposta::erro('Imagem do documento e obrigatoria');
-                }
-
-                UploadHelper::salvarImagemBase64($imagem, $atendimento['pasta_documentos'], $tipo . '.jpg');
-            } else {
-                $imagem = $entrada['imagem'] ?? null;
-
-                if (!$imagem) {
-                    Resposta::erro('Imagem do CRLV e obrigatoria');
-                }
-
-                UploadHelper::salvarImagemBase64($imagem, $atendimento['pasta_documentos'], 'crlv.jpg');
-            }
-        } catch (\RuntimeException $e) {
-            // Gap corrigido nesta demanda (remocao-legado-serpro-e-hardening-
-            // documentos, 2026-09-28): unico catch do Controller sem log,
-            // achado do security-especialista. Mensagem/codigo HTTP ja
-            // devolvidos ao cliente permanecem inalterados -- so o log
-            // sanitizado (mesmo padrao de logFalhaTecnica(), nunca
-            // getMessage()/trace) foi adicionado.
-            $this->logFalhaTecnica("upload id_atendimento={$idAtendimento} tipo={$tipo}", $e);
-            Resposta::erro('Nao foi possivel salvar a imagem do documento');
-        }
-
-        Resposta::sucesso(['ok' => true]);
-    }
-
-    /**
      * Inicia (ou consulta idempotentemente, se ja em andamento/concluido) a
      * validacao de um documento via vio.api.br. Chamado pelo front-end de
-     * forma fire-and-forget logo apos o upload.
+     * forma fire-and-forget com o JPEG do QR (imagem_qr_base64).
      *
-     * Fluxo (demanda migracao-vio-api-br-com-cache, 2026-09-25):
+     * Fluxo QR-only:
      * 1. Documento ja aprovado -> resposta idempotente, nunca reprocessa.
-     * 2. Cache VIO_CACHE (fingerprint do QR) -> hit evita QUALQUER chamada
-     *    externa, grava direto como CONCLUIDO.
-     * 3. Cache miss -> CAS (App\Dao\AtendimentoDao::iniciarEnvioVioApiBr) —
-     *    so quem ganha o direito de ENVIAR monta a imagem (PDF de 2 paginas
-     *    da CNH via FPDF/Util\AnexoPdfHelper, ou o JPEG unico do CRLV) e
-     *    chama App\Rn\VioApiBrClient::enviarParaLeitura() EXATAMENTE 1 vez.
+     * 2. JPEG do QR validado em memoria (sem gravar em disco/storage).
+     * 3. CAS (App\Dao\AtendimentoDao::iniciarEnvioVioApiBr) — so quem ganha
+     *    o direito de ENVIAR chama App\Rn\VioApiBrClient::enviarParaLeitura()
+     *    EXATAMENTE 1 vez (comparar=true). Sem cache VIO_CACHE.
      *    O ID EXTERNO retornado e persistido IMEDIATAMENTE, ANTES de
      *    qualquer polling — o polling real acontece depois, em
      *    statusProcessamento(), nunca aqui.
@@ -268,9 +125,9 @@ class DocumentoController
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
         $tipo = $entrada['tipo'] ?? null; // 'cnh' | 'crlv'
-        $qrBytesBase64 = $entrada['qr_bytes_base64'] ?? null;
+        $imagemQrBase64 = $entrada['imagem_qr_base64'] ?? null;
 
-        if (!$idAtendimento || !in_array($tipo, ['cnh', 'crlv'], true) || !is_string($qrBytesBase64) || $qrBytesBase64 === '') {
+        if (!$idAtendimento || !in_array($tipo, ['cnh', 'crlv'], true) || !is_string($imagemQrBase64) || $imagemQrBase64 === '') {
             Resposta::erro('Dados incompletos');
         }
 
@@ -289,72 +146,20 @@ class DocumentoController
             return;
         }
 
-        $bytesQrBrutos = base64_decode($qrBytesBase64, true);
-        if ($bytesQrBrutos === false || $bytesQrBrutos === '') {
-            Resposta::erro('QR invalido ou ilegivel');
-        }
-
-        // Fingerprint calculado UMA vez, aqui — o QR bruto so existe em
-        // memoria durante este calculo, nunca persistido (nem aqui, nem em
-        // App\Rn\DocumentoRn/App\Dao\VioApiBrCacheDao). Fail-closed: env de
-        // HMAC ausente/invalida propaga como erro tecnico generico.
         try {
-            ['fingerprint' => $fingerprint, 'versao' => $hmacVersao] = $this->documentoRn->calcularFingerprintVioApiBr($bytesQrBrutos);
+            $imagemBinaria = UploadHelper::decodificarJpegBase64Seguro($imagemQrBase64);
         } catch (\Throwable $e) {
-            $this->logFalhaTecnica("iniciar-processamento (fingerprint) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
-            Resposta::erro('Nao foi possivel validar o documento agora', 500);
+            $this->logFalhaTecnica("iniciar-processamento (jpeg qr) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
+            Resposta::erro('Imagem do QR invalida');
             return;
         }
 
-        // Cache VIO_CACHE — nunca gera chamada externa em caso de hit.
-        try {
-            $resultadoCache = $tipo === 'cnh'
-                ? $this->documentoRn->tentarCacheCnh($atendimento, $fingerprint, $hmacVersao)
-                : $this->documentoRn->tentarCacheCrlv($atendimento, $fingerprint, $hmacVersao);
-        } catch (\Throwable $e) {
-            $this->logFalhaTecnica("iniciar-processamento (cache) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
-            $resultadoCache = null;
-        }
-
-        if ($resultadoCache !== null) {
-            // Escrita direta (mesmo metodo ja usado pelo preenchimento
-            // manual) — cache-hit nunca passa pelo CAS de tentativa, nao ha
-            // concorrencia de ENVIO a proteger aqui.
-            $this->atendimentoDao->marcarProcessamentoConcluido($idAtendimento, $tipo);
-            Resposta::sucesso($resultadoCache);
-            return;
-        }
-
-        // Unificacao Recebimento/Expedicao (rodada corretiva de 2026-09-26):
-        // a CNH so pode ser enviada para validacao externa quando AMBOS os
-        // lados (frente/verso) ja estao gravados em disco -- Expedicao ja
-        // garante isso por upload() exigir os 2 lados na MESMA chamada
-        // (tipo 'cnh'); o Recebimento faz 2 uploads SEPARADOS
-        // (cnh_frente/cnh_verso), agora dentro da MESMA etapa 'rec_cnh'
-        // (ver ETAPAS_UPLOAD/AtendimentoController::
-        // SEQUENCIA_RECEBIMENTO_DOCUMENTOS), entao a maquina de etapas
-        // sozinha NAO garante, por si so, que o verso ja foi de fato salvo
-        // em disco no momento exato desta chamada (o front-end pode chamar
-        // iniciar-processamento assim que a FRENTE e salva, antes do verso
-        // sequer ser capturado, ja que nao ha mais transicao de etapa
-        // obrigatoria entre um upload e outro). Checagem explicita aqui, ANTES do CAS
-        // de envio (App\Dao\AtendimentoDao::iniciarEnvioVioApiBr) -- nunca
-        // consome uma tentativa/gera ENVIANDO->ERRO por um problema que nao e
-        // tecnico, so "documento ainda incompleto". Sem esta checagem o
-        // fluxo ja seria SEGURO mesmo assim (montarPdfCnh()/
-        // Util\AnexoPdfHelper::gerarPdfDeImagens() ja rejeita e nunca chega a
-        // fazer nenhum POST se um dos 2 arquivos faltar), mas desperdicaria
-        // um ciclo de CAS/ERRO por uma condicao inteiramente previsivel.
-        if ($tipo === 'cnh' && !$this->arquivosCnhCompletosParaModo($atendimento)) {
-            Resposta::erro('Aguardando captura de frente e verso da CNH antes de iniciar a validacao', 409);
-            return;
-        }
-
-        // CAS: so quem ganha o direito de ENVIAR chama a vio.api.br. Grava
-        // tambem o fingerprint/versao (necessarios mais tarde, de forma
-        // assincrona, para o cache-write quando a comparacao responder).
+        // QR-only nao calcula fingerprint nem acessa VIO_CACHE. O JPEG
+        // validado em memoria segue diretamente para o CAS e para o unico
+        // POST permitido nesta tentativa.
+        // CAS: so quem ganha o direito de ENVIAR chama a vio.api.br.
         $tentativaId = bin2hex(random_bytes(16));
-        $adquiriu = $this->atendimentoDao->iniciarEnvioVioApiBr($idAtendimento, $tipo, $tentativaId, $fingerprint, $hmacVersao);
+        $adquiriu = $this->atendimentoDao->iniciarEnvioVioApiBr($idAtendimento, $tipo, $tentativaId);
 
         if (!$adquiriu) {
             // Ja existe um envio/processamento em andamento OU o documento
@@ -387,20 +192,9 @@ class DocumentoController
         $erroCodigoHttp = null;
 
         try {
-            try {
-                $imagemBinaria = $tipo === 'cnh'
-                    ? $this->montarPdfCnh($atendimento)
-                    : $this->montarImagemCrlv($atendimento);
-            } catch (\Throwable $e) {
-                $this->logFalhaTecnica("iniciar-processamento (montar imagem) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
-                $this->atendimentoDao->marcarEnvioComoErro($idAtendimento, $tipo, $tentativaId);
-                $erroMensagem = 'Nao foi possivel preparar o documento para validacao';
-                $erroCodigoHttp = 500;
-            }
-
             if ($erroMensagem === null) {
                 try {
-                    $vio = new VioApiBrClient();
+                    $vio = $this->criarVioClient();
                 } catch (\Throwable $e) {
                     $this->logFalhaTecnica("iniciar-processamento (inicializar VioApiBrClient) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
                     $this->atendimentoDao->marcarEnvioComoErro($idAtendimento, $tipo, $tentativaId);
@@ -470,97 +264,6 @@ class DocumentoController
     }
 
     /**
-     * Monta o PDF de 2 paginas (frente+verso) da CNH, no BACKEND, via FPDF —
-     * reaproveita INTEGRALMENTE Util\AnexoPdfHelper::gerarPdfDeImagens(), ja
-     * aprovado/em uso real pelo Talent (App\Rn\TalentRn), sem nenhuma
-     * biblioteca nova. Esse helper ja garante: nome de arquivo temporario
-     * ALEATORIO, geracao FORA do webroot publico (storage/tmp), validacao de
-     * contagem EXATA de paginas (2), e limpeza GARANTIDA do arquivo
-     * temporario em `finally` (sucesso OU falha) — cobrindo os pontos 5/6/7
-     * do escopo desta demanda sem duplicar logica ja aprovada. As imagens
-     * JPEG originais (cnh_frente.jpg/cnh_verso.jpg) NUNCA sao modificadas.
-     *
-     * Suporte a CNH digital (demanda suporte-cnh-digital, 2026-09-27): se
-     * cnh_modo_captura === 'DIGITAL', monta o PDF com 1 imagem so (so a
-     * frente e capturada nesse modo — o verso nunca existe); caso contrario
-     * ('FISICA' ou NULL, fail-safe), continua montando com as 2 imagens,
-     * comportamento IDENTICO ao de antes desta mudanca.
-     * Util\AnexoPdfHelper::gerarPdfDeImagens() ja suporta 1 ou 2 imagens sem
-     * nenhuma alteracao nele.
-     */
-    private function montarPdfCnh(array $atendimento): string
-    {
-        $pasta = rtrim($_ENV['STORAGE_PATH'] ?? '', '/') . '/' . $atendimento['pasta_documentos'];
-        $modoCaptura = $atendimento['cnh_modo_captura'] ?? 'FISICA';
-
-        if ($modoCaptura === 'DIGITAL') {
-            return AnexoPdfHelper::gerarPdfDeImagens([
-                $pasta . '/cnh_frente.jpg',
-            ]);
-        }
-
-        return AnexoPdfHelper::gerarPdfDeImagens([
-            $pasta . '/cnh_frente.jpg',
-            $pasta . '/cnh_verso.jpg',
-        ]);
-    }
-
-    /**
-     * Checagem explicita de que os arquivos exigidos da CNH ja existem em
-     * disco para o modo de captura do atendimento — usada SOMENTE como um
-     * gate ANTES do CAS de envio (ver comentario em iniciarProcessamento()),
-     * nunca como a garantia primaria (essa continua sendo Util\
-     * AnexoPdfHelper::validarJpeg()/gerarPdfDeImagens(), que ja rejeita com
-     * seguranca se um arquivo faltar). Renomeada de
-     * arquivosCnhAmbosLadosPresentes() (demanda suporte-cnh-digital,
-     * 2026-09-27): modo DIGITAL exige so a frente (o verso nunca e
-     * obrigatorio); modo FISICA ou NULL (fail-safe, comportamento de antes
-     * desta mudanca) continua exigindo os 2 lados.
-     */
-    private function arquivosCnhCompletosParaModo(array $atendimento): bool
-    {
-        $pasta = rtrim($_ENV['STORAGE_PATH'] ?? '', '/') . '/' . $atendimento['pasta_documentos'];
-        $modoCaptura = $atendimento['cnh_modo_captura'] ?? 'FISICA';
-
-        if ($modoCaptura === 'DIGITAL') {
-            return is_file($pasta . '/cnh_frente.jpg');
-        }
-
-        return is_file($pasta . '/cnh_frente.jpg') && is_file($pasta . '/cnh_verso.jpg');
-    }
-
-    /**
-     * Le os bytes da imagem JPEG unica do CRLV ja salva em disco pelo
-     * endpoint de upload() — CRLV usa `comparar:true` com uma unica imagem,
-     * nunca PDF.
-     */
-    private function montarImagemCrlv(array $atendimento): string
-    {
-        $caminho = rtrim($_ENV['STORAGE_PATH'] ?? '', '/') . '/' . $atendimento['pasta_documentos'] . '/crlv.jpg';
-
-        if (!is_file($caminho)) {
-            throw new \RuntimeException('Imagem do CRLV nao encontrada');
-        }
-
-        $binario = file_get_contents($caminho);
-        if ($binario === false) {
-            throw new \RuntimeException('Falha ao ler imagem do CRLV');
-        }
-
-        return $binario;
-    }
-
-    /**
-     * Alias de compatibilidade — nome anterior (ciclo sincrono) do que hoje
-     * e iniciarProcessamento() no fluxo assincrono. Mantido para nao quebrar
-     * nenhum chamador ja existente que ainda use a acao 'validar-qr'.
-     */
-    public function validarQr(array $entrada, int $idTotem): void
-    {
-        $this->iniciarProcessamento($entrada, $idTotem);
-    }
-
-    /**
      * Polling do front-end (a cada 2-3s) — faz NO MAXIMO 1 GET real contra a
      * vio.api.br POR CHAMADA (nunca loop/sleep interno, nunca mais que 1),
      * so quando ha um ID externo pendente de resolucao
@@ -602,7 +305,7 @@ class DocumentoController
 
         if ($precisaConsultar) {
             try {
-                $vio = new VioApiBrClient();
+                $vio = $this->criarVioClient();
                 $resultado = $vio->consultarResultado($vioApiId);
             } catch (\Throwable $e) {
                 $this->logFalhaTecnica("status-processamento (consultar) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
@@ -647,38 +350,12 @@ class DocumentoController
             return;
         }
 
-        // estado_leitura === 'completed' daqui em diante.
-        if (in_array($resultado['estado_comparacao'], [null, 'pending', 'processing'], true)) {
-            // Catch dedicado (Padrao B -- swallow-into-safe-state, mesmo
-            // padrao ja usado nos demais pontos de escrita critica deste
-            // metodo/Controller) -- achado do /02-testes independente de
-            // 2026-09-28 (rodada corretiva remocao-legado-serpro-e-
-            // hardening-documentos): este UPDATE nao tinha catch proprio,
-            // dependia so da fronteira global do entrypoint
-            // (public/api/documento.php). avancarParaProcessandoComparacao()
-            // e um UPDATE atomico e IDEMPOTENTE (WHERE status =
-            // 'PROCESSANDO_LEITURA') -- uma falha aqui nunca deixa escrita
-            // parcial, nunca dispara um novo POST/GET automatico, e o
-            // proximo poll do front-end (status-processamento) naturalmente
-            // repete a mesma tentativa com seguranca (o GET ja feito acima
-            // nao gera cobranca duplicada no fornecedor). Nao rebaixa para
-            // ERRO/INDETERMINADO -- o estado permanece exatamente o mesmo
-            // (PROCESSANDO_LEITURA), sem ambiguidade a preservar.
-            try {
-                $this->atendimentoDao->avancarParaProcessandoComparacao($idAtendimento, $tipo);
-            } catch (\PDOException $e) {
-                $this->logFalhaTecnica("status-processamento (avancar comparacao) id_atendimento={$idAtendimento} tipo={$tipo}", $e);
-            }
-            return;
-        }
-
-        if (in_array($resultado['estado_comparacao'], ['failed', 'expired'], true)) {
-            $this->atendimentoDao->gravarResultadoFinalVioApiBr($idAtendimento, $tipo, $tentativaId, 'CONCLUIDO');
-            return;
-        }
-
-        // estado_comparacao === 'completed' -- avalia aprovacao automatica
-        // (e, se aprovado, atualiza o cache VIO_CACHE) antes de concluir.
+        // estado_leitura === 'completed' daqui em diante. A comparacao
+        // OCR/imagem e somente diagnostica: pending/processing/failed/
+        // expired/ausente, reliable e mismatched nao adiam, rebaixam nem
+        // sobrescrevem a decisao da leitura VIO. Esta chamada de polling ja
+        // possui o resultado principal; nunca faz GET adicional so para
+        // esperar a comparacao.
         if ($this->documentoRn !== null) {
             try {
                 $tipo === 'cnh'
@@ -751,18 +428,10 @@ class DocumentoController
                 // valor ja gravado em tb_atendimento em vez de sobrescrever
                 // com vazio/rejeitar a requisicao inteira — evita perder um
                 // dado bom so porque outro campo (ex.: placa/uf) faltou.
-                // VIO_CACHE/VIO_API_BR incluidos nesta allowlist (demanda
-                // migracao-vio-api-br-com-cache, 2026-09-25; VIO_API_BR
-                // acrescentado na rodada corretiva de 2026-09-26 quando a
-                // origem da validacao real via vio.api.br deixou de ser
-                // gravada como VIO_VALIDADO): VIO_CACHE so chega a ter essa
-                // origem gravada quando App\Rn\DocumentoRn::avaliarCrlv() ja
-                // aprovou o cache-hit (rntc/tipo_veiculo obrigatoriamente
-                // preenchidos nesse caminho — App\Dao\VioApiBrCacheDao::
-                // buscarCrlvValido ja garante isso), e VIO_API_BR so e
-                // gravada apos aprovacao automatica completa (mesma regra) —
-                // mesma garantia de confiabilidade que VIO_TRIAL/VIO_VALIDADO
-                // ja tinham.
+                // VIO_CACHE/VIO_API_BR permanecem na allowlist: VIO_CACHE e
+                // origem apenas HISTORICA (nao e mais gravada; cache removido
+                // em fluxo-qr-exclusivo-cnh-crlv) e VIO_API_BR so e gravada
+                // apos aprovacao automatica completa.
                 $origemAtualCrlv = $atendimento['crlv_origem_validacao'] ?? 'NAO_VALIDADO';
                 $ehOrigemVioAtual = in_array($origemAtualCrlv, ['VIO_TRIAL', 'VIO_VALIDADO', 'VIO_CACHE', 'VIO_API_BR'], true);
 
