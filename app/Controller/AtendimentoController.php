@@ -7,10 +7,14 @@ use App\Rn\TalentRn;
 use App\Rn\DocumentoRn;
 use App\Rn\OrdemColetaClient;
 use App\Rn\LgpdRn;
+use App\Rn\NotaFiscalRn;
 use App\Dao\AtendimentoNotaDao;
+use App\Dao\ClienteDao;
 use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
 use App\Dao\OrdemColetaPendenteBaixaDao;
+use Util\CnpjValidador;
+use Util\NotaArquivoStorage;
 use Util\Resposta;
 use Util\UploadHelper;
 use PDO;
@@ -32,8 +36,36 @@ class AtendimentoController
         // instancia este Controller sem elas, e nunca chama iniciar()) —
         // ver comentario em iniciar() sobre o fail-closed quando ausentes.
         private ?LgpdRn $lgpdRn = null,
-        private ?PDO $pdo = null
+        private ?PDO $pdo = null,
+        // Dependencias novas (demanda hardening-revisao-notas-e-cliente,
+        // 2026-09-30), OPCIONAIS ao final (mesmo criterio acima): Rn de notas
+        // (estado derivado do cliente), ClienteDao (validacao do cliente
+        // manual contra tb_cliente ativa) e storage das fotos (quarentena no
+        // cancelamento). Ausentes: Rn/storage usam o padrao; sem ClienteDao
+        // nem PDO o cliente manual falha fechado (500).
+        private ?NotaFiscalRn $notaFiscalRn = null,
+        private ?ClienteDao $clienteDao = null,
+        private ?NotaArquivoStorage $notaArquivoStorage = null
     ) {}
+
+    private function notaFiscalRn(): NotaFiscalRn
+    {
+        return $this->notaFiscalRn ??= new NotaFiscalRn($this->notaDao, $this->clienteDao);
+    }
+
+    private function notaArquivoStorage(): NotaArquivoStorage
+    {
+        return $this->notaArquivoStorage ??= new NotaArquivoStorage();
+    }
+
+    private function clienteDao(): ?ClienteDao
+    {
+        if ($this->clienteDao === null && $this->pdo !== null) {
+            $this->clienteDao = new ClienteDao($this->pdo);
+        }
+
+        return $this->clienteDao;
+    }
 
     /**
      * Passa a EXIGIR e validar 'token_aceite' (demanda
@@ -298,7 +330,31 @@ class AtendimentoController
                     Resposta::erro('Atendimento nao esta na etapa esperada para identificar o cliente');
                 }
 
-                $this->atendimentoRn->salvarCliente($idAtendimento, $dados['nome'] ?? '', $dados['cnpj'] ?? null);
+                // Validacao do cliente MANUAL (demanda hardening-revisao-notas-
+                // e-cliente, 2026-09-30): o cliente precisa existir em
+                // tb_cliente ATIVA (unica allowlist oficial, decisao D2) —
+                // a UDLOG/transportadora nunca e cliente ativo, entao nunca
+                // passa. Nome e CNPJ gravados vem SEMPRE de tb_cliente, nunca
+                // do que o front enviou. Rejeicao generica (mesma mensagem
+                // para CNPJ invalido, inexistente ou inativo).
+                $clienteDao = $this->clienteDao();
+                if ($clienteDao === null) {
+                    Resposta::erro('Nao foi possivel confirmar o cliente agora', 500);
+                }
+
+                $cnpjEnviado = is_string($dados['cnpj'] ?? null) ? $dados['cnpj'] : null;
+                $cnpjNormalizado = CnpjValidador::normalizarEValidar($cnpjEnviado);
+                try {
+                    $clienteValido = $cnpjNormalizado !== null ? $clienteDao->buscarPorCnpj($cnpjNormalizado) : null;
+                } catch (\PDOException $e) {
+                    error_log('salvar-etapa cliente: falha de banco ao validar o cliente (PDOException)');
+                    Resposta::erro('Nao foi possivel confirmar o cliente agora', 500);
+                }
+                if ($clienteValido === null) {
+                    Resposta::erro('Cliente invalido ou nao cadastrado');
+                }
+
+                $this->atendimentoRn->salvarCliente($idAtendimento, (string) $clienteValido['nome'], (string) $clienteValido['cnpj']);
                 $this->atendimentoRn->atualizarEtapa($idAtendimento, 'rec_cnh');
                 break;
             case 'ajudante':
@@ -368,10 +424,28 @@ class AtendimentoController
     }
 
     /**
-     * Conclui a etapa de digitalizacao de notas do Recebimento: valida que
-     * ha pelo menos 1 e no maximo 5 notas salvas, decide a proxima tela com
-     * base na identificacao (ou nao) do cliente pela leitura da nota fiscal,
-     * e so entao atualiza etapa_atual no banco.
+     * Conclui a etapa de digitalizacao de notas do Recebimento (demanda
+     * hardening-revisao-notas-e-cliente, 2026-09-30): TUDO sob lock de
+     * linha de tb_atendimento em transacao curta (BEGIN ... COMMIT), sempre
+     * na ordem atendimento -> notas, e so responde DEPOIS de fechar a
+     * transacao (Resposta faz exit; exit dentro de try pula o finally).
+     *
+     * Ordem: id valido (400); posse e tipo (404); status (400); etapa errada
+     * mantem o ramo idempotente (sucesso com o mesmo corpo da vencedora);
+     * BEGIN + FOR UPDATE em tb_atendimento e releitura sob lock; notas ativas
+     * travadas (menos de 1 ou mais de 5 = 400); SE a flag
+     * CONCLUIR_EXIGE_NUMERO_NOTA for literalmente "true": numero_nota
+     * pendente (fora do formato 1 a 9 digitos sem zero a esquerda) =
+     * HTTP 422 NOTAS_SEM_NUMERO com ROLLBACK (etapa e cliente inalterados);
+     * estado derivado do cliente (NotaFiscalRn::avaliarClienteDoAtendimento);
+     * CAS da etapa; se IDENTIFICADO grava cliente_nome/cliente_cnpj (decisao
+     * D1) sem sobrescrever cliente ja gravado; COMMIT.
+     *
+     * So IDENTIFICADO vai a rec_cnh. NAO_IDENTIFICADO e ANOMALIA vao a
+     * rec_cliente (etapa 'cliente') sem gravar cliente; a resposta sinaliza
+     * cliente_estado e cliente_motivo (CONFLITO|INDETERMINADO, so na
+     * anomalia). Flag ausente/qualquer outro valor = comportamento anterior
+     * (sem validacao de numero).
      */
     public function concluirDigitalizacao(array $entrada, int $idTotem): void
     {
@@ -381,111 +455,227 @@ class AtendimentoController
             Resposta::erro('Dados incompletos');
         }
 
+        // posse e tipo antes de abrir a transacao (mensagem generica)
         $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
         if ($atendimento['tipo'] !== 'recebimento') {
             Resposta::erro('Atendimento nao encontrado', 404);
         }
-        if ($atendimento['status'] !== 'em_andamento') {
-            Resposta::erro('Atendimento nao esta em andamento');
-        }
-        if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
-            // Correcao (mesma demanda, bug encontrado pelo qa-testes em
-            // 2026-09-17): antes esta checagem de precondicao rodava ANTES
-            // de qualquer tentativa de CAS/releitura, entao a requisicao
-            // perdedora de uma corrida (que so chega aqui DEPOIS que a
-            // vencedora ja terminou completamente, etapa_atual ja avancada)
-            // caia direto neste erro 400 generico, violando a exigencia do
-            // handoff de que so ha conflito real se o estado nao corresponde
-            // nem a origem nem ao destino. Antes de falhar, confere se
-            // etapa_atual ja e 'rec_cnh'/'cliente' (destino possivel
-            // desta chamada) ou uma etapa legitima posterior do fluxo de
-            // Recebimento — reaproveitando a MESMA lista/logica usada
-            // abaixo para o caso "CAS perdeu a corrida" — e, se for,
-            // responde sucesso idempotente sem repetir nenhum efeito
-            // colateral. So permanece erro de precondicao quando a etapa
-            // atual nao e nem a origem, nem nenhum destino/etapa posterior
-            // plausivel (situacao genuinamente anomala).
-            $etapaDestinoPossivel = $this->notaDao->algumaNotaComStatusIdentificada($idAtendimento) || $this->notaDao->algumaIdentificada($idAtendimento)
-                ? 'rec_cnh'
-                : 'cliente';
 
-            if ($this->etapaEhAlvoOuPosterior((string) $atendimento['etapa_atual'], $etapaDestinoPossivel)) {
-                $proximaTelaIdempotente = $etapaDestinoPossivel === 'rec_cnh' ? 'rec_cnh' : 'rec_cliente';
-                Resposta::sucesso(['proxima_tela' => $proximaTelaIdempotente, 'etapa' => $etapaDestinoPossivel]);
+        $exigeNumero = ($_ENV['CONCLUIR_EXIGE_NUMERO_NOTA'] ?? '') === 'true';
+
+        $resultado = $this->concluirSobLock($idAtendimento, $idTotem, $exigeNumero);
+
+        $http = (int) $resultado['http'];
+        if ($http >= 400) {
+            if (isset($resultado['codigo'])) {
+                Resposta::erroComDados((string) $resultado['erro'], (string) $resultado['codigo'], (array) $resultado['dados'], $http);
                 return;
             }
-
-            Resposta::erro('Atendimento nao esta na etapa de digitalizacao de notas');
-        }
-
-        $totalNotas = $this->notaDao->contarPorAtendimento($idAtendimento);
-
-        if ($totalNotas < 1) {
-            Resposta::erro('Nenhuma nota fiscal foi digitalizada para esse atendimento');
-        }
-        if ($totalNotas > 5) {
-            Resposta::erro('Limite de 5 notas fiscais excedido para esse atendimento');
-        }
-
-        // ATENCAO: a etapa/tela quando um cliente e identificado passou por
-        // 'cnh' -> 'rec_cnh_frente' (expedicao-vio-cnh-crlv, REPLANEJAMENTO
-        // 2026-09-09) e foi unificada para 'rec_cnh' na rodada corretiva de
-        // 2026-09-26 — Recebimento valida CNH/CRLV via vio.api.br, com a
-        // mesma maquina de estados assincrona da Expedicao (rec_cnh ->
-        // rec_crlv -> rec_aguarde_documentos -> rec_confirmacao), ver
-        // avancarEtapaDocumentos() abaixo.
-        //
-        // Duas fontes de verdade coexistem e precisam ser unidas (OR logico):
-        // - algumaIdentificada(): fluxo ANTIGO de chave de acesso, que ainda
-        //   pode gravar cliente_identificado=1/cnpj_emitente e depende de
-        //   JOIN com tb_cliente LOCAL (nao removido, continua funcionando).
-        // - algumaNotaComStatusIdentificada(): fluxo NOVO de OCR client-side,
-        //   baseado em status_ocr = 'IDENTIFICADA' em tb_atendimento_nota, que
-        //   NAO depende de tb_cliente local (origem/sincronizacao de
-        //   tb_cliente e pendencia de produto separada, nao resolvida aqui).
-        // Bug corrigido: antes so o metodo antigo era consultado, entao uma
-        // nota identificada via OCR (sem CNPJ correspondente em tb_cliente
-        // local) nunca pulava para rec_cnh.
-        $identificadoViaOcr = $this->notaDao->algumaNotaComStatusIdentificada($idAtendimento);
-        $identificadoViaChaveAntiga = $this->notaDao->algumaIdentificada($idAtendimento);
-
-        if ($identificadoViaOcr || $identificadoViaChaveAntiga) {
-            $etapa = 'rec_cnh';
-            $proximaTela = 'rec_cnh';
-        } else {
-            $etapa = 'cliente';
-            $proximaTela = 'rec_cliente';
-        }
-
-        // CAS dedicado (demanda integridade-conclusao-atendimento,
-        // 2026-09-16) contra a corrida entre 2 requisicoes quase
-        // simultaneas de concluirDigitalizacao() do mesmo atendimento: so
-        // grava se etapa_atual ainda for 'digitalizacao_notas' e status
-        // ainda for 'em_andamento' no momento exato do UPDATE.
-        $venceuCas = $this->atendimentoRn->concluirDigitalizacaoNotas($idAtendimento, $etapa);
-
-        if (!$venceuCas) {
-            // CAS perdeu — outra requisicao concorrente ja avancou esta
-            // etapa antes desta chamada. Rele o estado atual: se ja e a
-            // mesma etapa-alvo que esta chamada calculou (ou uma etapa
-            // legitima posterior do fluxo de Recebimento), responde sucesso
-            // idempotente com os MESMOS dados que a chamada vencedora
-            // devolveria, sem repetir nenhum efeito colateral (nenhuma nova
-            // escrita, nenhuma contagem de notas de novo). Qualquer outro
-            // estado e anomalo — 409.
-            $atual = $this->atendimentoRn->buscar($idAtendimento);
-
-            if ($atual !== null && $atual['status'] === 'em_andamento' && $this->etapaEhAlvoOuPosterior((string) $atual['etapa_atual'], $etapa)) {
-                Resposta::sucesso(['proxima_tela' => $proximaTela, 'etapa' => $etapa]);
-                return;
-            }
-
-            Resposta::erro('Nao foi possivel concluir a digitalizacao agora — tente novamente', 409);
+            Resposta::erro((string) $resultado['erro'], $http);
             return;
         }
 
-        Resposta::sucesso(['proxima_tela' => $proximaTela, 'etapa' => $etapa]);
+        Resposta::sucesso($resultado['dados']);
+    }
+
+    /**
+     * Abre a transacao, executa concluirDentroDaTransacao() e a fecha
+     * (COMMIT so se http < 400). Nunca chama Resposta.
+     *
+     * @return array{http:int, erro?:string, codigo?:string, dados?:array}
+     */
+    private function concluirSobLock(int $idAtendimento, int $idTotem, bool $exigeNumero): array
+    {
+        $mensagemFalha = 'Nao foi possivel concluir a digitalizacao agora — tente novamente';
+        $confirmou = false;
+
+        try {
+            $this->atendimentoRn->iniciarTransacao(5);
+            $resultado = $this->concluirDentroDaTransacao($idAtendimento, $idTotem, $exigeNumero);
+
+            if ($resultado['http'] < 400) {
+                $this->atendimentoRn->confirmarTransacao();
+                $confirmou = true;
+            }
+
+            return $resultado;
+        } catch (\PDOException $e) {
+            $sqlstate = (string) $e->getCode();
+            error_log('concluir-digitalizacao: falha de banco (PDOException)'
+                . (preg_match('/^[A-Z0-9]{5}$/', $sqlstate) === 1 ? " [SQLSTATE={$sqlstate}]" : ''));
+
+            $codigoDriver = (int) ($e->errorInfo[1] ?? 0);
+            if ($codigoDriver === 1205 || $codigoDriver === 1213) {
+                return ['http' => 503, 'erro' => 'Servico ocupado no momento. Tente novamente em instantes.'];
+            }
+
+            return ['http' => 500, 'erro' => $mensagemFalha];
+        } catch (\Throwable $e) {
+            error_log('concluir-digitalizacao: falha nao prevista [' . get_class($e) . ']');
+
+            return ['http' => 500, 'erro' => $mensagemFalha];
+        } finally {
+            if (!$confirmou) {
+                try {
+                    $this->atendimentoRn->desfazerTransacao();
+                } catch (\Throwable $e) {
+                    // conexao descartada no fim da requisicao
+                }
+            }
+        }
+    }
+
+    /**
+     * Corpo da resposta de sucesso (aditivo): proxima_tela e etapa ja
+     * existiam; cliente_estado/cliente_motivo sao novos.
+     */
+    private function corpoConclusao(array $avaliacao): array
+    {
+        $identificado = $avaliacao['estado'] === NotaFiscalRn::CLIENTE_IDENTIFICADO;
+
+        return [
+            'proxima_tela'   => $identificado ? 'rec_cnh' : 'rec_cliente',
+            'etapa'          => $identificado ? 'rec_cnh' : 'cliente',
+            'cliente_estado' => $avaliacao['estado'],
+            'cliente_motivo' => $avaliacao['motivo'],
+        ];
+    }
+
+    /**
+     * @return array{http:int, erro?:string, codigo?:string, dados?:array}
+     */
+    private function concluirDentroDaTransacao(int $idAtendimento, int $idTotem, bool $exigeNumero): array
+    {
+        $atendimento = $this->atendimentoRn->buscarParaUpdate($idAtendimento);
+
+        if (!$atendimento || (int) $atendimento['id_totem'] !== $idTotem || $atendimento['tipo'] !== 'recebimento') {
+            return ['http' => 404, 'erro' => 'Atendimento nao encontrado'];
+        }
+        if ($atendimento['status'] !== 'em_andamento') {
+            return ['http' => 400, 'erro' => 'Atendimento nao esta em andamento'];
+        }
+
+        $notaRn = $this->notaFiscalRn();
+        // notas ativas travadas (depois do atendimento, nunca o contrario)
+        $notas = $notaRn->listarNotasAtivasTravadas($idAtendimento);
+
+        if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
+            // Ramo idempotente (bug encontrado pelo qa-testes em 2026-09-17):
+            // a requisicao perdedora de uma corrida so chega aqui DEPOIS que a
+            // vencedora ja terminou (etapa ja avancada). Sob lock o estado das
+            // notas esta congelado, entao recalcular o destino da o MESMO
+            // resultado da vencedora: se a etapa atual e o destino (ou uma
+            // etapa legitima posterior), responde sucesso idempotente com o
+            // mesmo corpo, sem nenhum efeito colateral. Senao e situacao
+            // genuinamente anomala (400).
+            $avaliacao = $notaRn->avaliarClienteDoAtendimento($idAtendimento, false, true);
+            $destino = $avaliacao['estado'] === NotaFiscalRn::CLIENTE_IDENTIFICADO ? 'rec_cnh' : 'cliente';
+
+            if ($this->etapaEhAlvoOuPosterior((string) $atendimento['etapa_atual'], $destino)) {
+                return ['http' => 200, 'dados' => $this->corpoConclusao($avaliacao)];
+            }
+
+            return ['http' => 400, 'erro' => 'Atendimento nao esta na etapa de digitalizacao de notas'];
+        }
+
+        $totalNotas = count($notas);
+
+        if ($totalNotas < 1) {
+            return ['http' => 400, 'erro' => 'Nenhuma nota fiscal foi digitalizada para esse atendimento'];
+        }
+        if ($totalNotas > 5) {
+            return ['http' => 400, 'erro' => 'Limite de 5 notas fiscais excedido para esse atendimento'];
+        }
+
+        // F1 (rodada corretiva 2026-10-01): NENHUM cliente e persistido (nem a
+        // etapa avanca) enquanto qualquer nota ATIVA ainda estiver PENDENTE ou
+        // PROCESSANDO dentro do teto de OCR (NotaFiscalRn::OCR_TIMEOUT_
+        // SEGUNDOS = 120 s desde o upload). HTTP 409 OCR_EM_ANDAMENTO com SO
+        // as ordens (1..5) em processamento; ROLLBACK (etapa, cliente_nome e
+        // cliente_cnpj inalterados). Vale com a flag CONCLUIR_EXIGE_NUMERO_NOTA
+        // ligada ou desligada. Todas as notas foram travadas e lidas acima,
+        // sob o lock do atendimento, na mesma transacao que depois grava o
+        // cliente. Notas acima do teto nao bloqueiam: vao ao fallback manual
+        // (avaliarClienteDoAtendimento com exigirTerminais).
+        //
+        // PRECEDENCIA (documentada e testada): 400 (sem notas / mais de 5) >
+        // 409 OCR_EM_ANDAMENTO > 422 NOTAS_SEM_NUMERO > decisao de cliente.
+        // O 409 vem antes do 422 porque, com OCR ainda em curso, o numero e o
+        // cliente da nota podem estar prestes a chegar; so depois de todas as
+        // notas terminais o numero pendente e um erro do motorista.
+        $classificacao = NotaFiscalRn::classificarNotasEmProcessamento($notas);
+        if ($classificacao['bloqueantes'] !== []) {
+            return [
+                'http'   => 409,
+                'erro'   => 'Ainda ha notas fiscais em processamento (OCR_EM_ANDAMENTO)',
+                'codigo' => 'OCR_EM_ANDAMENTO',
+                'dados'  => ['ordens_em_processamento' => $classificacao['bloqueantes']],
+            ];
+        }
+
+        if ($exigeNumero) {
+            $ordensPendentes = [];
+            foreach ($notas as $nota) {
+                if (!NotaFiscalRn::numeroNotaValido($nota['numero_nota'])) {
+                    $ordensPendentes[] = (int) $nota['ordem'];
+                }
+            }
+
+            if ($ordensPendentes !== []) {
+                sort($ordensPendentes);
+
+                // mesma mensagem de finalizar(); dados so com inteiros
+                // (nunca id_nota, numero, CNPJ, caminho ou imagem)
+                return [
+                    'http'   => 422,
+                    'erro'   => 'Existem notas fiscais sem numero definido (NOTAS_SEM_NUMERO)',
+                    'codigo' => 'NOTAS_SEM_NUMERO',
+                    'dados'  => [
+                        'ordens_pendentes' => $ordensPendentes,
+                        'total_notas'      => $totalNotas,
+                        'total_pendentes'  => count($ordensPendentes),
+                    ],
+                ];
+            }
+        }
+
+        // Estado DERIVADO das notas ativas (unica fonte; o OR legado com
+        // algumaIdentificada, sem filtro de cliente ativo, foi removido).
+        // So IDENTIFICADO vai a rec_cnh; NAO_IDENTIFICADO e ANOMALIA vao a
+        // rec_cliente sem gravar cliente.
+        $avaliacao = $notaRn->avaliarClienteDoAtendimento($idAtendimento, false, true);
+        $corpo = $this->corpoConclusao($avaliacao);
+        $etapa = $corpo['etapa'];
+
+        // CAS dedicado (demanda integridade-conclusao-atendimento,
+        // 2026-09-16): so grava se etapa_atual ainda for
+        // 'digitalizacao_notas' e status ainda for 'em_andamento'. Sob lock
+        // de linha nao deveria perder, mas a guarda permanece (defesa em
+        // profundidade e idempotencia).
+        $venceuCas = $this->atendimentoRn->concluirDigitalizacaoNotas($idAtendimento, $etapa);
+
+        if (!$venceuCas) {
+            $atual = $this->atendimentoRn->buscar($idAtendimento);
+
+            if ($atual !== null && $atual['status'] === 'em_andamento' && $this->etapaEhAlvoOuPosterior((string) $atual['etapa_atual'], $etapa)) {
+                return ['http' => 200, 'dados' => $corpo];
+            }
+
+            return ['http' => 409, 'erro' => 'Nao foi possivel concluir a digitalizacao agora — tente novamente'];
+        }
+
+        if ($avaliacao['estado'] === NotaFiscalRn::CLIENTE_IDENTIFICADO && is_array($avaliacao['cliente'])) {
+            // D1: grava o cliente automatico na MESMA transacao do CAS, sem
+            // sobrescrever cliente ja confirmado/gravado por outro caminho.
+            $this->atendimentoRn->gravarClienteAutomaticoSeVazio(
+                $idAtendimento,
+                (string) $avaliacao['cliente']['razao_social'],
+                (string) $avaliacao['cliente']['cnpj']
+            );
+        }
+
+        return ['http' => 200, 'dados' => $corpo];
     }
 
     /**
@@ -827,14 +1017,57 @@ class AtendimentoController
         // (App\Dao\AtendimentoDao::cancelar), nunca checada em PHP antes —
         // checar em PHP aqui abriria uma janela de corrida (TOCTOU) entre
         // este SELECT de posse e o UPDATE.
-        $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
+        $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
         if (!$this->atendimentoRn->cancelar($idAtendimento)) {
             Resposta::erro('Atendimento ja concluido, nao pode mais ser cancelado', 409);
             return;
         }
 
+        // Decisao D3 (demanda hardening-revisao-notas-e-cliente,
+        // 2026-09-30): cancelamento e abandono (a inatividade cancela pelo
+        // mesmo endpoint) movem as FOTOS DAS NOTAS para quarentena (sem
+        // apagar de vez; o cron diario apaga os .del com mais de 24 h).
+        // Falha aqui NUNCA impede o cancelamento ja confirmado no banco.
+        $this->quarentenarFotosDasNotas($idAtendimento, $atendimento);
+
         Resposta::sucesso(['ok' => true]);
+    }
+
+    /**
+     * Move as fotos das notas do atendimento cancelado para quarentena
+     * (rename para nota_NN.jpg.<id_nota>.del). Melhor esforco: nunca lanca,
+     * nunca altera a resposta. Log SEMPRE fixo e agregado (contagens e
+     * id_atendimento inteiro; nunca caminho, pasta com placa ou nome de
+     * arquivo).
+     */
+    private function quarentenarFotosDasNotas(int $idAtendimento, array $atendimento): void
+    {
+        try {
+            $notas = $this->notaDao->listarPorAtendimento($idAtendimento);
+            $storage = $this->notaArquivoStorage();
+            $falhas = 0;
+
+            foreach ($notas as $nota) {
+                $caminho = $storage->caminhoDoArquivo($atendimento['pasta_documentos'] ?? null, $nota['arquivo'] ?? null);
+                if ($caminho === null) {
+                    $falhas++;
+                    continue;
+                }
+
+                try {
+                    $storage->quarentenar($caminho, (int) $nota['id_nota']);
+                } catch (\Throwable $e) {
+                    $falhas++;
+                }
+            }
+
+            if ($falhas > 0) {
+                error_log("cancelar: falha ao mover foto(s) de nota para a quarentena (id_atendimento={$idAtendimento} falhas={$falhas})");
+            }
+        } catch (\Throwable $e) {
+            error_log('cancelar: falha ao quarentenar as fotos das notas [' . get_class($e) . '] id_atendimento=' . $idAtendimento);
+        }
     }
 
     /**

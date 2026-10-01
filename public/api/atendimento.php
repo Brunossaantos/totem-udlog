@@ -7,6 +7,7 @@ use Util\Auth;
 use Util\Resposta;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
+use App\Dao\ClienteDao;
 use App\Dao\FilaEnvioDao;
 use App\Dao\VioCacheDao;
 use App\Dao\TotemDao;
@@ -20,6 +21,7 @@ use App\Rn\TalentRn;
 use App\Rn\TalentClient;
 use App\Rn\DocumentoRn;
 use App\Rn\LgpdRn;
+use App\Rn\NotaFiscalRn;
 use App\Controller\AtendimentoController;
 
 // Bootstrap isolado: mesma protecao aplicada em public/api/nota.php --
@@ -63,7 +65,12 @@ $controller = new AtendimentoController(
     $ordemColetaClient,
     new OrdemColetaPendenteBaixaDao($pdo),
     $lgpdRn,
-    $pdo
+    $pdo,
+    // hardening-revisao-notas-e-cliente (2026-09-30): estado derivado do
+    // cliente das notas e validacao do cliente manual contra tb_cliente
+    // ativa; o storage das fotos usa o padrao (STORAGE_PATH).
+    new NotaFiscalRn(new AtendimentoNotaDao($pdo), new ClienteDao($pdo)),
+    new ClienteDao($pdo)
 );
 
 $acao = $_GET['acao'] ?? '';

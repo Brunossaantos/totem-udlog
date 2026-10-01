@@ -42,7 +42,10 @@ $dados = json_decode(base64_decode($argv[4] ?? '', true) ?: '{}', true) ?? [];
 
 $atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient(new OrdemColetaDao()));
 $talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
-$controller = new AtendimentoController($atendimentoRn, $talentRn, new AtendimentoNotaDao($pdo));
+// hardening-revisao-notas-e-cliente (2026-09-30): o case 'cliente' valida o
+// cliente manual contra tb_cliente ATIVA e precisa do PDO (sem ele falha
+// fechado, 500).
+$controller = new AtendimentoController($atendimentoRn, $talentRn, new AtendimentoNotaDao($pdo), pdo: $pdo);
 
 $controller->salvarEtapa([
     'id_atendimento' => $idAtendimento,

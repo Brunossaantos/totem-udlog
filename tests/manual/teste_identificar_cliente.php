@@ -155,6 +155,25 @@ $notaDao = new AtendimentoNotaDao($pdo);
 
 $idsAtendimentoCriados = [];
 
+// ATUALIZADO (demanda hardening-revisao-notas-e-cliente, 2026-09-30): o estado
+// do cliente do atendimento (ja_identificado_no_atendimento e
+// cliente_atendimento) agora e DERIVADO de tb_cliente ATIVA (JOIN no banco),
+// nao do ClienteDaoFake. Para os casos que dependem desse estado, o script
+// insere UMA linha temporaria em tb_cliente (CNPJ fixo do cenario) e a remove
+// no finally (so se foi ela quem inseriu; o CNPJ e UNIQUE).
+$idsClienteTemporarios = [];
+function garantirClienteTemporario(PDO $pdo, string $nome, string $cnpj, array &$idsTemporarios): void
+{
+    $existe = $pdo->prepare('SELECT id_cliente FROM tb_cliente WHERE cnpj = :c');
+    $existe->execute(['c' => $cnpj]);
+    if ($existe->fetchColumn() !== false) {
+        return;
+    }
+    $pdo->prepare('INSERT INTO tb_cliente (nome, razao_social_normalizada, cnpj, ativo) VALUES (:n, :r, :c, 1)')
+        ->execute(['n' => $nome, 'r' => strtoupper($nome), 'c' => $cnpj]);
+    $idsTemporarios[] = (int) $pdo->lastInsertId();
+}
+
 function novoRn(AtendimentoNotaDao $notaDao, ClienteDaoFake $fakeClienteDao): NotaFiscalRn
 {
     return new NotaFiscalRn($notaDao, $fakeClienteDao);
@@ -163,6 +182,7 @@ function novoRn(AtendimentoNotaDao $notaDao, ClienteDaoFake $fakeClienteDao): No
 try {
     $idTotemTeste = obterOuCriarTotemTeste($pdo, CODIGO_TOTEM_TESTE);
     $idTotemAlheio = obterOuCriarTotemTeste($pdo, CODIGO_TOTEM_ALHEIO);
+    garantirClienteTemporario($pdo, 'TESTE-QA-IDCLI CROMEX TINTAS LTDA', '11222333000181', $idsClienteTemporarios);
 
     // ===================== Caso 1: CNPJ exato (com mascara) identifica na primeira nota =====================
     $idAt1 = criarAtendimentoTeste($pdo, $idTotemTeste);
@@ -247,9 +267,18 @@ try {
     ];
     $rn6 = novoRn($notaDao,$fake6);
     $r6 = $rn6->identificarCliente($idAt6, $idNt6, null, [], 'TRANSPORTES SILVA');
-    checar('Caso 6: dois nomes semelhantes -> NAO_IDENTIFICADA (sem associacao automatica)', $r6['status'] === 'NAO_IDENTIFICADA', $r6);
+    // ATUALIZADO (hardening-revisao-notas-e-cliente, 2026-09-30): fuzzy
+    // ambiguo deixou de ser NAO_IDENTIFICADA silencioso e passou a ser
+    // anomalia explicita (ERRO / RAZAO_SOCIAL_AMBIGUA). Continua SEM
+    // associacao automatica (cliente nulo, nada marcado como identificado).
+    checar('Caso 6: dois nomes semelhantes -> ERRO RAZAO_SOCIAL_AMBIGUA (sem associacao automatica)', $r6['status'] === 'ERRO' && $r6['motivo'] === 'RAZAO_SOCIAL_AMBIGUA' && $r6['cliente'] === null && $r6['ja_identificado_no_atendimento'] === false, $r6);
 
-    // ===================== Caso 7: passo 0/early-stop nao reprocessa chamada duplicada =====================
+    // ===================== Caso 7: SEM early-stop (hardening-revisao-notas-e-cliente) =====================
+    // ATUALIZADO (2026-09-30): o passo 0 / early-stop foi REMOVIDO. Uma nota
+    // posterior a uma nota ja identificada e avaliada normalmente, com a
+    // propria evidencia: candidato desconhecido = NAO_IDENTIFICADA; nada e
+    // copiado da nota 1 para a nota 2. O atendimento segue IDENTIFICADO
+    // (estado derivado da nota 1) e a consulta foi REALMENTE feita.
     $idAt7 = criarAtendimentoTeste($pdo, $idTotemTeste);
     $idsAtendimentoCriados[] = $idAt7;
     $idNt7a = criarNotaTeste($pdo, $idAt7, 1);
@@ -259,15 +288,14 @@ try {
     $rn7 = novoRn($notaDao,$fake7);
     $rn7->identificarCliente($idAt7, $idNt7a, null, ['11222333000181'], null); // identifica na nota 1
     $chamadasAntes7 = $fake7->chamadasBuscarPorCnpj;
-    $r7 = $rn7->identificarCliente($idAt7, $idNt7b, null, ['99999999999999'], null); // nota 2, candidato DIFERENTE
-    // Decisao de implementacao (documentada no codigo de NotaFiscalRn::identificarCliente,
-    // passo 0): o short-circuit faz NO MAXIMO 1 chamada pontual a buscarPorCnpj so
-    // para popular o campo "cliente" da resposta -- nunca compara/valida o novo
-    // candidato ('99999999999999'), nunca roda chave/fuzzy para a nota 2.
-    checar('Caso 7: passo 0 faz no maximo 1 chamada pontual (nao processa novo candidato)', $fake7->chamadasBuscarPorCnpj <= $chamadasAntes7 + 1, ['antes' => $chamadasAntes7, 'depois' => $fake7->chamadasBuscarPorCnpj]);
-    checar('Caso 7: passo 0 responde IDENTIFICADA com ja_identificado_no_atendimento=true', $r7['status'] === 'IDENTIFICADA' && $r7['ja_identificado_no_atendimento'] === true, $r7);
-    $persistida7b = $pdo->query("SELECT status_ocr FROM tb_atendimento_nota WHERE id_nota = $idNt7b")->fetch(PDO::FETCH_ASSOC);
-    checar('Caso 7: nota 2 tambem marcada IDENTIFICADA no banco (consistencia do atendimento)', $persistida7b['status_ocr'] === 'IDENTIFICADA', $persistida7b);
+    $r7 = $rn7->identificarCliente($idAt7, $idNt7b, null, ['99999999999999'], null); // nota 2, candidato invalido
+    $r7b = $rn7->identificarCliente($idAt7, $idNt7b, null, ['22333444000181'], null); // idempotente: nota 2 ja tem resultado
+    checar('Caso 7: sem early-stop -- nota 2 com candidato proprio DESCONHECIDO = NAO_IDENTIFICADA (nada copiado da nota 1)', $r7['status'] === 'NAO_IDENTIFICADA' && $r7['cliente'] === null, $r7);
+    checar('Caso 7: o atendimento continua IDENTIFICADO pela nota 1 (estado derivado)', $r7['ja_identificado_no_atendimento'] === true && ($r7['cliente_atendimento']['estado'] ?? null) === 'IDENTIFICADO', $r7);
+    $persistida7b = $pdo->query("SELECT status_ocr, cnpj_emitente FROM tb_atendimento_nota WHERE id_nota = $idNt7b")->fetch(PDO::FETCH_ASSOC);
+    checar('Caso 7: nota 2 NAO e marcada IDENTIFICADA (sem copia de evidencia entre notas)', $persistida7b['status_ocr'] === 'NAO_IDENTIFICADA' && $persistida7b['cnpj_emitente'] === null, $persistida7b);
+    checar('Caso 7: segunda chamada na nota 2 e idempotente (devolve o gravado, nao sobrescreve)', $r7b['status'] === 'NAO_IDENTIFICADA', $r7b);
+    checar('Caso 7: o candidato valido da nota 2 gerou consulta real (sem early-stop)', $fake7->chamadasBuscarPorCnpj > $chamadasAntes7, ['antes' => $chamadasAntes7, 'depois' => $fake7->chamadasBuscarPorCnpj]);
 
     // ===================== Caso 8: falha tecnica -> ERRO (nao propaga excecao crua) =====================
     $idAt8 = criarAtendimentoTeste($pdo, $idTotemTeste);
@@ -326,29 +354,24 @@ try {
     checar('Caso 10: nota 1 permanece NAO_IDENTIFICADA no banco (nao sobrescrita retroativamente)', $persistida10a['status_ocr'] === 'NAO_IDENTIFICADA', $persistida10a);
     checar('Caso 10: nota 2 permanece NAO_IDENTIFICADA no banco (nao sobrescrita retroativamente)', $persistida10b['status_ocr'] === 'NAO_IDENTIFICADA', $persistida10b);
 
-    // ===================== Caso 11: nenhuma nova consulta "de negocio" apos identificacao =====================
-    // Continua o atendimento do Caso 10 (ja identificado na nota 3) simulando
-    // um atendimento completo de 5 notas -- notas 4 e 5 chamando o endpoint
-    // (como se o front-end tivesse, por bug/corrida, chamado mesmo apos a
-    // flag local de "ja identificado"). Nenhuma delas deve rodar
-    // chave/CNPJ/fuzzy de verdade (listarTodos nunca chamado; buscarPorCnpj
-    // so o "pontual" de popular a resposta, no maximo 1 por chamada).
+    // ===================== Caso 11: SEM early-stop nas notas 4 e 5 (hardening-revisao-notas-e-cliente) =====================
+    // ATUALIZADO (2026-09-30): continua o atendimento do Caso 10 (ja
+    // identificado na nota 3). As notas 4 e 5 NAO herdam a identificacao
+    // (early-stop removido): cada uma e avaliada com a propria evidencia.
+    // Sem CNPJ e com razao social abaixo do limiar = NAO_IDENTIFICADA; o
+    // fuzzy RODA (nao ha mais curto-circuito); o atendimento continua
+    // IDENTIFICADO pela nota 3.
     $idNt10d = criarNotaTeste($pdo, $idAt10, 4);
     $idNt10e = criarNotaTeste($pdo, $idAt10, 5);
-    $chamadasBuscarAntes11 = $fake10->chamadasBuscarPorCnpj;
     $chamadasListarAntes11 = $fake10->chamadasListarParaFuzzy;
 
     $r11d = $rn10->identificarCliente($idAt10, $idNt10d, null, ['00000000000000'], 'RAZAO SOCIAL TOTALMENTE DIFERENTE');
     $r11e = $rn10->identificarCliente($idAt10, $idNt10e, null, ['00000000000000'], 'OUTRA RAZAO SOCIAL DIFERENTE');
 
-    checar('Caso 11: nota 4 (apos identificacao) responde IDENTIFICADA via early-stop, nao NAO_IDENTIFICADA', $r11d['status'] === 'IDENTIFICADA' && $r11d['ja_identificado_no_atendimento'] === true, $r11d);
-    checar('Caso 11: nota 5 (apos identificacao) responde IDENTIFICADA via early-stop', $r11e['status'] === 'IDENTIFICADA' && $r11e['ja_identificado_no_atendimento'] === true, $r11e);
-    checar('Caso 11: listarTodos (fuzzy) NUNCA chamado para notas 4/5 pos-identificacao', $fake10->chamadasListarParaFuzzy === $chamadasListarAntes11, $fake10->chamadasListarParaFuzzy);
-    checar(
-        'Caso 11: buscarPorCnpj cresce no maximo 1 por chamada pos-identificacao (so "pontual" de popular resposta, nunca reprocessa os novos candidatos)',
-        $fake10->chamadasBuscarPorCnpj <= $chamadasBuscarAntes11 + 2,
-        ['antes' => $chamadasBuscarAntes11, 'depois' => $fake10->chamadasBuscarPorCnpj]
-    );
+    checar('Caso 11: nota 4 NAO herda a identificacao (sem early-stop): NAO_IDENTIFICADA com evidencia propria', $r11d['status'] === 'NAO_IDENTIFICADA' && $r11d['cliente'] === null, $r11d);
+    checar('Caso 11: nota 5 NAO herda a identificacao (sem early-stop): NAO_IDENTIFICADA com evidencia propria', $r11e['status'] === 'NAO_IDENTIFICADA' && $r11e['cliente'] === null, $r11e);
+    checar('Caso 11: o atendimento segue IDENTIFICADO pela nota 3 (estado derivado)', $r11e['ja_identificado_no_atendimento'] === true && ($r11e['cliente_atendimento']['estado'] ?? null) === 'IDENTIFICADO', $r11e);
+    checar('Caso 11: o fuzzy RODOU para as notas 4 e 5 (sem curto-circuito)', $fake10->chamadasListarParaFuzzy === $chamadasListarAntes11 + 2, $fake10->chamadasListarParaFuzzy);
 
     // ===================== Caso 12: candidatos vazios -> NAO_IDENTIFICADA (sem erro) =====================
     $idAt12 = criarAtendimentoTeste($pdo, $idTotemTeste);
@@ -466,6 +489,9 @@ try {
     $pdo->prepare('DELETE FROM tb_atendimento_nota WHERE id_atendimento IN (SELECT id_atendimento FROM tb_atendimento WHERE placa = :placa)')
         ->execute(['placa' => PLACA_TESTE]);
     $pdo->prepare('DELETE FROM tb_atendimento WHERE placa = :placa')->execute(['placa' => PLACA_TESTE]);
+    foreach ($idsClienteTemporarios as $idClienteTmp) {
+        $pdo->prepare('DELETE FROM tb_cliente WHERE id_cliente = :id')->execute(['id' => $idClienteTmp]);
+    }
     // Achado 3 do qa-testes (robustez-rate-limit-migrations, 2026-09-18):
     // desde que este script passou a exercitar NotaController::identificarCliente()
     // de verdade via subprocesso (Caso 16, cenario 'ok_feliz'), com

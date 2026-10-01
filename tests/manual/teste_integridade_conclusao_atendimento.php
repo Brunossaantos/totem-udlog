@@ -484,7 +484,11 @@ echo "\n=== Itens 6/7/8: concluirDigitalizacao() sob concorrencia REAL (2 subpro
 $id6 = $atendimentoDao->criar($idTotem, 'recebimento', 'ITG0006');
 $idsAtendimentoLimpar[] = $id6;
 $atendimentoDao->atualizarEtapa($id6, 'digitalizacao_notas');
-$notaDao->inserir($id6, 1, 'nota_01.jpg', null, null, false);
+$idNota6 = $notaDao->inserir($id6, 1, 'nota_01.jpg', null, null, false);
+// F1 (rodada corretiva 2026-10-01): concluir-digitalizacao so conclui com todas
+// as notas em estado terminal de OCR; a fixture representa uma nota cujo OCR ja
+// terminou sem identificar cliente (antes ela ficava PENDENTE e era ignorada).
+$notaDao->gravarResultadoOcrUnico($idNota6, $id6, 'NAO_IDENTIFICADA', null);
 $totalNotasAntes6 = $notaDao->contarPorAtendimento($id6);
 
 $saidasConcluir = dispararParalelo(__DIR__ . '/_caso_concluir_digitalizacao.php', [

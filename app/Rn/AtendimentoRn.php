@@ -254,4 +254,31 @@ class AtendimentoRn
     {
         return $this->atendimentoDao->buscarPorId($idAtendimento);
     }
+
+    // Passthroughs de lock/transacao (demanda hardening-revisao-notas-e-
+    // cliente, 2026-09-30) -- ver App\Dao\AtendimentoDao.
+    public function iniciarTransacao(int $timeoutLockSegundos = 5): void
+    {
+        $this->atendimentoDao->iniciarTransacao($timeoutLockSegundos);
+    }
+
+    public function confirmarTransacao(): void
+    {
+        $this->atendimentoDao->confirmarTransacao();
+    }
+
+    public function desfazerTransacao(): void
+    {
+        $this->atendimentoDao->desfazerTransacao();
+    }
+
+    public function buscarParaUpdate(int $idAtendimento): ?array
+    {
+        return $this->atendimentoDao->buscarPorIdParaUpdate($idAtendimento);
+    }
+
+    public function gravarClienteAutomaticoSeVazio(int $idAtendimento, string $nome, string $cnpj): bool
+    {
+        return $this->atendimentoDao->gravarClienteAutomaticoSeVazio($idAtendimento, $nome, $cnpj);
+    }
 }

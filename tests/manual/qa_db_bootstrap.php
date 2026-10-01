@@ -101,6 +101,10 @@ if (!function_exists('qaDbCriar')) {
         // cnh_modo_captura, aditiva, aplicada por padrao em todo banco qa_
         // novo desta bateria.
         qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/017_cnh_modo_captura.sql');
+        // Migration 018 (demanda hardening-revisao-notas-e-cliente, rodada
+        // corretiva F7, 2026-10-01) -- client_uid em tb_atendimento_nota,
+        // aditiva e idempotente.
+        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/018_nota_client_uid.sql');
 
         return [$admin, $nomeBanco];
     }

@@ -33,14 +33,20 @@ class RazaoSocialMatcher
 
     /**
      * @param array<int, array{id:mixed, razao_social:string, cnpj:string}> $listagem
-     * @return array{identificado: bool, cliente: ?array, score1: float, score2: float}
+     * @return array{identificado: bool, cliente: ?array, score1: float, score2: float, ambiguo: bool}
+     *
+     * `ambiguo` (ADITIVO, demanda hardening-revisao-notas-e-cliente,
+     * 2026-09-30): true quando o 1o colocado atingiu LIMIAR_MINIMO mas a
+     * margem para o 2o ficou abaixo de MARGEM_MINIMA (empate ou quase
+     * empate entre clientes) -- o chamador trata como anomalia, nunca
+     * escolhe automaticamente. `identificado` continua com a mesma semantica.
      */
     public static function melhorCandidato(string $razaoSocialCandidata, array $listagem): array
     {
         $candidataNormalizada = self::normalizar($razaoSocialCandidata);
 
         if ($candidataNormalizada === '' || empty($listagem)) {
-            return ['identificado' => false, 'cliente' => null, 'score1' => 0.0, 'score2' => 0.0];
+            return ['identificado' => false, 'cliente' => null, 'score1' => 0.0, 'score2' => 0.0, 'ambiguo' => false];
         }
 
         $ranking = [];
@@ -53,7 +59,7 @@ class RazaoSocialMatcher
         }
 
         if (empty($ranking)) {
-            return ['identificado' => false, 'cliente' => null, 'score1' => 0.0, 'score2' => 0.0];
+            return ['identificado' => false, 'cliente' => null, 'score1' => 0.0, 'score2' => 0.0, 'ambiguo' => false];
         }
 
         usort($ranking, static fn(array $a, array $b) => $b['score'] <=> $a['score']);
@@ -62,12 +68,14 @@ class RazaoSocialMatcher
         $score2 = count($ranking) > 1 ? $ranking[1]['score'] : 0.0;
 
         $identificado = $score1 >= self::LIMIAR_MINIMO && ($score1 - $score2) >= self::MARGEM_MINIMA;
+        $ambiguo = $score1 >= self::LIMIAR_MINIMO && !$identificado;
 
         return [
             'identificado' => $identificado,
             'cliente'      => $identificado ? $ranking[0]['item'] : null,
             'score1'       => $score1,
             'score2'       => $score2,
+            'ambiguo'      => $ambiguo,
         ];
     }
 

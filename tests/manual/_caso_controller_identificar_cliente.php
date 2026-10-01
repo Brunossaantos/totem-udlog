@@ -102,18 +102,17 @@ class NotaFiscalRnLancaExcecao extends NotaFiscalRn
     // deliberadamente vazio acima), e estouraria um erro de "typed property
     // must not be accessed before initialization" antes mesmo de chegar no
     // cenario que este dublê existe para simular.
-    public function buscarNotaDaOrdem(int $idAtendimento, int $ordem): ?array
+    // Atualizado em 2026-09-30 (hardening-revisao-notas-e-cliente): o
+    // Controller agora localiza a nota por buscarNotaDoAtendimento() (id_nota
+    // e/ou ordem) e calcula o resultado em avaliarNota() FORA do lock; o
+    // dubl\u00ea lanca a excecao nesta fase (antes: identificarCliente()).
+    public function buscarNotaDoAtendimento(int $idAtendimento, ?int $idNota, ?int $ordem, bool $travar = false): ?array
     {
-        return ['id_nota' => 1, 'ordem' => $ordem];
+        return ['id_nota' => 1, 'ordem' => $ordem ?? 1];
     }
 
-    public function identificarCliente(
-        int $idAtendimento,
-        int $idNota,
-        ?string $chaveOcr,
-        array $cnpjsCandidatos,
-        ?string $razaoSocialCandidata
-    ): array {
+    public function avaliarNota(int $idAtendimento, int $idNota, array $cnpjsCandidatos, ?string $razaoSocialCandidata): array
+    {
         throw new \RuntimeException('detalhe tecnico sensivel que jamais pode vazar na resposta ao totem');
     }
 }
@@ -159,9 +158,9 @@ switch ($cenario) {
         $rnSpy = new class extends NotaFiscalRn {
             public int $chamadas = 0;
             public function __construct() {}
-            public function buscarNotaDaOrdem(int $idAtendimento, int $ordem): ?array
+            public function buscarNotaDoAtendimento(int $idAtendimento, ?int $idNota, ?int $ordem, bool $travar = false): ?array
             {
-                return ['id_nota' => 1, 'ordem' => $ordem];
+                return ['id_nota' => 1, 'ordem' => $ordem ?? 1];
             }
             public function identificarCliente(
                 int $idAtendimento,

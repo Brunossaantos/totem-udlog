@@ -179,18 +179,24 @@ final class DocumentoRnMarcadorThrow extends \App\Rn\DocumentoRn
 // ---------------------------------------------------------------------
 final class NotaFiscalRnMarcadorThrow extends \App\Rn\NotaFiscalRn
 {
-    public function identificarCliente(
-        int $idAtendimento,
-        int $idNota,
-        ?string $chaveOcr,
-        array $cnpjsCandidatos,
-        ?string $razaoSocialCandidata
-    ): array {
+    // ATUALIZADO (hardening-revisao-notas-e-cliente, 2026-09-30): o controller
+    // deixou de chamar identificarCliente() e atualizarNumeroNota() -- agora
+    // calcula com avaliarNota() (fora do lock) e grava o numero por
+    // atualizarNumeroNotaPorIdentificador() (sob lock). O marcador sensivel
+    // passa a ser lancado nesses pontos de entrada REAIS do controller.
+    public function avaliarNota(int $idAtendimento, int $idNota, array $cnpjsCandidatos, ?string $razaoSocialCandidata): array
+    {
         throw new \RuntimeException(mensagemMarcadaCompleta('identificarCliente'));
     }
 
-    public function atualizarNumeroNota(int $idAtendimento, int $ordem, string $numeroBruto, string $origem): array
-    {
+    public function atualizarNumeroNotaPorIdentificador(
+        int $idAtendimento,
+        ?int $idNota,
+        ?int $ordem,
+        string $numeroBruto,
+        string $origem,
+        bool $travar = false
+    ): array {
         // Mensagem deliberadamente DIFERENTE de 'numero_nota_duplicado' e de
         // 'nota_nao_encontrada' -- precisa cair no ramo `else` final de
         // NotaController::definirNumero(), o unico alvo desta sanitizacao.

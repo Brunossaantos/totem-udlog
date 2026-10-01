@@ -138,6 +138,16 @@ afirmar(
     $atendimentoAposInvasorCliente['etapa_atual'] === 'cliente'
 );
 
+// ATUALIZADO (hardening-revisao-notas-e-cliente, 2026-09-30): o cliente MANUAL
+// e validado contra tb_cliente ATIVA (D2); linha temporaria, removida na limpeza.
+$idClienteTmp = null;
+$existeClienteTmp = $pdo->prepare('SELECT id_cliente FROM tb_cliente WHERE cnpj = :c');
+$existeClienteTmp->execute(['c' => '11222333000181']);
+if ($existeClienteTmp->fetchColumn() === false) {
+    $pdo->prepare("INSERT INTO tb_cliente (nome, razao_social_normalizada, cnpj, ativo) VALUES (:n, :n, '11222333000181', 1)")->execute(['n' => 'CLIENTE LEGITIMO LTDA']);
+    $idClienteTmp = (int) $pdo->lastInsertId();
+}
+
 // dono legitimo continua funcionando normalmente (sem regressao)
 $dadosClienteDono = base64_encode(json_encode(['nome' => 'CLIENTE LEGITIMO LTDA', 'cnpj' => '11222333000181']));
 $rDonoCliente = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotemVitima, $idAtCliente, 'cliente', $dadosClienteDono]);
@@ -186,6 +196,9 @@ afirmar(
 // Limpeza final
 // ============================================================
 limpar($pdo, $idsAtendimento, [$idTotemVitima, $idTotemInvasor]);
+if ($idClienteTmp !== null) {
+    $pdo->prepare('DELETE FROM tb_cliente WHERE id_cliente = :id')->execute(['id' => $idClienteTmp]);
+}
 
 echo "\n=== RESULTADO: {$totalTestes} testes, " . ($totalTestes - $totalFalhas) . " passaram, {$totalFalhas} falharam ===\n";
 exit($totalFalhas > 0 ? 1 : 0);

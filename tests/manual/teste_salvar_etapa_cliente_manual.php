@@ -88,12 +88,35 @@ $atendimentoDao->atualizarEtapa($idAtendimento, 'cliente');
 // base64: escapeshellarg() no Windows remove aspas duplas de argumentos,
 // corrompendo JSON literal na linha de comando — ver comentario em
 // _caso_salvar_etapa.php.
-$dadosCliente = base64_encode(json_encode(['nome' => 'CLIENTE TESTE MANUAL LTDA', 'cnpj' => '11222333000181']));
+// ATUALIZADO (hardening-revisao-notas-e-cliente, 2026-09-30): o cliente
+// MANUAL agora e validado contra tb_cliente ATIVA (unica allowlist, D2) e
+// nome/CNPJ gravados vem SEMPRE de tb_cliente. O setup insere uma linha
+// temporaria em tb_cliente (removida na limpeza) e a assercao original
+// (etapa avanca para rec_cnh) permanece; novas assercoes cobrem a rejeicao de
+// CNPJ desconhecido (etapa e cliente inalterados) e a origem do nome gravado.
+$cnpjTesteManual = '11222333000181';
+$idClienteTmp = null;
+$existeCliente = $pdo->prepare('SELECT id_cliente FROM tb_cliente WHERE cnpj = :c');
+$existeCliente->execute(['c' => $cnpjTesteManual]);
+if ($existeCliente->fetchColumn() === false) {
+    $pdo->prepare("INSERT INTO tb_cliente (nome, razao_social_normalizada, cnpj, ativo) VALUES ('CLIENTE TESTE MANUAL LTDA', 'CLIENTE TESTE MANUAL LTDA', :c, 1)")->execute(['c' => $cnpjTesteManual]);
+    $idClienteTmp = (int) $pdo->lastInsertId();
+}
+
+$dadosDesconhecido = base64_encode(json_encode(['nome' => 'CLIENTE INVENTADO', 'cnpj' => '22333444000181']));
+$rRejeitado = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotem, $idAtendimento, 'cliente', $dadosDesconhecido]);
+$aposRejeicao = $atendimentoDao->buscarPorId($idAtendimento);
+afirmar('salvar-etapa cliente com CNPJ fora de tb_cliente ativa e REJEITADO (sucesso false)', str_contains($rRejeitado['saida'], '"sucesso":false'));
+afirmar('Rejeicao do cliente desconhecido nao altera a etapa nem grava cliente', $aposRejeicao['etapa_atual'] === 'cliente' && empty($aposRejeicao['cliente_cnpj']) && empty($aposRejeicao['cliente_nome']));
+
+// o front envia um NOME divergente: o backend grava o de tb_cliente
+$dadosCliente = base64_encode(json_encode(['nome' => 'NOME ENVIADO PELO FRONT', 'cnpj' => $cnpjTesteManual]));
 $rSalvarEtapa = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotem, $idAtendimento, 'cliente', $dadosCliente]);
 afirmar('salvar-etapa cliente (manual) responde sucesso', str_contains($rSalvarEtapa['saida'], '"sucesso":true'));
 
 $atendimentoAposCliente = $atendimentoDao->buscarPorId($idAtendimento);
 afirmar('Apos salvar-etapa cliente (manual), etapa_atual avanca para rec_cnh', $atendimentoAposCliente['etapa_atual'] === 'rec_cnh');
+afirmar('Nome e CNPJ gravados vem de tb_cliente (nunca do que o front enviou)', $atendimentoAposCliente['cliente_cnpj'] === $cnpjTesteManual && $atendimentoAposCliente['cliente_nome'] !== 'NOME ENVIADO PELO FRONT' && !empty($atendimentoAposCliente['cliente_nome']));
 
 $imagemJpegBase64 = 'data:image/jpeg;base64,' . base64_encode(
     base64_decode('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=')
@@ -105,6 +128,9 @@ afirmar('Primeiro upload de cnh_frente (etapa rec_cnh) funciona sem erro de etap
 // Limpeza
 $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $idAtendimento]);
 $pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotem]);
+if ($idClienteTmp !== null) {
+    $pdo->prepare('DELETE FROM tb_cliente WHERE id_cliente = :id')->execute(['id' => $idClienteTmp]);
+}
 $storagePath = rtrim($_ENV['STORAGE_PATH'], '/') . '/' . $pastaTeste;
 if (is_dir($storagePath)) {
     foreach (glob($storagePath . '/*') as $arquivo) {

@@ -44,6 +44,14 @@ switch ($_GET['acao'] ?? '') {
     case 'definir-numero':
         $controller->definirNumero($entrada, (int) $totem['id_totem']);
         break;
+    case 'listar':
+        // reconciliacao somente leitura (rodada corretiva F7): aceita
+        // id_atendimento na query (GET) ou no corpo JSON (POST)
+        $controller->listar((int) ($_GET['id_atendimento'] ?? $entrada['id_atendimento'] ?? 0), (int) $totem['id_totem']);
+        break;
+    case 'excluir':
+        $controller->excluir($entrada, (int) $totem['id_totem']);
+        break;
     default:
         Resposta::erro('Acao invalida', 404);
 }

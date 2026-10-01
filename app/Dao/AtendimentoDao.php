@@ -45,6 +45,139 @@ class AtendimentoDao
         return $stmt->fetch() ?: null;
     }
 
+    // ============================================================
+    // demanda hardening-revisao-notas-e-cliente (2026-09-30) -- lock de
+    // linha e transacao curta para processar/excluir/definir-numero/concluir
+    // (sempre na ordem: tb_atendimento e DEPOIS tb_atendimento_nota).
+    // ============================================================
+
+    public function iniciarTransacao(int $timeoutLockSegundos = 5): void
+    {
+        $this->pdo->beginTransaction();
+        // inteiro fixo (nunca entrada de usuario); SET nao aceita placeholder.
+        $this->pdo->exec('SET SESSION innodb_lock_wait_timeout = ' . max(1, $timeoutLockSegundos));
+    }
+
+    public function confirmarTransacao(): void
+    {
+        $this->pdo->commit();
+    }
+
+    public function desfazerTransacao(): void
+    {
+        if ($this->pdo->inTransaction()) {
+            $this->pdo->rollBack();
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Abandono (rodada corretiva 2026-10-01): atendimento em_andamento sem
+    // atividade ha mais de 24 h passa ao estado terminal JA EXISTENTE
+    // 'cancelado' (mesmo estado do cancelar/inatividade do front) e as fotos
+    // das notas vao para quarentena. NAO existe coluna dedicada de "ultima
+    // atividade": o criterio usa so colunas existentes -- o MAIOR entre
+    // tb_atendimento.atualizado_em (ON UPDATE CURRENT_TIMESTAMP: muda a cada
+    // alteracao real da linha) e, entre as notas, criado_em/processado_em.
+    // Nao atualizam o criterio: a edicao so do numero de uma nota
+    // (numero_nota nao tem timestamp) e consultas de leitura.
+    // ------------------------------------------------------------
+
+    private const SQL_INATIVIDADE_SEGUNDOS = '
+        TIMESTAMPDIFF(SECOND,
+            GREATEST(
+                a.atualizado_em,
+                COALESCE(
+                    (SELECT MAX(GREATEST(n.criado_em, COALESCE(n.processado_em, n.criado_em)))
+                     FROM tb_atendimento_nota n WHERE n.id_atendimento = a.id_atendimento),
+                    a.atualizado_em
+                )
+            ),
+            NOW())';
+
+    /**
+     * Candidatos ao abandono (somente leitura, SEM lock): em_andamento, sem
+     * atividade por pelo menos $inatividadeSegundos e SEM envio ao Talent em
+     * curso/aceito (talent_checkin_status so NAO_ENVIADO ou ERRO_REPROCESSAVEL:
+     * nunca cancela atendimento que o Talent pode ter aceito). Os mais antigos
+     * primeiro, no maximo $limite ids. Cada candidato e revalidado sob lock
+     * por buscarParaAbandonoParaUpdate().
+     *
+     * @return int[]
+     */
+    public function listarCandidatosAbandono(int $inatividadeSegundos, int $limite): array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT a.id_atendimento
+            FROM tb_atendimento a
+            WHERE a.status = 'em_andamento'
+              AND a.talent_checkin_status IN ('NAO_ENVIADO', 'ERRO_REPROCESSAVEL')
+              AND " . self::SQL_INATIVIDADE_SEGUNDOS . " >= :inatividade
+            ORDER BY a.atualizado_em ASC, a.id_atendimento ASC
+            LIMIT :limite
+        ");
+        $stmt->bindValue(':inatividade', $inatividadeSegundos, PDO::PARAM_INT);
+        $stmt->bindValue(':limite', $limite, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Revalidacao SOB LOCK (FOR UPDATE na linha do atendimento; so dentro de
+     * transacao): status, talent_checkin_status, pasta_documentos e
+     * inatividade_segundos atuais.
+     */
+    public function buscarParaAbandonoParaUpdate(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT a.id_atendimento, a.status, a.talent_checkin_status, a.pasta_documentos,
+                   " . self::SQL_INATIVIDADE_SEGUNDOS . " AS inatividade_segundos
+            FROM tb_atendimento a
+            WHERE a.id_atendimento = :id
+            FOR UPDATE
+        ");
+        $stmt->execute(['id' => $id]);
+
+        return $stmt->fetch() ?: null;
+    }
+
+    /**
+     * CAS do abandono: so transita em_andamento -> cancelado (estado terminal
+     * existente). Retorna true se transitou agora.
+     */
+    public function marcarAbandonado(int $id): bool
+    {
+        $stmt = $this->pdo->prepare("UPDATE tb_atendimento SET status = 'cancelado' WHERE id_atendimento = :id AND status = 'em_andamento'");
+        $stmt->execute(['id' => $id]);
+
+        return $stmt->rowCount() === 1;
+    }
+
+    /** Leitura travada (SELECT ... FOR UPDATE) -- so valida dentro de transacao. */
+    public function buscarPorIdParaUpdate(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM tb_atendimento WHERE id_atendimento = :id FOR UPDATE');
+        $stmt->execute(['id' => $id]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /**
+     * Grava cliente_nome/cliente_cnpj identificados AUTOMATICAMENTE (decisao
+     * D1), nunca sobrescrevendo cliente ja confirmado/gravado por outro
+     * caminho: so escreve se cliente_cnpj ainda estiver vazio. Retorna true
+     * se gravou.
+     */
+    public function gravarClienteAutomaticoSeVazio(int $id, string $nome, string $cnpj): bool
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento SET cliente_nome = :nome, cliente_cnpj = :cnpj
+            WHERE id_atendimento = :id AND (cliente_cnpj IS NULL OR TRIM(cliente_cnpj) = '')
+        ");
+        $stmt->execute(['nome' => $nome, 'cnpj' => $cnpj, 'id' => $id]);
+
+        return $stmt->rowCount() > 0;
+    }
+
     public function atualizarEtapa(int $id, string $etapa): void
     {
         $stmt = $this->pdo->prepare('UPDATE tb_atendimento SET etapa_atual = :etapa WHERE id_atendimento = :id');

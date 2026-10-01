@@ -117,6 +117,15 @@ afirmar('[Recebimento] numero da nota 2 gravado com valor correto (222) apos rej
 $rNum3 = rodar($dir . '/_caso_nota_definir_numero.php', [$idTotem, $idAtRec, 3, '333', 'MANUAL']);
 afirmar('[Recebimento] numero da nota 3 gravado (333)', str_contains($rNum3['saida'], '"sucesso":true'));
 
+// F1 (rodada corretiva 2026-10-01): concluir-digitalizacao so conclui com todas
+// as notas em estado terminal de OCR. O front real chama identificar-cliente por
+// nota; aqui o resultado (OCR sem nenhum cliente identificado) e gravado direto
+// pelo DAO, como o endpoint faria.
+foreach ([1, 2, 3] as $ordemOcr) {
+    $notaOcr = $notaDao->buscarPorAtendimentoEOrdem($idAtRec, $ordemOcr);
+    $notaDao->gravarResultadoOcrUnico((int) $notaOcr['id_nota'], $idAtRec, 'NAO_IDENTIFICADA', null);
+}
+
 // --- concluir digitalizacao (sem cliente identificado via OCR -> etapa 'cliente') ---
 $rConcluir = rodar($dir . '/_caso_concluir_digitalizacao.php', [$idTotem, $idAtRec]);
 afirmar('[Recebimento] concluirDigitalizacao aceita (1-5 notas, todas com numero)', str_contains($rConcluir['saida'], '"sucesso":true'));
@@ -125,6 +134,15 @@ afirmar("[Recebimento] proxima etapa e 'cliente' (nenhuma nota identificou autom
 // --- identificacao manual do cliente (etapa 'cliente' -> 'rec_cnh', unica
 //     etapa desde a rodada corretiva de migracao-vio-api-br-com-cache de
 //     2026-09-26 -- antes 'rec_cnh_frente') ---
+// ATUALIZADO (hardening-revisao-notas-e-cliente, 2026-09-30): o cliente MANUAL
+// e validado contra tb_cliente ATIVA (D2); linha temporaria, removida na limpeza.
+$idClienteTmp = null;
+$existeClienteTmp = $pdo->prepare('SELECT id_cliente FROM tb_cliente WHERE cnpj = :c');
+$existeClienteTmp->execute(['c' => '11222333000181']);
+if ($existeClienteTmp->fetchColumn() === false) {
+    $pdo->prepare("INSERT INTO tb_cliente (nome, razao_social_normalizada, cnpj, ativo) VALUES (:n, :n, '11222333000181', 1)")->execute(['n' => 'CLIENTE E2E LTDA']);
+    $idClienteTmp = (int) $pdo->lastInsertId();
+}
 $dadosCliente = base64_encode(json_encode(['nome' => 'CLIENTE E2E LTDA', 'cnpj' => '11222333000181']));
 $rCliente = rodar($dir . '/_caso_salvar_etapa.php', [$idTotem, $idAtRec, 'cliente', $dadosCliente]);
 afirmar('[Recebimento] cliente identificado manualmente, avanca para rec_cnh', str_contains($rCliente['saida'], '"sucesso":true'));
@@ -239,6 +257,9 @@ foreach ($idsAtendimento as $id) {
     $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $id]);
 }
 $pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotem]);
+if ($idClienteTmp !== null) {
+    $pdo->prepare('DELETE FROM tb_cliente WHERE id_cliente = :id')->execute(['id' => $idClienteTmp]);
+}
 
 echo "\n=== RESULTADO: {$totalTestes} testes, " . ($totalTestes - $totalFalhas) . " passaram, {$totalFalhas} falharam ===\n";
 exit($totalFalhas > 0 ? 1 : 0);
