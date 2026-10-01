@@ -45,3 +45,11 @@ CLAUDE.md
 docs/
 ia_development_state.md
 ia_development_state_bkp.md
+
+# Fotos reais de notas fiscais usadas em diagnostico de OCR (dado pessoal/de
+# terceiros, LGPD) — nunca versionar. A pasta permanece no disco local.
+/testeOcr/
+
+# Fixtures de teste: nada em tests/fixtures/ e versionado (fotos de documentos
+# reais contem dado pessoal; os testes geram imagens sinteticas em memoria).
+tests/fixtures/*

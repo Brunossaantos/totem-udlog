@@ -316,18 +316,21 @@ const state = {
     placa: '',
     ordens: [],
     dados: {},
-    notaOrdem: 0,
-    notasImagens: [],
-    // paralelo a notasImagens (mesmo indice, ordem = indice+1) — demanda
-    // talent-doctos-finalizacao-checkin: cada entrada { ordem, numero,
-    // confirmado, origem: 'OCR'|'MANUAL'|null }. "Finalizar digitalizacao"
-    // so habilita quando todas estiverem confirmado=true (ver
-    // atualizarIndicadorNumerosNota()).
+    // Notas do Recebimento, na ordem de captura (a POSICAO na lista e o que o
+    // motorista ve como "Nota N de M"). Cada entrada:
+    // { uid, ordem, idNota, imagem, numero, confirmado, origem, estado,
+    //   sugestao, sugestaoOcr, ocrConcluido, manualOverride, destaque }
+    // uid: identidade local imutavel (state.notaUidSeq, por atendimento) — TODA
+    // busca/closure usa o uid, nunca a ordem. idNota/ordem: valores devolvidos
+    // pelo servidor (nota.php?acao=processar); idNota e a chave nas chamadas
+    // definir-numero/identificar-cliente/excluir. imagem: miniatura so em memoria.
+    notaUidSeq: 0,
     notasNumeros: [],
     previewNotaAtual: null,
     capturaNotaEmAndamento: false,
     finalizandoDigitalizacao: false,
-    clienteIdentificado: false,
+    // true durante a chamada excluir (travada na mesma tick do primeiro toque)
+    excluindoNota: false,
     ultimaLeituraQr: null,
     // estado dedicado a captura/validacao de CNH/CRLV da Expedicao via VIO
     // Decode (demanda expedicao-vio-cnh-crlv) — nao compartilhado com Recebimento.
@@ -366,19 +369,35 @@ function estadoRecVazio() {
 
 // -------------------- comunicacao com a API --------------------
 
-async function api(arquivo, acao, corpo) {
-    const res = await fetch(`${API_BASE}${arquivo}?acao=${acao}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${TOKEN}`,
-        },
-        body: JSON.stringify(corpo || {}),
-    });
-    const json = await res.json();
+// opcoes.timeoutMs (opcional): aborta a requisicao apos esse prazo (AbortError, sem
+// status). So o upload da nota e a listagem usam; as demais chamadas seguem sem prazo.
+async function api(arquivo, acao, corpo, opcoes) {
+    const timeoutMs = opcoes && Number.isInteger(opcoes.timeoutMs) && opcoes.timeoutMs > 0 ? opcoes.timeoutMs : 0;
+    const ctrl = timeoutMs && typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+    let res;
+    let json;
+    try {
+        res = await fetch(`${API_BASE}${arquivo}?acao=${acao}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${TOKEN}`,
+            },
+            body: JSON.stringify(corpo || {}),
+            signal: ctrl ? ctrl.signal : undefined,
+        });
+        json = await res.json();
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
     if (!json.sucesso) {
         const erro = new Error(json.erro || 'Erro desconhecido');
         erro.status = res.status;
+        // detalhes estruturados do corpo de erro (ex.: 422 NOTAS_SEM_NUMERO);
+        // quem consome valida o formato, nunca exibe o conteudo cru
+        if (json.codigo !== undefined) erro.codigo = json.codigo;
+        if (json.dados !== undefined) erro.dados = json.dados;
         throw erro;
     }
     return json.dados;
@@ -388,12 +407,48 @@ function escapeHtml(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Versao (filemtime) de assets que o JS nao consegue versionar sozinho, vinda
+// do index.php no bloco <script type="application/json" id="assets-versoes">.
+// Fallback seguro: bloco ausente/invalido = URL sem ?v (nunca lanca erro).
+function urlAssetComVersao(url, chave) {
+    let versao = 0;
+    try {
+        const el = document.getElementById('assets-versoes');
+        const dados = el ? JSON.parse(el.textContent) : null;
+        versao = dados ? Number(dados[chave]) : 0;
+    } catch (e) {
+        versao = 0;
+    }
+    return Number.isInteger(versao) && versao > 0 ? url + '?v=' + versao : url;
+}
+
+// Pasta versionada do Tesseract.js (arquivos identificados pelo SHA-256 em
+// assets/vendor/MANIFEST.sha256). Relativa a pagina (public/totem/index.php).
+const TESSERACT_VENDOR_PATH = 'assets/vendor/tesseract-5.1.1';
+
+// Toast de erro: FALLBACK para telas sem area de erro propria. Fica sob a barra
+// Cancelar (topo), nunca sobre os botoes principais, e nao recebe toque
+// (pointer-events:none em app.css). O contêiner (role=alert, aria-live
+// assertive) ja existe vazio e recolhido quando o texto entra. Na revisao das
+// notas a mensagem vai SO inline em #revisaoErro (sem toast duplicado).
 function mostrarErroTela(msg) {
+    if (state.tela === 'rec_revisao_numeros') {
+        atualizarRevisaoNumeros(msg);
+        return;
+    }
     const el = document.getElementById('toastErro');
+    if (!el) return;
     el.textContent = msg;
-    el.style.display = 'block';
+    el.classList.add('visivel');
     clearTimeout(mostrarErroTela._timer);
-    mostrarErroTela._timer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+    mostrarErroTela._timer = setTimeout(esconderToastErro, 6000);
+}
+function esconderToastErro() {
+    clearTimeout(mostrarErroTela._timer);
+    const el = document.getElementById('toastErro');
+    if (!el) return;
+    el.classList.remove('visivel');
+    el.textContent = '';
 }
 
 // -------------------- teclado virtual (padrao pt-BR, numeros na 1a linha) --------------------
@@ -453,7 +508,8 @@ const IDLE_ABANDONO_MS = 30000;
 // primeiro disparo do timer de inatividade com trabalho ativo. Passado o teto,
 // o aviso aparece normalmente (recognize() travado nao segura o totem).
 const INATIVIDADE_TETO_SUSPENSAO_MS = 120000;
-// Timestamp (Date.now()) do inicio da suspensao corrente; 0 = sem suspensao.
+// Instante (performance.now(), relogio monotonico: nao sofre salto de relogio
+// do sistema) do inicio da suspensao corrente; 0 = sem suspensao.
 let suspensaoInicioMs = 0;
 
 // Reinicia o timer de monitoramento NORMAL (180s). So deve ser chamada
@@ -515,8 +571,10 @@ function mostrarInatividade() {
     // A suspensao vale no maximo INATIVIDADE_TETO_SUSPENSAO_MS; ao expirar, o
     // aviso aparece normalmente mesmo com trabalho ativo.
     if (trabalhoAtivoNotas()) {
-        if (!suspensaoInicioMs) suspensaoInicioMs = Date.now();
-        const restante = INATIVIDADE_TETO_SUSPENSAO_MS - (Date.now() - suspensaoInicioMs);
+        // || 1: performance.now() nunca fica em 0 aqui (passaram >= IDLE_MS desde a
+        // carga), mas o 0 e o sentinela de "sem suspensao" e nao pode ser um instante.
+        if (!suspensaoInicioMs) suspensaoInicioMs = performance.now() || 1;
+        const restante = INATIVIDADE_TETO_SUSPENSAO_MS - (performance.now() - suspensaoInicioMs);
         if (restante > 0) {
             clearTimeout(idleTimerPrincipal);
             idleTimerPrincipal = setTimeout(mostrarInatividade, restante);
@@ -571,11 +629,25 @@ function fecharAvisoInatividade() {
 
 // -------------------- modal generico --------------------
 
+// Esvazia a caixa de um modal: tira o src de toda <img> (a foto da nota nunca fica
+// retida em DOM oculto nem aparece por um instante no proximo modal) e remove o
+// conteudo inteiro (os handlers ligados aos botoes saem junto com os elementos).
+function limparCaixaModal(id) {
+    const caixa = document.getElementById(id);
+    if (!caixa) return;
+    caixa.querySelectorAll('img').forEach(img => { img.removeAttribute('src'); });
+    caixa.innerHTML = '';
+}
+
 function abrirModal(html) {
+    limparCaixaModal('modalCaixa'); // troca de modal com o anterior ainda aberto (ex.: Corrigir)
     document.getElementById('modalCaixa').innerHTML = html;
     document.getElementById('modalFundo').classList.add('aberto');
 }
-function fecharModal() { document.getElementById('modalFundo').classList.remove('aberto'); }
+function fecharModal() {
+    document.getElementById('modalFundo').classList.remove('aberto');
+    limparCaixaModal('modalCaixa');
+}
 
 function confirmarCancelar() {
     abrirModal(`
@@ -605,6 +677,8 @@ function ir(tela) {
     document.getElementById('barraCancelar').style.display = (tela === 'home' || tela === 'lgpd') ? 'none' : 'block';
     fecharTeclado();
     fecharModal();
+    fecharConfirmacaoExcluirNota();
+    if (tela === 'rec_revisao_numeros') esconderToastErro(); // revisao: mensagens so inline
     // toda troca de tela (cancelar, voltar ao inicio, novo atendimento) fecha
     // tambem o aviso de inatividade, se estiver aberto — evita overlay orfao
     // visivel por cima da tela nova. fecharAvisoInatividade() sempre limpa o
@@ -689,14 +763,18 @@ function novoAtendimento() {
         // 2026-09-24).
         tela: 'lgpd', lgpdAceito: false, lgpdTokenAceite: null,
         tipo: null, idAtendimento: null, placa: '',
-        ordens: [], dados: {}, notaOrdem: 0, notasImagens: [], notasNumeros: [], previewNotaAtual: null,
-        capturaNotaEmAndamento: false, finalizandoDigitalizacao: false, clienteIdentificado: false, ultimaLeituraQr: null,
+        ordens: [], dados: {}, notaUidSeq: 0, notasNumeros: [], previewNotaAtual: null,
+        capturaNotaEmAndamento: false, finalizandoDigitalizacao: false, excluindoNota: false,
+        ultimaLeituraQr: null,
         exp: estadoExpVazio(),
         rec: estadoRecVazio(),
     });
     ocrFila = [];
-    numeroModalFila = [];
     numeroModalAberta = false;
+    numeroModalOverrideUid = null;
+    avisoCapturaVazia = false;
+    resetarControleNotasServidor();
+    limparFaixaExclusaoNota();
     medirLimpar();
     ir('lgpd');
 }
@@ -1672,7 +1750,7 @@ let qrWorkerCallbackPendente = null;
 
 function obterQrWorker() {
     if (!qrWorker) {
-        qrWorker = new Worker('assets/qr-worker.js');
+        qrWorker = new Worker(urlAssetComVersao('assets/qr-worker.js', 'qrWorker'));
         qrWorker.onmessage = (e) => {
             const cb = qrWorkerCallbackPendente;
             qrWorkerCallbackPendente = null;
@@ -1857,8 +1935,8 @@ function comTimeout(promise, ms) {
 // navegador; o que NAO sobrevive e a tela/estado visual do atendimento em
 // si, que sempre reinicia do zero.
 async function pollarAteTerminal(idAtendimento, tipo, geracao, aoAtualizar) {
-    const inicio = Date.now();
-    while (Date.now() - inicio < PROCESSAMENTO_TIMEOUT_MS) {
+    const inicio = performance.now(); // monotonico: timeout imune a salto de relogio
+    while (performance.now() - inicio < PROCESSAMENTO_TIMEOUT_MS) {
         if (pollGeracao !== geracao) return resultadoTimeoutProcessamento();
         const status = await consultarStatusProcessamento(idAtendimento, tipo);
         if (pollGeracao !== geracao) return resultadoTimeoutProcessamento();
@@ -2058,18 +2136,20 @@ async function iniciarRecebimento(excedeLimite) {
             await api('atendimento.php', 'bloquear-excesso-notas', { id_atendimento: state.idAtendimento });
             ir('rec_bloqueado');
         } else {
-            state.notaOrdem = 0;
-            state.notasImagens = [];
+            state.notaUidSeq = 0;
             state.notasNumeros = [];
             state.previewNotaAtual = null;
             state.capturaNotaEmAndamento = false;
             state.finalizandoDigitalizacao = false;
-            state.clienteIdentificado = false;
+            state.excluindoNota = false;
             atendimentoGeracao++;
             suspensaoInicioMs = 0;
             ocrFila = [];
-            numeroModalFila = [];
             numeroModalAberta = false;
+            numeroModalOverrideUid = null;
+            avisoCapturaVazia = false;
+            resetarControleNotasServidor();
+            limparFaixaExclusaoNota();
             medirLimpar();
             await api('atendimento.php', 'salvar-etapa', { id_atendimento: state.idAtendimento, etapa: 'digitalizacao_notas' });
             ir('rec_digitaliza');
@@ -2084,21 +2164,215 @@ function telaBloqueado() {
 
 // -------------------- recebimento: digitalizacao das notas --------------------
 // captura fica fluida: cada nota carrega e volta pra mesma tela pronta pra proxima.
-// a identificacao do cliente roda em segundo plano em cada chamada de /nota.php;
-// "Finalizar digitalizacao" decide se pula a tela de confirmacao do cliente.
+// a identificacao do cliente roda em segundo plano para cada nota capturada (uma
+// chamada por nota); quem decide o cliente do atendimento e o BACKEND, que devolve
+// a proxima tela em concluir-digitalizacao (ver concluirDigitalizacaoRevisao()).
+
+// true quando a captura foi aberta porque a ultima nota foi excluida (mensagem
+// curta no indicador ate a primeira nova captura).
+let avisoCapturaVazia = false;
+
+const NOTAS_LIMITE = 5;
+
+// Busca/posicao SEMPRE por uid (identidade imutavel), nunca pela ordem.
+function buscarNotaPorUid(uid) {
+    return (state.notasNumeros || []).find(n => n.uid === uid) || null;
+}
+function posicaoNotaPorUid(uid) {
+    return (state.notasNumeros || []).findIndex(n => n.uid === uid) + 1; // 0 = inexistente
+}
+
+// Identificador da nota nas chamadas ao backend: id_nota (imutavel); a ordem so
+// vai como fallback quando o servidor nao devolveu id_nota. Nunca os dois juntos.
+function identificadorNotaApi(nota) {
+    if (!nota) return null;
+    if (Number.isInteger(nota.idNota) && nota.idNota > 0) return { id_nota: nota.idNota };
+    if (Number.isInteger(nota.ordem) && nota.ordem > 0) return { ordem: nota.ordem };
+    return null;
+}
 
 // Miniaturas da tela de captura (demanda captura-notas-sem-interrupcao, impl. 2):
 // durante a captura nenhum numero e confirmado (a confirmacao acontece so na
-// tela de revisao), entao as miniaturas nao mostram selo de estado.
-// state.notasNumeros e paralelo a state.notasImagens (mesmo indice).
+// tela de revisao), entao as miniaturas nao mostram selo de estado. Nota
+// recuperada do servidor (sem foto em memoria) mostra so um bloco neutro.
 function renderMiniaturasNotas() {
-    return (state.notasImagens || []).map(img =>
-        `<div class="miniatura"><img src="${img}" alt="Nota digitalizada"></div>`
+    return (state.notasNumeros || []).map(n => n.imagem
+        ? `<div class="miniatura"><img src="${n.imagem}" alt="Nota digitalizada"></div>`
+        : '<div class="miniatura miniatura-sem-foto" title="Foto indisponível" role="img" aria-label="Foto indisponível"></div>'
     ).join('');
 }
 
+// -------------------- recebimento: identidade da nota no servidor (uid), retry e reconciliacao --------------------
+// uid LOCAL (state.notaUidSeq, numerico) continua sendo a chave de DOM/handlers/OCR
+// (imutavel). O uid do SERVIDOR (nota.clientUid, string) e outra coisa: gerado ANTES
+// do upload, enviado no processar e usado so para idempotencia (retry com o mesmo
+// valor nunca cria segunda nota) e para casar notas em nota.php?acao=listar.
+const NOTA_CLIENT_UID_REGEX = /^[A-Za-z0-9_-]{8,64}$/;
+const NOTA_UPLOAD_TIMEOUT_MS = 90000;
+const NOTA_LISTAR_TIMEOUT_MS = 20000;
+
+// clientUid ja usados NESTE atendimento (nunca reutiliza, nem apos excluir); ids de
+// notas excluidas localmente (listar defasado nao as ressuscita); upload ambiguo
+// pendente ({ clientUid, imagem, geracao, idAtendimento }); aviso do 409.
+let clientUidsUsados = new Set();
+let idNotasExcluidas = new Set();
+let uploadPendente = null;
+let avisoOcrEmAndamento = false;
+let reconciliacaoEmCurso = null;
+// true depois do concluir-digitalizacao aceito: OCR/identificacao tardios sao descartados
+// (nenhum identificar-cliente depois de concluir)
+let digitalizacaoConcluida = false;
+
+function resetarControleNotasServidor() {
+    clientUidsUsados = new Set();
+    idNotasExcluidas = new Set();
+    uploadPendente = null;
+    avisoOcrEmAndamento = false;
+    reconciliacaoEmCurso = null;
+    digitalizacaoConcluida = false;
+}
+
+// Gera um uid unico por nota: crypto.randomUUID quando existe, senao
+// crypto.getRandomValues (32 hex); sem crypto algum, fallback Math.random + relogio
+// + contador (so unicidade, o uid nao e segredo e e escopado ao atendimento).
+// Sempre confere a regex do contrato e a ausencia de colisao local.
+function gerarClientUidNota() {
+    for (let i = 0; i < 8; i++) {
+        let uid = '';
+        try {
+            const c = (typeof crypto !== 'undefined') ? crypto : null;
+            if (c && typeof c.randomUUID === 'function') {
+                uid = c.randomUUID();
+            } else if (c && typeof c.getRandomValues === 'function') {
+                const b = new Uint8Array(16);
+                c.getRandomValues(b);
+                uid = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+            }
+        } catch (e) { uid = ''; }
+        if (!uid) {
+            uid = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12) + (++clientUidFallbackSeq).toString(36);
+        }
+        if (NOTA_CLIENT_UID_REGEX.test(uid) && !clientUidsUsados.has(uid)) {
+            clientUidsUsados.add(uid);
+            return uid;
+        }
+    }
+    throw new Error('uid indisponivel');
+}
+let clientUidFallbackSeq = 0;
+
+function novaNotaLocal(campos) {
+    return Object.assign({
+        uid: ++state.notaUidSeq,
+        clientUid: null,
+        ordem: null,
+        idNota: null,
+        imagem: null,
+        numero: null, confirmado: false, origem: null,
+        // estado do numero: 'pendente' (OCR nao terminou) | 'sugerido' | 'sem_sugestao' | 'confirmado'
+        estado: 'pendente', sugestao: null, sugestaoOcr: null,
+        ocrConcluido: false, manualOverride: false, destaque: false,
+        aguardando: false, // 409 OCR_EM_ANDAMENTO apontou esta nota (destaque neutro, nao e erro)
+        recuperada: false, // criada a partir de listar (sem foto em memoria)
+    }, campos);
+}
+
+// Valida o corpo de listar: so itens bem formados (id_nota inteiro > 0, ordem 1..5,
+// uid null ou conforme a regex, numero_definido booleano); nunca usa campo extra.
+function notasListarValidas(dados) {
+    const bruto = dados && Array.isArray(dados.notas) ? dados.notas : null;
+    if (!bruto) return null;
+    const itens = [];
+    bruto.forEach(x => {
+        if (!x || !Number.isInteger(x.id_nota) || x.id_nota <= 0) return;
+        if (!Number.isInteger(x.ordem) || x.ordem < 1 || x.ordem > NOTAS_LIMITE) return;
+        if (x.uid !== null && x.uid !== undefined && !(typeof x.uid === 'string' && NOTA_CLIENT_UID_REGEX.test(x.uid))) return;
+        if (itens.some(i => i.id_nota === x.id_nota)) return;
+        itens.push({ id_nota: x.id_nota, ordem: x.ordem, uid: typeof x.uid === 'string' ? x.uid : null, numero_definido: x.numero_definido === true });
+    });
+    return itens;
+}
+
+// Reconcilia o estado local com o servidor (nota.php?acao=listar, so leitura): toda
+// nota ativa do atendimento passa a ter item local visivel (corrigivel e excluivel).
+// So ADICIONA ou ATUALIZA ordem/idNota; nunca remove item local. pendente (opcional):
+// upload ambiguo cujo uid, se achado, vira nota completa (foto em memoria + OCR);
+// qualquer outra nota desconhecida vira item recuperado, SEM foto (nao ha endpoint de
+// imagem), sem numero (listar nao devolve o numero) e com a identificacao de cliente
+// encerrada com candidatos vazios (para nao ficar PENDENTE no servidor).
+// Retorna true se a listagem foi lida e aplicada; false em qualquer falha.
+function reconciliarNotasComServidor(pendente) {
+    if (reconciliacaoEmCurso) return reconciliacaoEmCurso;
+    const geracao = atendimentoGeracao;
+    const idAtendimentoCapturado = state.idAtendimento;
+    if (idAtendimentoCapturado == null) return Promise.resolve(false);
+    reconciliacaoEmCurso = (async () => {
+        try {
+            const dados = await api('nota.php', 'listar', { id_atendimento: idAtendimentoCapturado }, { timeoutMs: NOTA_LISTAR_TIMEOUT_MS });
+            if (geracao !== atendimentoGeracao || idAtendimentoCapturado !== state.idAtendimento) return false;
+            const itens = notasListarValidas(dados);
+            if (!itens) return false;
+            itens.sort((a, b) => a.ordem - b.ordem);
+            let mudou = false;
+            itens.forEach(srv => {
+                if (idNotasExcluidas.has(srv.id_nota)) return; // excluida localmente: listar defasado
+                let local = state.notasNumeros.find(n => n.idNota === srv.id_nota)
+                    || (srv.uid ? state.notasNumeros.find(n => n.clientUid === srv.uid) : null);
+                if (local) {
+                    if (local.idNota == null) { local.idNota = srv.id_nota; mudou = true; }
+                    if (local.idNota === srv.id_nota && local.ordem !== srv.ordem) { local.ordem = srv.ordem; mudou = true; }
+                    return;
+                }
+                if (state.notasNumeros.length >= NOTAS_LIMITE) return;
+                const doPendente = !!(pendente && srv.uid && pendente.clientUid === srv.uid && pendente.imagem);
+                const nota = novaNotaLocal({
+                    clientUid: srv.uid, ordem: srv.ordem, idNota: srv.id_nota,
+                    imagem: doPendente ? pendente.imagem : null,
+                    recuperada: !doPendente,
+                });
+                if (!doPendente) { nota.estado = 'sem_sugestao'; nota.ocrConcluido = true; }
+                state.notasNumeros.push(nota);
+                mudou = true;
+                if (doPendente) {
+                    processarOcrNota(nota.imagem, nota.uid, 0);
+                } else {
+                    const ident = identificarClienteNota(nota.uid, [], null, idAtendimentoCapturado, geracao, 0);
+                    if (ident && typeof ident.catch === 'function') ident.catch(() => {});
+                }
+            });
+            if (mudou) {
+                atualizarIndicadorNumerosNota();
+                atualizarRevisaoNumeros();
+            }
+            return true;
+        } catch (e) {
+            return false;
+        } finally {
+            reconciliacaoEmCurso = null;
+        }
+    })();
+    return reconciliacaoEmCurso;
+}
+
+// Upload ambiguo anterior (resposta perdida/timeout/5xx) ainda pendente: resolve
+// via listar ANTES de seguir (nova captura, Finalizar). Falha de listar mantem o
+// pendente para outra tentativa; geracao antiga e descartada.
+async function resolverUploadPendente() {
+    const pend = uploadPendente;
+    if (!pend) return;
+    if (pend.geracao !== atendimentoGeracao || pend.idAtendimento !== state.idAtendimento) { uploadPendente = null; return; }
+    const ok = await reconciliarNotasComServidor(pend);
+    if (ok && uploadPendente === pend) uploadPendente = null;
+}
+
+function textoIndicadorNotas() {
+    const total = (state.notasNumeros || []).length;
+    if (total > 0) return `Notas capturadas: ${total}`;
+    return avisoCapturaVazia ? 'Nenhuma nota. Capture a primeira nota.' : '';
+}
+
 function telaDigitaliza() {
-    return `<div class="subtitulo">Notas digitalizadas: <span id="contadorNotas">${state.notaOrdem}</span> de 5</div>
+    return `<div class="subtitulo">Notas digitalizadas: <span id="contadorNotas">${(state.notasNumeros || []).length}</span> de ${NOTAS_LIMITE}</div>
         <div class="caixa-scanner" id="caixaScanner">
             <video id="videoScanner" autoplay playsinline></video>
             <div class="guia-scanner"></div>
@@ -2106,7 +2380,7 @@ function telaDigitaliza() {
         <img id="previaNota" class="previa-nota" style="display:none" alt="Nota capturada">
         <div class="status-scanner" id="scannerStatus">Conectando ao scanner...</div>
         <div class="miniaturas" id="miniaturas">${renderMiniaturasNotas()}</div>
-        <div class="subtitulo" id="indicadorNumerosNota"></div>
+        <div class="subtitulo" id="indicadorNumerosNota" role="status">${escapeHtml(textoIndicadorNotas())}</div>
         <div class="grupo-botoes" id="controlesScanner">
             <button class="btn-fantasma" id="btnCapturarNota" onclick="capturarPreviaNota()" disabled>Capturar nota</button>
         </div>
@@ -2126,33 +2400,36 @@ function atualizarBotaoFinalizarDigitalizacao() {
 // Contador simples de notas capturadas + miniaturas + botao Finalizar — chamado
 // quando uma nota e capturada (ver confirmarUsoImagemNota()).
 function atualizarIndicadorNumerosNota() {
-    const total = (state.notasNumeros || []).length;
     const indicador = document.getElementById('indicadorNumerosNota');
-    if (indicador) {
-        indicador.textContent = total === 0 ? '' : `Notas capturadas: ${total}`;
-    }
+    if (indicador) indicador.textContent = textoIndicadorNotas();
     const miniaturas = document.getElementById('miniaturas');
     if (miniaturas) miniaturas.innerHTML = renderMiniaturasNotas();
     atualizarBotaoFinalizarDigitalizacao();
 }
 
 // -------------------- recebimento: revisao unica dos numeros das notas --------------------
-// Tela unica (ate 5 cartoes) aberta por "Finalizar digitalizacao". Usa as imagens
-// JA em memoria (state.notasImagens) so como miniatura; nada e gravado em
+// Tela unica (ate 5 cartoes) aberta por "Finalizar digitalizacao". Usa a imagem
+// JA em memoria (nota.imagem) so como miniatura; nada e gravado em
 // localStorage/sessionStorage/banco. Estado por nota (state.notasNumeros[i]):
 //   estado: 'pendente' (OCR nao terminou) -> 'sugerido' | 'sem_sugestao' (OCR terminou)
 //           -> 'confirmado' (salvo via definir-numero; tambem alcancavel direto de
 //           qualquer estado por digitacao manual); ocrConcluido: OCR de numero terminou;
+//           sugestaoOcr: ultimo resultado do OCR (mesmo se ignorado);
 //           manualOverride: motorista abriu a digitacao com OCR pendente — resultado
-//           tardio do OCR e ignorado.
+//           tardio do OCR e ignorado (o Voltar desfaz e recalcula o estado);
+//           destaque: o backend (422) apontou esta nota sem numero.
+// Cartoes identificados por uid; o rotulo "Nota N de M" vem da POSICAO na lista.
 function telaRevisaoNumeros() {
     return `<div class="rev-wrap">
         <div class="titulo">Confira as notas</div>
         <p class="rev-instrucao">Toque em cada nota para conferir o número. Se estiver certo, toque em Confirmar. Se estiver errado, corrija. Quando todas estiverem confirmadas, toque em Continuar.</p>
+        <div class="rev-faixa" id="revisaoFaixa" role="status" style="display:none"></div>
         <div class="rev-leitura" id="revisaoLeitura" role="status" style="display:none"></div>
         <div class="rev-lista" id="revisaoLista"></div>
+        <button type="button" class="rev-adicionar" id="btnAdicionarNota" style="display:none" onclick="adicionarOutraNota()">Adicionar outra nota</button>
         <div class="rev-rodape">
             <div class="rev-motivo" id="revisaoMotivo" role="status"></div>
+            <div class="rev-aguarde" id="revisaoAguarde" role="status" style="display:none"></div>
             <div class="rev-erro" id="revisaoErro" role="alert" style="display:none"></div>
             <button type="button" class="rev-continuar" id="btnContinuarRevisao" disabled onclick="concluirDigitalizacaoRevisao()">Continuar</button>
         </div>
@@ -2166,21 +2443,30 @@ const REV_ICONES = {
     confirmado: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>'
 };
 
-function criarCartaoNota(ordem, imagem, total) {
+function criarCartaoNota(nota) {
     const cartao = document.createElement('button');
     cartao.type = 'button';
     cartao.className = 'rev-cartao';
-    cartao.id = 'cartaoNota' + ordem;
-    cartao.addEventListener('click', () => tocarCartaoNota(ordem));
-    const img = document.createElement('img');
-    img.className = 'rev-miniatura';
-    img.alt = 'Nota ' + ordem + ' de ' + total;
-    if (imagem) img.src = imagem; // imagem ja em memoria (nao duplicada em storage)
+    cartao.id = 'cartaoNota' + nota.uid;
+    cartao.dataset.uid = String(nota.uid);
+    cartao._imagem = nota.imagem; // para reconciliar: recria o cartao se a imagem mudou
+    const uid = nota.uid;
+    cartao.addEventListener('click', () => tocarCartaoNota(uid));
+    let img;
+    if (nota.imagem) {
+        img = document.createElement('img');
+        img.className = 'rev-miniatura';
+        img.src = nota.imagem; // imagem ja em memoria (nao duplicada em storage)
+    } else {
+        // nota recuperada do servidor: nao ha endpoint de imagem, so um bloco neutro
+        img = document.createElement('div');
+        img.className = 'rev-miniatura rev-sem-foto';
+        img.textContent = 'Foto indisponível';
+    }
     const textos = document.createElement('div');
     textos.className = 'rev-textos';
     const rotulo = document.createElement('div');
     rotulo.className = 'rev-rotulo';
-    rotulo.textContent = 'Nota ' + ordem + ' de ' + total;
     const numero = document.createElement('div');
     numero.className = 'rev-numero';
     const selo = document.createElement('span');
@@ -2199,12 +2485,20 @@ function criarCartaoNota(ordem, imagem, total) {
     return cartao;
 }
 
-function preencherCartaoNota(cartao, nota) {
+function preencherCartaoNota(cartao, nota, posicao, total) {
     const estado = nota.estado || 'pendente';
+    const destacar = !!nota.destaque && !nota.confirmado;
+    const rotuloEl = cartao.querySelector('.rev-rotulo');
     const numero = cartao.querySelector('.rev-numero');
     const selo = cartao.querySelector('.rev-selo');
     const seloIcone = cartao.querySelector('.rev-selo-icone');
     const seloTexto = cartao.querySelector('.rev-selo-texto');
+    const rotulo = 'Nota ' + posicao + ' de ' + total;
+    rotuloEl.textContent = rotulo;
+    const miniatura = cartao.querySelector('.rev-miniatura');
+    if (miniatura) {
+        if (miniatura.tagName === 'IMG') miniatura.alt = rotulo; else miniatura.setAttribute('aria-label', rotulo + ': foto indisponível');
+    }
     let textoNumero;
     let grande = false;
     let textoSelo;
@@ -2214,26 +2508,60 @@ function preencherCartaoNota(cartao, nota) {
     else { textoNumero = 'Toque para digitar o número'; textoSelo = 'Lendo...'; }
     numero.textContent = textoNumero;
     numero.className = 'rev-numero' + (grande ? ' rev-numero-grande' : '');
-    selo.className = 'rev-selo rev-selo-' + estado;
-    cartao.className = 'rev-cartao rev-cartao-' + estado;
-    seloIcone.innerHTML = REV_ICONES[estado] || REV_ICONES.pendente; // constante interna, sem dado da nota
-    seloTexto.textContent = textoSelo;
+    if (destacar) {
+        selo.className = 'rev-selo rev-selo-destaque';
+        cartao.className = 'rev-cartao rev-cartao-' + estado + ' rev-cartao-destaque';
+        seloIcone.innerHTML = REV_ICONES.sem_sugestao; // constante interna, sem dado da nota
+        seloTexto.textContent = 'Falta o número';
+    } else if (nota.aguardando) {
+        // 409 OCR_EM_ANDAMENTO: destaque neutro (azul), o numero da nota segue visivel
+        selo.className = 'rev-selo rev-selo-aguardando';
+        cartao.className = 'rev-cartao rev-cartao-' + estado + ' rev-cartao-aguardando';
+        seloIcone.innerHTML = REV_ICONES.pendente; // constante interna
+        seloTexto.textContent = 'Leitura em andamento';
+    } else {
+        selo.className = 'rev-selo rev-selo-' + estado;
+        cartao.className = 'rev-cartao rev-cartao-' + estado;
+        seloIcone.innerHTML = REV_ICONES[estado] || REV_ICONES.pendente; // constante interna, sem dado da nota
+        seloTexto.textContent = textoSelo;
+    }
 }
 
-// Atualiza (sem recriar as miniaturas) cartoes, linha de leitura, motivo e
-// botao Continuar. msgErro (opcional): erro ao concluir a digitalizacao.
+// Junta posicoes em texto: "2", "2 e 4", "1, 2 e 4".
+function juntarPosicoesNotas(posicoes) {
+    if (posicoes.length <= 1) return String(posicoes[0]);
+    return posicoes.slice(0, -1).join(', ') + ' e ' + posicoes[posicoes.length - 1];
+}
+
+// Mensagem FIXA do destaque de notas sem numero (422): N = posicao na lista, nunca
+// texto do backend. '' quando nenhuma nota esta destacada.
+function mensagemNotasDestacadas() {
+    const posicoes = [];
+    (state.notasNumeros || []).forEach((n, i) => { if (n.destaque && !n.confirmado) posicoes.push(i + 1); });
+    if (posicoes.length === 0) return '';
+    if (posicoes.length === 1) return 'Falta o número da Nota ' + posicoes[0] + '. Toque na nota para digitar.';
+    return 'Faltam os números das Notas ' + juntarPosicoesNotas(posicoes) + '. Toque em cada nota para digitar.';
+}
+
+// Atualiza cartoes (reconciliando o DOM por uid: remove o cartao cuja nota nao
+// existe mais, recria se a imagem mudou, mantem a ordem da lista), linha de
+// leitura, motivo, botoes Adicionar/Continuar. msgErro (opcional): erro ao
+// concluir a digitalizacao; sem ele, vale a mensagem do destaque (422), se houver.
 function atualizarRevisaoNumeros(msgErro) {
     if (state.tela !== 'rec_revisao_numeros') return;
     const lista = document.getElementById('revisaoLista');
     if (!lista) return;
     const notas = state.notasNumeros || [];
+    const vivos = new Set(notas.map(n => String(n.uid)));
+    Array.from(lista.children).forEach(filho => {
+        if (!vivos.has(filho.dataset.uid)) filho.remove();
+    });
     notas.forEach((n, i) => {
-        let cartao = document.getElementById('cartaoNota' + n.ordem);
-        if (!cartao) {
-            cartao = criarCartaoNota(n.ordem, (state.notasImagens || [])[i], notas.length);
-            lista.appendChild(cartao);
-        }
-        preencherCartaoNota(cartao, n);
+        let cartao = document.getElementById('cartaoNota' + n.uid);
+        if (cartao && cartao._imagem !== n.imagem) { cartao.remove(); cartao = null; }
+        if (!cartao) cartao = criarCartaoNota(n);
+        if (lista.children[i] !== cartao) lista.insertBefore(cartao, lista.children[i] || null);
+        preencherCartaoNota(cartao, n, i + 1, notas.length);
     });
     const lendo = notas.filter(n => n.estado === 'pendente').length;
     const falta = notas.filter(n => !n.confirmado).length;
@@ -2246,13 +2574,54 @@ function atualizarRevisaoNumeros(msgErro) {
     if (elMotivo) {
         elMotivo.textContent = falta > 0 ? (falta === 1 ? 'Falta conferir 1 nota.' : 'Faltam conferir ' + falta + ' notas.') : 'Todas as notas conferidas.';
     }
+    const elAguarde = document.getElementById('revisaoAguarde');
+    if (elAguarde) {
+        // aviso NEUTRO do 409 (nao e erro): texto fixo, so enquanto o aviso valer
+        elAguarde.textContent = avisoOcrEmAndamento ? MSG_OCR_EM_ANDAMENTO : '';
+        elAguarde.style.display = avisoOcrEmAndamento ? '' : 'none';
+    }
+    const textoErro = msgErro || mensagemNotasDestacadas();
     const elErro = document.getElementById('revisaoErro');
     if (elErro) {
-        elErro.textContent = msgErro || '';
-        elErro.style.display = msgErro ? '' : 'none';
+        elErro.textContent = textoErro;
+        elErro.style.display = textoErro ? '' : 'none';
+    }
+    const btnAdicionar = document.getElementById('btnAdicionarNota');
+    if (btnAdicionar) {
+        btnAdicionar.style.display = notas.length > 0 && notas.length < NOTAS_LIMITE ? '' : 'none';
+        btnAdicionar.disabled = !!state.excluindoNota || !!state.finalizandoDigitalizacao;
     }
     const btn = document.getElementById('btnContinuarRevisao');
-    if (btn) btn.disabled = falta > 0 || notas.length === 0 || !!state.finalizandoDigitalizacao;
+    if (btn) btn.disabled = falta > 0 || notas.length === 0 || !!state.finalizandoDigitalizacao || !!state.excluindoNota;
+}
+
+// "Adicionar outra nota": volta a captura SEM tocar no estado das notas (ir() so
+// para a camera, troca a tela e a reabre; nao chama iniciarRecebimento nem
+// novoAtendimento). Some com 5 notas (ver atualizarRevisaoNumeros).
+function adicionarOutraNota() {
+    if (numeroModalAberta || state.excluindoNota || state.finalizandoDigitalizacao) return;
+    if ((state.notasNumeros || []).length >= NOTAS_LIMITE) return;
+    avisoCapturaVazia = false;
+    ir('rec_digitaliza');
+}
+
+// Faixa curta "Nota N excluida." dentro da revisao (role=status), some sozinha.
+let faixaExclusaoTimer = null;
+function limparFaixaExclusaoNota() {
+    clearTimeout(faixaExclusaoTimer);
+    faixaExclusaoTimer = null;
+}
+function mostrarFaixaExclusaoNota(posicao) {
+    limparFaixaExclusaoNota();
+    const faixa = document.getElementById('revisaoFaixa');
+    if (!faixa) return;
+    faixa.textContent = 'Nota ' + posicao + ' excluída.';
+    faixa.style.display = '';
+    faixaExclusaoTimer = setTimeout(() => {
+        faixaExclusaoTimer = null;
+        const el = document.getElementById('revisaoFaixa');
+        if (el) { el.textContent = ''; el.style.display = 'none'; }
+    }, 5000);
 }
 
 // -------------------- scanner Netum SD-2000 (dispositivo de video USB) --------------------
@@ -2288,7 +2657,7 @@ function mostrarStatusScanner(msg, isErro) {
     if (!el) return;
     el.textContent = msg;
     el.classList.toggle('erro', !!isErro);
-    el.classList.toggle('ok', !isErro && (msg === 'Scanner pronto' || msg === 'Documento salvo' || msg === 'Cliente identificado'));
+    el.classList.toggle('ok', !isErro && (msg === 'Scanner pronto' || msg === 'Documento salvo'));
 }
 
 // CSS aspect-ratio nao e respeitado de forma confiavel dentro do container
@@ -2366,7 +2735,7 @@ function atualizarBotaoCaptura() {
     if (!btn) return;
     const video = document.getElementById('videoScanner');
     const prontoVideo = !!video && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
-    btn.disabled = !prontoVideo || !scannerVideoPronto || state.notaOrdem >= 5;
+    btn.disabled = !prontoVideo || !scannerVideoPronto || (state.notasNumeros || []).length >= NOTAS_LIMITE;
 }
 
 async function iniciarCameraScanner() {
@@ -2710,7 +3079,7 @@ function capturarPreviaNota() {
         mostrarStatusScanner('Aguarde o vídeo carregar.', true);
         return;
     }
-    if (state.notaOrdem >= 5) return;
+    if ((state.notasNumeros || []).length >= NOTAS_LIMITE) return;
     medirSeqPrevia = medirNovaSeq();
     marca('cap_click', medirSeqPrevia);
     mostrarStatusScanner('Capturando imagem...');
@@ -2768,30 +3137,71 @@ async function confirmarUsoImagemNota() {
     if (btnRefazer) btnRefazer.disabled = true;
     mostrarStatusScanner('Enviando documento...');
     const imagem = state.previewNotaAtual;
-    const ordem = state.notaOrdem + 1;
     const notaSeq = medirSeqPrevia; // nota_seq desta captura (numerico; 0 sem ?medir=1)
     marca('usar_click', notaSeq); // uma vez por captura: apos a guarda de duplo clique
     try {
+        // upload ambiguo anterior de OUTRA captura (resposta perdida): confere no
+        // servidor (listar) antes de gerar um uid novo, para nunca deixar nota orfa
+        if (uploadPendente && uploadPendente.imagem !== imagem) {
+            await resolverUploadPendente();
+            if (geracao !== atendimentoGeracao) return;
+            atualizarIndicadorNumerosNota();
+            if (state.notasNumeros.length >= NOTAS_LIMITE) {
+                // a nota do envio anterior ocupou a ultima vaga: nao envia esta
+                state.previewNotaAtual = null;
+                voltarParaVideoAoVivo();
+                const btnCap = document.getElementById('btnCapturarNota');
+                if (btnCap) btnCap.disabled = true;
+                const contadorCheio = document.getElementById('contadorNotas');
+                if (contadorCheio) contadorCheio.textContent = state.notasNumeros.length;
+                mostrarStatusScanner('Limite de 5 notas atingido');
+                state.capturaNotaEmAndamento = false;
+                atualizarBotaoFinalizarDigitalizacao();
+                notificarFimDeTrabalhoNotas();
+                return;
+            }
+        }
+        // uid da nota no servidor: gerado ANTES do upload e mantido enquanto a MESMA
+        // captura for reenviada apos falha ambigua (retry nunca cria segunda nota)
+        if (!uploadPendente || uploadPendente.imagem !== imagem || uploadPendente.geracao !== geracao) {
+            uploadPendente = { clientUid: gerarClientUidNota(), imagem, geracao, idAtendimento: idAtendimentoCapturado };
+        }
+        const pend = uploadPendente;
         marca('upload_ini', notaSeq);
-        const resultado = await api('nota.php', 'processar', { id_atendimento: idAtendimentoCapturado, ordem, imagem, chave: null });
+        // a ordem NAO e enviada: o servidor aloca a primeira livre e devolve
+        // id_nota e ordem (a nota so entra na lista apos essa resposta)
+        const resultado = await api('nota.php', 'processar', { id_atendimento: idAtendimentoCapturado, imagem, chave: null, uid: pend.clientUid }, { timeoutMs: NOTA_UPLOAD_TIMEOUT_MS });
         marca('upload_fim', notaSeq);
         // cancelamento/novo atendimento durante o upload: descarta sem tocar no
         // estado do atendimento novo (o upload ja enviado segue o backend atual).
         if (geracao !== atendimentoGeracao) return;
-        if (resultado.cliente_identificado) state.clienteIdentificado = true;
-        state.notaOrdem = ordem;
-        state.notasImagens.push(imagem);
-        // estado do numero: 'pendente' (OCR nao terminou) | 'sugerido' | 'sem_sugestao' | 'confirmado'
-        state.notasNumeros.push({ ordem, numero: null, confirmado: false, origem: null, sugestao: null, estado: 'pendente', ocrConcluido: false, manualOverride: false });
+        // uid de resposta que nao case com o enviado: nao usa a resposta (nota alheia)
+        if (resultado && resultado.uid !== undefined && resultado.uid !== pend.clientUid) {
+            if (uploadPendente === pend) uploadPendente = null;
+            const divergente = new Error('uid divergente');
+            divergente.status = 400;
+            throw divergente;
+        }
+        // reaproveitada:true (retry apos resposta perdida) e sucesso: mesma nota, sem erro
+        if (uploadPendente === pend) uploadPendente = null;
+        // uid local criado so aqui, apos a guarda de geracao (nunca reutilizado no atendimento)
+        const nota = novaNotaLocal({
+            clientUid: pend.clientUid,
+            ordem: Number.isInteger(resultado.ordem) ? resultado.ordem : null,
+            idNota: Number.isInteger(resultado.id_nota) && resultado.id_nota > 0 ? resultado.id_nota : null,
+            imagem,
+        });
+        state.notasNumeros.push(nota);
+        avisoCapturaVazia = false;
         state.previewNotaAtual = null;
-        processarOcrNota(imagem, ordem, notaSeq); // passada unica: numero + candidatos de cliente
+        processarOcrNota(imagem, nota.uid, notaSeq); // passada unica: numero + candidatos de cliente
         const contador = document.getElementById('contadorNotas');
-        if (contador) contador.textContent = state.notaOrdem;
+        if (contador) contador.textContent = state.notasNumeros.length;
         atualizarIndicadorNumerosNota();
         mostrarStatusScanner('Documento salvo');
         voltarParaVideoAoVivo();
         marca('liberado', notaSeq);
-        if (state.notaOrdem >= 5) {
+        if (state.notasNumeros.length >= NOTAS_LIMITE) {
             const btn = document.getElementById('btnCapturarNota');
             if (btn) btn.disabled = true;
             mostrarStatusScanner('Limite de 5 notas atingido');
@@ -2799,11 +3209,17 @@ async function confirmarUsoImagemNota() {
     } catch (e) {
         marca('falha_upload', notaSeq);
         if (geracao !== atendimentoGeracao) return;
-        const msg = (e instanceof TypeError)
+        // 400 (limite de 5, ordem ou imagem): mensagem fixa; o estado das notas
+        // nao e alterado (a nota so entra na lista na resposta de sucesso)
+        // resposta recusada pelo servidor (4xx) = a nota NAO foi criada: o uid pendente
+        // e descartado (a proxima tentativa gera outro). Sem status (rede, timeout,
+        // resposta ilegivel) ou 5xx = resultado AMBIGUO: o uid pendente e mantido e o
+        // "Usar imagem" seguinte reenvia a MESMA captura com o MESMO uid (idempotente).
+        if (uploadPendente && Number.isInteger(e.status) && e.status >= 400 && e.status < 500) uploadPendente = null;
+        const msg = (e instanceof TypeError || !Number.isInteger(e.status))
             ? 'Erro ao enviar o documento. Verifique a conexão e tente novamente.'
-            : (e.message || 'Erro ao salvar o documento.');
-        mostrarStatusScanner(msg, true);
-        mostrarErroTela(msg);
+            : (e.status === 400 ? 'Não foi possível salvar esta nota. Toque em Refazer e tente de novo.' : (e.message || 'Erro ao salvar o documento.'));
+        mostrarStatusScanner(msg, true); // erro de upload so em #scannerStatus (sem toast duplicado)
         if (btnUsar) btnUsar.disabled = false;
         if (btnRefazer) btnRefazer.disabled = false;
     }
@@ -2813,40 +3229,135 @@ async function confirmarUsoImagemNota() {
 }
 
 // "Finalizar digitalizacao" (tela de captura): nao valida mais numero nenhum —
-// abre a tela unica de revisao (rec_revisao_numeros). Sem retorno a captura.
-function finalizarDigitalizacao() {
+// abre a tela unica de revisao (rec_revisao_numeros).
+async function finalizarDigitalizacao() {
     if (state.finalizandoDigitalizacao || state.capturaNotaEmAndamento) return;
     if ((state.notasNumeros || []).length === 0) return;
+    if (uploadPendente) {
+        // upload ambiguo nao resolvido: confere no servidor antes de abrir a revisao
+        // (nota que o servidor tem e o front nao conhece entra na lista). Falha de
+        // listar nao bloqueia: a reconciliacao se repete no 422/409.
+        const geracao = atendimentoGeracao;
+        state.finalizandoDigitalizacao = true;
+        atualizarBotaoFinalizarDigitalizacao();
+        try { await resolverUploadPendente(); } finally {
+            if (geracao === atendimentoGeracao) state.finalizandoDigitalizacao = false;
+        }
+        if (geracao !== atendimentoGeracao) return;
+    }
     ir('rec_revisao_numeros');
+}
+
+// Valida dados.ordens_pendentes do 422: array de inteiros de 1 a 5 (qualquer outra
+// coisa e ignorada). Devolve array (possivelmente vazio) de ordens unicas.
+function ordensPendentesValidas(dados) {
+    return ordensValidasDe(dados, 'ordens_pendentes');
+}
+// Mesmo formato para dados.ordens_em_processamento (409 OCR_EM_ANDAMENTO).
+function ordensValidasDe(dados, chave) {
+    const bruto = dados && dados[chave];
+    if (!Array.isArray(bruto)) return [];
+    const ordens = [];
+    bruto.forEach(o => {
+        if (Number.isInteger(o) && o >= 1 && o <= NOTAS_LIMITE && !ordens.includes(o)) ordens.push(o);
+    });
+    return ordens;
+}
+
+// 422 NOTAS_SEM_NUMERO: marca como pendentes (destaque) as notas locais cuja ordem
+// o servidor apontou, permanece na revisao e rola ate a primeira. A mensagem e
+// SEMPRE o texto fixo de mensagemNotasDestacadas() (nunca texto do backend).
+// Retorna true se alguma nota local foi destacada.
+function tratarNotasSemNumero(dados) {
+    const ordens = ordensPendentesValidas(dados);
+    if (ordens.length === 0) return false;
+    let algum = false;
+    state.notasNumeros.forEach(n => {
+        if (n.ordem !== null && ordens.includes(n.ordem)) {
+            n.confirmado = false;
+            n.numero = null;
+            n.origem = null;
+            n.destaque = true;
+            // sem override residual: o estado e reconstruido so a partir do ultimo
+            // resultado do OCR (sugestaoOcr/ocrConcluido), nunca fica em Lendo...
+            n.manualOverride = false;
+            recalcularEstadoOcrNota(n);
+            algum = true;
+        } else if (!n.confirmado && n.manualOverride && n.uid !== numeroModalOverrideUid) {
+            // nenhuma outra nota nao confirmada pode ficar com override orfao
+            // (nenhum modal aberto o mantem: a revisao esta sob o Continuar)
+            n.manualOverride = false;
+            recalcularEstadoOcrNota(n);
+        }
+    });
+    if (!algum) return false;
+    atualizarRevisaoNumeros();
+    const primeira = state.notasNumeros.find(n => n.destaque && !n.confirmado);
+    const cartao = primeira ? document.getElementById('cartaoNota' + primeira.uid) : null;
+    if (cartao && typeof cartao.scrollIntoView === 'function') cartao.scrollIntoView({ block: 'center' });
+    return true;
 }
 
 // "Continuar" da revisao: caminho ja existente de finalizar a digitalizacao
 // (concluir-digitalizacao + avanco de etapa). So com TODAS as notas confirmadas.
 async function concluirDigitalizacaoRevisao() {
-    if (state.finalizandoDigitalizacao) return;
+    if (state.finalizandoDigitalizacao || state.excluindoNota) return;
     if ((state.notasNumeros || []).length === 0 || (state.notasNumeros || []).some(n => !n.confirmado)) return;
     state.finalizandoDigitalizacao = true;
     const geracao = atendimentoGeracao;
     const idAtendimentoCapturado = state.idAtendimento;
+    limparAvisoOcrEmAndamento(); // nova tentativa do motorista: some o aviso do 409 anterior
     atualizarRevisaoNumeros();
     try {
         const dados = await api('atendimento.php', 'concluir-digitalizacao', { id_atendimento: idAtendimentoCapturado });
         if (geracao !== atendimentoGeracao) return; // cancelado durante a chamada
-        // o backend responde com o literal 'rec_cnh' (etapa unica) quando o
-        // cliente ja foi identificado automaticamente via nota — traduz para
-        // a sub-tela client-side de escolha do modo (mesmo padrao ja usado
-        // por avancarDados() com 'exp_cnh'->'exp_cnh_modo' na Expedicao,
-        // demanda suporte-cnh-digital, 2026-09-27); o outro valor possivel
-        // aqui e 'rec_cliente', repassado direto.
         state.finalizandoDigitalizacao = false;
-        ir(dados.proxima_tela === 'rec_cnh' ? 'rec_cnh_modo' : dados.proxima_tela);
+        digitalizacaoConcluida = true;
+        // O backend decide: 'rec_cnh' (etapa unica; o front traduz para a sub-tela
+        // client-side de escolha do modo, mesmo padrao de avancarDados() com
+        // 'exp_cnh'->'exp_cnh_modo', demanda suporte-cnh-digital) ou 'rec_cliente'
+        // (confirmacao manual). Valor ausente/desconhecido = confirmacao manual
+        // (nunca pula o cliente por engano).
+        ir(dados.proxima_tela === 'rec_cnh' ? 'rec_cnh_modo' : 'rec_cliente');
     } catch (e) {
         if (geracao !== atendimentoGeracao) return;
+        const ehNotasSemNumero = e.status === 422 && e.codigo === 'NOTAS_SEM_NUMERO';
+        // 409 OCR_EM_ANDAMENTO e da acao concluir-digitalizacao (o 409 antigo
+        // NUMERO_NOTA_DUPLICADO e do definir-numero, outra rota, tratado em
+        // mensagemErroSalvarNumero). Qualquer outro 409 cai no erro generico abaixo.
+        const ehOcrEmAndamento = e.status === 409 && e.codigo === 'OCR_EM_ANDAMENTO';
+        if (ehNotasSemNumero || ehOcrEmAndamento) {
+            // o servidor pode ter nota que o front nao conhece (resposta do processar
+            // perdida): reconcilia via listar ANTES de mapear ordens e liberar o botao
+            await reconciliarNotasComServidor();
+            if (geracao !== atendimentoGeracao) return;
+            state.finalizandoDigitalizacao = false;
+            if (ehNotasSemNumero && tratarNotasSemNumero(e.dados)) return;
+            if (ehOcrEmAndamento) { tratarOcrEmAndamento(e.dados); return; }
+            atualizarRevisaoNumeros('Não foi possível continuar. Tente novamente.');
+            return;
+        }
         state.finalizandoDigitalizacao = false;
-        const msg = 'Não foi possível continuar. Tente novamente.';
-        mostrarErroTela(msg);
-        atualizarRevisaoNumeros(msg);
+        atualizarRevisaoNumeros('Não foi possível continuar. Tente novamente.'); // inline em #revisaoErro
     }
+}
+
+// 409 OCR_EM_ANDAMENTO: o servidor ainda le o cliente de alguma nota. A revisao
+// continua aberta, a etapa NAO avanca, o botao Continuar volta a valer (so por
+// toque do motorista: nenhum retry automatico) e as notas apontadas ganham um
+// destaque NEUTRO (azul, nunca vermelho). Passados 120 s do upload da nota o
+// servidor para de bloquear, entao o motorista nunca fica preso. Mensagem fixa,
+// nunca o texto do backend; nada de dados do 409 e logado ou medido.
+const MSG_OCR_EM_ANDAMENTO = 'A leitura das notas ainda está sendo concluída. Aguarde alguns segundos e toque em Continuar novamente.';
+function tratarOcrEmAndamento(dados) {
+    const ordens = ordensValidasDe(dados, 'ordens_em_processamento');
+    avisoOcrEmAndamento = true;
+    state.notasNumeros.forEach(n => { n.aguardando = n.ordem !== null && ordens.includes(n.ordem); });
+    atualizarRevisaoNumeros();
+}
+function limparAvisoOcrEmAndamento() {
+    avisoOcrEmAndamento = false;
+    (state.notasNumeros || []).forEach(n => { n.aguardando = false; });
 }
 
 // -------------------- recebimento: identificacao de cliente via OCR local (Tesseract.js) --------------------
@@ -2856,12 +3367,12 @@ async function concluirDigitalizacaoRevisao() {
 // que Tesseract.createWorker() faz: cria um Worker dedicado, via blob URL,
 // para rodar o reconhecimento fora da thread principal). Isso resultava num
 // Worker aninhado (Worker dentro de Worker): o worker interno do
-// Tesseract.js tentava importScripts('tesseract/worker.min.js') com caminho
+// Tesseract.js tentava importScripts() do worker com caminho
 // relativo, que nao resolve a partir do contexto de um blob worker aninhado
 // (WorkerGlobalScope de um worker criado dinamicamente via blob nao tem a
 // mesma base URL de assets/ocr-worker.js) — confirmado em teste fisico real
 // (SyntaxError: Failed to execute 'importScripts' ... URL
-// 'tesseract/worker.min.js' is invalid), quebrando 100% do OCR em producao.
+// '...worker.min.js' is invalid), quebrando 100% do OCR em producao.
 // Correcao: Tesseract.createWorker() agora e chamado DIRETAMENTE na thread
 // principal (aqui), com os caminhos relativos resolvendo normalmente a
 // partir da propria pagina (public/totem/index.php). Isso nao bloqueia a UI/
@@ -2872,9 +3383,8 @@ async function concluirDigitalizacaoRevisao() {
 // (regex), rapida, sem necessidade de Worker nenhum. A imagem nunca sai do
 // totem/navegador — so os candidatos textuais extraidos (CNPJ/razao social)
 // sao enviados ao backend (nota.php?acao=identificar-cliente). Fila interna
-// processa as notas em ordem (nota por nota); assim que o backend confirma
-// IDENTIFICADA, a fila e esvaziada e nenhuma nota seguinte dispara OCR/
-// chamada de identificacao (early-stop por atendimento).
+// processa as notas em ordem (nota por nota); o OCR e a identificacao rodam
+// para TODA nota (sem early-stop; o backend decide o cliente do atendimento).
 //
 // AJUSTE (2026-09-04, diagnostico com imagem real): confirmado que a imagem
 // crua do video precisa de rotacao fixa de 270 graus para o OCR reconhecer
@@ -3084,7 +3594,7 @@ function extrairCandidatos(texto) {
 // plausivel (1 a 9 digitos, apos remover pontuacao) perto de um desses
 // rotulos, excluindo explicitamente comprimentos de CNPJ (14) e de chave de
 // acesso (44). Qualquer outro caso cai no preenchimento manual obrigatorio
-// (ver aplicarResultadoOcrNumero()/tocarCartaoNota(): a sugestao fica no estado da nota e o modal so abre por toque na revisao).
+// (ver aplicarResultadoOcrNumero()/tocarCartaoNota()).
 // AJUSTE (2026-09-28, diagnostico com 3 notas reais): o grupo numerico
 // tolerava espaco/tab interno (junto com o ponto), o que por vezes fazia o
 // regex atravessar, na MESMA linha, o numero da nota e um campo numerico
@@ -3148,10 +3658,13 @@ function atendimentoVigente(item) {
 // Grava o resultado do OCR de numero no estado da nota (sem abrir modal).
 // Ignora o resultado se a nota ja foi confirmada ou se o motorista digitou/abriu
 // o campo manual (manualOverride) — nunca troca o valor sob o dedo.
-function aplicarResultadoOcrNumero(ordem, sugestao) {
-    const entrada = (state.notasNumeros || []).find(n => n.ordem === ordem);
+function aplicarResultadoOcrNumero(uid, sugestao) {
+    const entrada = buscarNotaPorUid(uid);
     if (!entrada) return;
     entrada.ocrConcluido = true;
+    // ultimo resultado do OCR, guardado MESMO quando ignorado abaixo: o Voltar dos
+    // modais usa isso para recalcular o estado da nota (recalcularEstadoOcrNota).
+    entrada.sugestaoOcr = sugestao || null;
     if (entrada.manualOverride || entrada.confirmado) return;
     entrada.sugestao = sugestao || null;
     entrada.estado = entrada.sugestao ? 'sugerido' : 'sem_sugestao';
@@ -3161,26 +3674,26 @@ function aplicarResultadoOcrNumero(ordem, sugestao) {
 // OCR de PASSADA UNICA por nota: um unico worker.recognize() cujo texto alimenta
 // extrairNumeroNota (estado da nota, prioridade) e extrairCandidatos (cliente).
 // Enfileirado logo apos confirmarUsoImagemNota() salvar a imagem, sem await
-// (nao bloqueia a captura da proxima nota). O OCR roda para TODAS as notas (o
-// numero e necessario mesmo com o cliente ja identificado); o "early-stop" de
-// cliente pula so a chamada identificarClienteNota (ver finally abaixo).
+// (nao bloqueia a captura da proxima nota). O OCR roda para TODAS as notas e a
+// chamada identificarClienteNota tambem (uma por nota). O item da fila carrega o
+// uid da nota: o resultado e aplicado por uid (nota excluida = descartado).
 // Marcas ?medir=1: ocr_fila_num/ocr_ini_num/ocr_fim_num/falha_ocr_num/
 // res_aplic_num/res_descart_num descrevem a passada de OCR; ocr_ini_cli/
 // ocr_fim_cli cercam so a chamada de identificacao (ocr_cli_ms = tempo da
 // identificacao; fila_cli_ms fica sempre 'na'; eventos *_fila_cli, res_*_cli e
 // falha_ocr_cli nao sao mais emitidos).
-function processarOcrNota(imagem, ordem, medirSeq) {
+function processarOcrNota(imagem, uid, medirSeq) {
     marca('ocr_fila_num', medirSeq);
     // idAtendimento/geracao CAPTURADOS no enfileiramento (nunca lidos tarde)
-    ocrFila.push({ imagem, ordem, idAtendimento: state.idAtendimento, geracao: atendimentoGeracao, medirSeq });
+    ocrFila.push({ imagem, uid, idAtendimento: state.idAtendimento, geracao: atendimentoGeracao, medirSeq });
     processarProximaOcrDaFila();
 }
 
 // Processa a fila nota por nota (sem reconhecimentos em paralelo). Mesmo em caso
 // de erro real de OCR (imagem ilegivel, modelo de idioma, worker indisponivel)
-// a nota vai a sem_sugestao e, se o cliente ainda nao foi identificado, chama
-// identificarClienteNota com candidatos vazios, para a nota sempre sair de
-// PENDENTE (o backend trata candidatos vazios como NAO_IDENTIFICADA, sem erro).
+// a nota vai a sem_sugestao e chama identificarClienteNota com candidatos vazios,
+// para a nota sempre sair de PENDENTE (o backend trata candidatos vazios como
+// NAO_IDENTIFICADA, sem erro).
 async function processarProximaOcrDaFila() {
     if (ocrProcessando) return;
     const proxima = ocrFila.shift();
@@ -3190,62 +3703,109 @@ async function processarProximaOcrDaFila() {
     let cnpjsCandidatos = [];
     let razaoSocialCandidata = null;
     try {
-        const workerPromise = iniciarOcrWorker();
-        if (!workerPromise) throw new Error('Tesseract.js indisponivel');
-        const worker = await workerPromise;
-        // proxima.imagem ja nasce rotacionada 270 graus (em pe) em
-        // capturarFotoScannerNota() — nao rotaciona de novo aqui.
-        const resultado = await executarReconhecimentoSerializado(() => {
-            marca('ocr_ini_num', proxima.medirSeq);
-            return worker.recognize(proxima.imagem);
-        });
-        marca('ocr_fim_num', proxima.medirSeq);
-        const texto = (resultado && resultado.data && resultado.data.text) || '';
-        const extraido = extrairNumeroNota(texto);
-        numeroSugerido = extraido.confiancaAlta ? extraido.numero : null;
-        const candidatos = extrairCandidatos(texto);
-        cnpjsCandidatos = candidatos.cnpjsCandidatos;
-        razaoSocialCandidata = candidatos.razaoSocialCandidata;
-    } catch (e) {
-        marca('falha_ocr_num', proxima.medirSeq);
-        console.warn('[OCR] falha ao processar nota via Tesseract.js', e);
-        numeroSugerido = null;
-        cnpjsCandidatos = [];
-        razaoSocialCandidata = null;
+        // Cada etapa tem try PROPRIO: a falha de uma nunca apaga o resultado da
+        // outra (numero e candidatos de cliente sao independentes).
+        let texto = '';
+        try {
+            const workerPromise = iniciarOcrWorker();
+            if (!workerPromise) throw new Error('Tesseract.js indisponivel');
+            const worker = await workerPromise;
+            // proxima.imagem ja nasce rotacionada 270 graus (em pe) em
+            // capturarFotoScannerNota() — nao rotaciona de novo aqui.
+            const resultado = await executarReconhecimentoSerializado(() => {
+                marca('ocr_ini_num', proxima.medirSeq);
+                return worker.recognize(proxima.imagem);
+            });
+            marca('ocr_fim_num', proxima.medirSeq);
+            texto = (resultado && resultado.data && resultado.data.text) || '';
+        } catch (e) {
+            marca('falha_ocr_num', proxima.medirSeq);
+            logFalhaOcr('reconhecimento', e);
+            texto = '';
+        }
+        try {
+            const extraido = extrairNumeroNota(texto);
+            numeroSugerido = extraido.confiancaAlta ? extraido.numero : null;
+        } catch (e) {
+            marca('falha_ocr_num', proxima.medirSeq);
+            logFalhaOcr('numero', e);
+            numeroSugerido = null;
+        }
+        try {
+            const candidatos = extrairCandidatos(texto);
+            cnpjsCandidatos = candidatos.cnpjsCandidatos;
+            razaoSocialCandidata = candidatos.razaoSocialCandidata;
+        } catch (e) {
+            marca('falha_ocr_num', proxima.medirSeq);
+            logFalhaOcr('candidatos', e);
+            cnpjsCandidatos = [];
+            razaoSocialCandidata = null; // numero ja extraido fica PRESERVADO
+        }
     } finally {
         ocrProcessando = false;
-        // guard reavaliado DEPOIS do await do recognize (id e geracao capturados)
-        if (atendimentoVigente(proxima)) {
-            // 1) numero primeiro: estado da nota gravado antes de qualquer chamada de rede
-            aplicarResultadoOcrNumero(proxima.ordem, numeroSugerido);
-            marca('res_aplic_num', proxima.medirSeq);
-            // 2) cliente em segundo plano (sem await); so enquanto nao identificado
-            if (!state.clienteIdentificado) {
-                identificarClienteNota(proxima.ordem, cnpjsCandidatos, razaoSocialCandidata, proxima.idAtendimento, proxima.geracao, proxima.medirSeq);
-            }
-        } else {
-            marca('res_descart_num', proxima.medirSeq);
+        try {
+            concluirOcrDaNota(proxima, numeroSugerido, cnpjsCandidatos, razaoSocialCandidata);
+        } finally {
+            // sempre executados, qualquer que seja o destino da nota
+            processarProximaOcrDaFila();
+            notificarFimDeTrabalhoNotas();
         }
-        processarProximaOcrDaFila();
-        notificarFimDeTrabalhoNotas();
     }
+}
+
+// Destino do resultado da passada de OCR (chamada so do finally acima). Aplicar o
+// numero e disparar a identificacao de cliente tem try/catch SEPARADOS: falha de
+// um nao impede o outro. guard reavaliado DEPOIS do await do recognize (id e
+// geracao capturados no enfileiramento); nota ja excluida (uid inexistente) =
+// resultado descartado, nunca aplicado a outra nota.
+function concluirOcrDaNota(proxima, numeroSugerido, cnpjsCandidatos, razaoSocialCandidata) {
+    if (digitalizacaoConcluida || !atendimentoVigente(proxima) || !buscarNotaPorUid(proxima.uid)) {
+        marca('res_descart_num', proxima.medirSeq);
+        return;
+    }
+    // 1) numero primeiro: estado da nota gravado antes de qualquer chamada de rede
+    try {
+        aplicarResultadoOcrNumero(proxima.uid, numeroSugerido);
+        marca('res_aplic_num', proxima.medirSeq);
+    } catch (e) {
+        logFalhaOcr('aplicar', e);
+    }
+    // 2) cliente em segundo plano (sem await), para toda nota
+    try {
+        const identificacao = identificarClienteNota(proxima.uid, cnpjsCandidatos, razaoSocialCandidata, proxima.idAtendimento, proxima.geracao, proxima.medirSeq);
+        if (identificacao && typeof identificacao.catch === 'function') {
+            identificacao.catch(e => logFalhaOcr('identificar', e));
+        }
+    } catch (e) {
+        logFalhaOcr('identificar', e);
+    }
+}
+
+// Log tecnico do OCR SEM dado pessoal: so o nome da etapa e o NOME do erro
+// (nunca a mensagem, o objeto de erro ou o texto reconhecido da nota).
+function logFalhaOcr(etapa, e) {
+    const nome = (e && typeof e.name === 'string') ? e.name.slice(0, 40) : 'Erro';
+    console.warn('[OCR] falha em ' + etapa + ': ' + nome);
 }
 
 // -------------------- recebimento: confirmacao/preenchimento do numero da nota --------------------
 // Nunca mais de um modal aberto por vez — cada nota tem confirmacao rapida
 // (confianca alta) ou preenchimento manual obrigatorio (confianca baixa/ausente),
 // aberto por toque no cartao da tela de revisao. Preserva as notas ja
-// aprovadas: so mexe na entrada de state.notasNumeros correspondente a
-// "ordem", nunca nas demais.
-let numeroModalFila = [];
+// aprovadas: so mexe na entrada de state.notasNumeros correspondente ao "uid",
+// nunca nas demais. Todas as closures capturam o UID (identidade imutavel).
 let numeroModalAberta = false;
+// Uid da nota cujo manualOverride FOI LIGADO pela abertura do modal corrente
+// (tocarCartaoNota, nota ainda 'pendente'); null se a abertura nao ligou nada.
+// So o Voltar desfaz; confirmar mantem (a nota passa a 'confirmado').
+let numeroModalOverrideUid = null;
 
 // Confirmacao de cancelamento EMPILHADA sobre o modal de numero da nota
 // (achado bloqueante do /03-revisao, demanda talent-doctos-finalizacao-checkin).
 // O botao "Cancelar atendimento" DENTRO do modal obrigatorio de numero da nota
 // (abrirModalNumeroNotaManual) NUNCA deve chamar confirmarCancelar() direto,
 // pois essa funcao usa abrirModal(), que SOBRESCREVE o innerHTML do MESMO
-// #modalCaixa ja aberto — destruindo o numero ja digitado, a "ordem" pendente,
+// #modalCaixa ja aberto — destruindo o numero ja digitado, a nota pendente,
 // o teclado numerico dedicado e qual variante do modal (manual/sugestao)
 // estava em uso, alem de nunca restaurar nada se o motorista tocasse em
 // "Continuar atendimento" (numeroModalAberta ficava true para sempre, sem
@@ -3270,104 +3830,202 @@ function confirmarCancelarNotaModal() {
 }
 function fecharConfirmacaoCancelarNotaModal() {
     document.getElementById('modalConfirmCancelNotaFundo').classList.remove('aberto');
+    limparCaixaModal('modalConfirmCancelNotaCaixa');
 }
 
 // Modais de numero so abrem a partir da tela de revisao (rec_revisao_numeros),
 // por toque no cartao da nota — nunca durante a captura. numeroModalAberta
-// impede abrir dois ao mesmo tempo; numeroModalFila nao e mais populada (um
-// modal por toque), mas continua resetada em iniciarRecebimento/novoAtendimento.
-function tocarCartaoNota(ordem) {
-    if (numeroModalAberta || state.finalizandoDigitalizacao) return;
-    const entrada = (state.notasNumeros || []).find(n => n.ordem === ordem);
+// impede abrir dois ao mesmo tempo (um modal por toque). Tocar numa nota
+// destacada (422) remove o destaque dela.
+function tocarCartaoNota(uid) {
+    if (numeroModalAberta || state.finalizandoDigitalizacao || state.excluindoNota) return;
+    const entrada = buscarNotaPorUid(uid);
     if (!entrada) return;
+    if (entrada.destaque || entrada.aguardando) {
+        entrada.destaque = false;
+        if (entrada.aguardando) {
+            // destaque neutro do 409 sai ao abrir a nota; sem mais notas apontadas, some o aviso
+            entrada.aguardando = false;
+            if (!state.notasNumeros.some(n => n.aguardando)) avisoOcrEmAndamento = false;
+        }
+        atualizarRevisaoNumeros();
+    }
     numeroModalAberta = true;
     if (entrada.estado === 'confirmado') {
-        abrirModalNumeroNotaManual(ordem, entrada.numero, ''); // correcao de numero ja confirmado
+        abrirModalNumeroNotaManual(uid, entrada.numero, ''); // correcao de numero ja confirmado
     } else if (entrada.estado === 'sugerido' && entrada.sugestao) {
-        abrirModalNumeroNotaSugestao(ordem, entrada.sugestao);
+        abrirModalNumeroNotaSugestao(uid, entrada.sugestao);
     } else {
         // 'pendente' (OCR ainda lendo): digitacao manual passa a valer e o
-        // resultado tardio do OCR desta nota e ignorado.
-        if (entrada.estado === 'pendente') entrada.manualOverride = true;
-        abrirModalNumeroNotaManual(ordem, null, '');
+        // resultado tardio do OCR desta nota e ignorado — ate o motorista
+        // confirmar ou tocar em Voltar (que desfaz; ver voltarModalNumeroNota).
+        if (entrada.estado === 'pendente' && !entrada.manualOverride) {
+            entrada.manualOverride = true;
+            numeroModalOverrideUid = uid;
+        }
+        abrirModalNumeroNotaManual(uid, null, '');
     }
 }
 
 function fecharModalNumeroNotaAtual() {
     fecharModal();
     numeroModalAberta = false;
+    numeroModalOverrideUid = null;
     atualizarRevisaoNumeros();
+}
+
+// Recalcula o estado de uma nota NAO confirmada a partir do ultimo resultado do
+// OCR (sugestaoOcr), usando ocrConcluido para saber se o OCR ja terminou.
+function recalcularEstadoOcrNota(entrada) {
+    if (entrada.confirmado) return;
+    if (!entrada.ocrConcluido) {
+        entrada.sugestao = null;
+        entrada.estado = 'pendente';
+        return;
+    }
+    entrada.sugestao = entrada.sugestaoOcr || null;
+    entrada.estado = entrada.sugestao ? 'sugerido' : 'sem_sugestao';
+}
+
+// VOLTAR dos modais de numero (conferir e digitar): fecha SEM chamar api e SEM
+// alterar numero, confirmado nem origem; o valor digitado e descartado. Se a
+// abertura deste modal ligou o manualOverride (nota pendente), desfaz e recalcula
+// o estado a partir do ultimo OCR — senao o OCR tardio ficaria ignorado e o
+// cartao em Lendo... para sempre. Foco volta ao cartao da nota.
+function voltarModalNumeroNota(uid) {
+    if (!numeroModalAberta) return;
+    const entrada = buscarNotaPorUid(uid);
+    if (entrada && numeroModalOverrideUid === uid) {
+        entrada.manualOverride = false;
+        recalcularEstadoOcrNota(entrada);
+    }
+    fecharModalNumeroNotaAtual();
+    const cartao = document.getElementById('cartaoNota' + uid);
+    if (cartao) cartao.focus();
+}
+
+// Desabilita Voltar e Excluir nota enquanto um salvar esta em voo (o fechamento
+// pelo salvar nao pode atingir outro modal aberto depois).
+function definirSaidasModalNotaDesabilitadas(desabilitado) {
+    ['btnVoltarModalNota', 'btnExcluirNota'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.disabled = desabilitado;
+    });
 }
 
 function mensagemErroSalvarNumero(e) {
     if (e && e.status === 409) return 'Este número já foi usado em outra nota. Confira o número na nota e corrija.';
+    if (e && e.status === 404) return 'Não encontramos esta nota. Toque em Voltar e confira a lista.';
     if (e && e.status === 400 && e.message) return e.message; // numero invalido (mensagem do backend)
     return 'Não foi possível salvar. Toque para tentar de novo.';
 }
 
-// Topo dos modais de numero: identificacao "Nota N de M" + miniatura da nota
-// (state.notasImagens, em memoria; o src e atribuido por DOM, nunca gravado em storage).
-function cabecalhoModalNota(ordem) {
+// Topo dos modais de numero: identificacao "Nota N de M" (N = posicao na lista)
+// + miniatura da nota (nota.imagem, em memoria; o src e atribuido por DOM, nunca
+// gravado em storage).
+function cabecalhoModalNota(uid) {
     const total = (state.notasNumeros || []).length;
+    const nota = buscarNotaPorUid(uid);
+    // nota recuperada do servidor (sem foto em memoria): bloco de texto no lugar da miniatura
+    const mini = (nota && !nota.imagem)
+        ? '<div class="nota-modal-mini nota-modal-sem-foto" id="notaModalMini" role="img" aria-label="Foto indisponível">Foto indisponível</div>'
+        : '<img class="nota-modal-mini" id="notaModalMini" alt="">';
     return `<div class="nota-modal-topo">
-            <img class="nota-modal-mini" id="notaModalMini" alt="">
-            <div class="nota-modal-id">Nota ${escapeHtml(ordem)} de ${escapeHtml(total)}</div>
+            ${mini}
+            <div class="nota-modal-id">Nota ${escapeHtml(posicaoNotaPorUid(uid))} de ${escapeHtml(total)}</div>
         </div>`;
 }
-function preencherMiniaturaModalNota(ordem) {
+function preencherMiniaturaModalNota(uid) {
     const img = document.getElementById('notaModalMini');
-    if (!img) return;
-    const i = (state.notasNumeros || []).findIndex(n => n.ordem === ordem);
-    const src = i >= 0 ? (state.notasImagens || [])[i] : null;
-    if (src) img.src = src; else img.style.display = 'none';
-    img.alt = 'Foto da nota ' + ordem;
+    if (!img || img.tagName !== 'IMG') return;
+    const nota = buscarNotaPorUid(uid);
+    if (nota && nota.imagem) img.src = nota.imagem; else img.style.display = 'none';
+    img.alt = 'Foto da nota ' + posicaoNotaPorUid(uid);
 }
 
-function abrirModalNumeroNotaSugestao(ordem, sugestao) {
+// Excluir nota: SO dentro dos modais de numero (nunca no cartao). Separado do
+// Confirmar/teclado por um divisor e folga; o toque abre a confirmacao propria.
+function blocoExcluirModalNota(uid) {
+    return `<div class="nota-modal-divisor" role="separator"></div>
+        <button type="button" class="btn-excluir-nota" id="btnExcluirNota" aria-label="Excluir Nota ${escapeHtml(posicaoNotaPorUid(uid))}">Excluir nota</button>`;
+}
+// Secao propria do atendimento, separada do grupo da nota por linha e folga.
+function blocoCancelarAtendimentoModalNota() {
+    return `<div class="nota-modal-sep-atendimento" role="separator"></div>
+        <div class="nota-modal-rotulo-secao">Atendimento</div>
+        <button class="btn-saida-modal-nota" onclick="confirmarCancelarNotaModal()">✕ Cancelar atendimento</button>`;
+}
+function ligarExcluirModalNota(uid) {
+    const btn = document.getElementById('btnExcluirNota');
+    if (btn) btn.addEventListener('click', () => abrirConfirmacaoExcluirNota(uid));
+}
+
+function abrirModalNumeroNotaSugestao(uid, sugestao) {
     abrirModal(`
-        ${cabecalhoModalNota(ordem)}
+        ${cabecalhoModalNota(uid)}
         <div class="nota-modal-instrucao">O sistema leu este número. Confira na nota: está certo?</div>
         <div class="nota-modal-numero">${escapeHtml(sugestao)}</div>
         <div class="grupo-botoes">
             <button class="btn-primario" id="btnConfirmarNumeroSugerido">Confirmar</button>
             <button class="btn-fantasma" id="btnCorrigirNumeroSugerido">Corrigir</button>
+            <button type="button" class="btn-voltar-modal-nota" id="btnVoltarModalNota" aria-label="Voltar para a lista de notas">Voltar</button>
         </div>
-        <button class="btn-saida-modal-nota" onclick="confirmarCancelarNotaModal()">✕ Cancelar atendimento</button>
+        ${blocoExcluirModalNota(uid)}
+        ${blocoCancelarAtendimentoModalNota()}
     `);
-    preencherMiniaturaModalNota(ordem);
+    preencherMiniaturaModalNota(uid);
     const btnConfirmar = document.getElementById('btnConfirmarNumeroSugerido');
     const btnCorrigir = document.getElementById('btnCorrigirNumeroSugerido');
-    if (btnConfirmar) btnConfirmar.addEventListener('click', () => confirmarNumeroNotaSugerido(ordem, sugestao));
-    if (btnCorrigir) btnCorrigir.addEventListener('click', () => abrirModalNumeroNotaManual(ordem, sugestao, ''));
+    if (btnConfirmar) btnConfirmar.addEventListener('click', () => confirmarNumeroNotaSugerido(uid, sugestao));
+    if (btnCorrigir) btnCorrigir.addEventListener('click', () => abrirModalNumeroNotaManual(uid, sugestao, ''));
+    const btnVoltar = document.getElementById('btnVoltarModalNota');
+    if (btnVoltar) btnVoltar.addEventListener('click', () => voltarModalNumeroNota(uid));
+    ligarExcluirModalNota(uid);
 }
 
-async function confirmarNumeroNotaSugerido(ordem, sugestao) {
+// Fim de um salvar (definir-numero) cuja nota nao existe mais (excluida): ignora
+// com seguranca, sem confirmar nada, e fecha o modal.
+function encerrarSalvarDeNotaInexistente() {
+    fecharModalNumeroNotaAtual();
+}
+
+async function confirmarNumeroNotaSugerido(uid, sugestao) {
+    const nota = buscarNotaPorUid(uid);
+    if (!nota) { encerrarSalvarDeNotaInexistente(); return; }
     const geracao = atendimentoGeracao;
+    definirSaidasModalNotaDesabilitadas(true);
     try {
-        await salvarNumeroNota(ordem, sugestao, 'OCR');
+        await salvarNumeroNota(nota, sugestao, 'OCR');
         if (geracao !== atendimentoGeracao) return; // atendimento cancelado durante o salvar
-        marcarNumeroNotaConfirmado(ordem, sugestao);
+        if (!buscarNotaPorUid(uid)) { encerrarSalvarDeNotaInexistente(); return; }
+        marcarNumeroNotaConfirmado(uid, sugestao, 'OCR');
         fecharModalNumeroNotaAtual();
     } catch (e) {
         if (geracao !== atendimentoGeracao) return;
-        // NUMERO_NOTA_DUPLICADO (HTTP 409) ou erro de validacao — NUNCA fecha
-        // o modal nem descarta a imagem ja capturada; cai para o campo
-        // manual, com o erro exibido inline, mesma "ordem".
-        abrirModalNumeroNotaManual(ordem, sugestao, mensagemErroSalvarNumero(e));
+        if (!buscarNotaPorUid(uid)) { encerrarSalvarDeNotaInexistente(); return; }
+        // NUMERO_NOTA_DUPLICADO (HTTP 409), nota nao encontrada (404) ou erro de
+        // validacao — NUNCA fecha o modal nem descarta a imagem ja capturada; cai
+        // para o campo manual, com o erro exibido inline, mesma nota.
+        abrirModalNumeroNotaManual(uid, sugestao, mensagemErroSalvarNumero(e));
     }
 }
 
-function abrirModalNumeroNotaManual(ordem, valorInicial, mensagemErro) {
+function abrirModalNumeroNotaManual(uid, valorInicial, mensagemErro) {
     abrirModal(`
-        ${cabecalhoModalNota(ordem)}
+        ${cabecalhoModalNota(uid)}
         <div class="nota-modal-instrucao">Digite o número da nota (só os números).</div>
         <input class="campo-texto" id="inputNumeroNota" inputmode="numeric" readonly value="${escapeHtml(valorInicial || '')}" placeholder="Número da nota">
         <div class="status-scanner erro" id="numeroNotaErro" style="${mensagemErro ? '' : 'display:none'}">${escapeHtml(mensagemErro || '')}</div>
         <div class="teclado-numerico-nota" id="tecladoNumericoNota"></div>
-        <button class="btn-saida-modal-nota" onclick="confirmarCancelarNotaModal()">✕ Cancelar atendimento</button>
+        <button type="button" class="btn-voltar-modal-nota btn-voltar-modal-nota-larga" id="btnVoltarModalNota" aria-label="Voltar para a lista de notas">Voltar</button>
+        ${blocoExcluirModalNota(uid)}
+        ${blocoCancelarAtendimentoModalNota()}
     `);
-    preencherMiniaturaModalNota(ordem);
-    montarTecladoNumericoNota(ordem);
+    preencherMiniaturaModalNota(uid);
+    montarTecladoNumericoNota(uid);
+    const btnVoltar = document.getElementById('btnVoltarModalNota');
+    if (btnVoltar) btnVoltar.addEventListener('click', () => voltarModalNumeroNota(uid));
+    ligarExcluirModalNota(uid);
 }
 
 // Teclado numerico DEDICADO ao modal de numero da nota fiscal — NAO reaproveita
@@ -3376,7 +4034,7 @@ function abrirModalNumeroNotaManual(ordem, valorInicial, mensagemErro) {
 // (~64px) para uso com dedo/luva. O botao "Confirmar" aciona exatamente o
 // mesmo fluxo ja existente de salvar (salvarNumeroNotaManual -> nota.php?
 // acao=definir-numero), sem reimplementar validacao alguma.
-function montarTecladoNumericoNota(ordem) {
+function montarTecladoNumericoNota(uid) {
     const container = document.getElementById('tecladoNumericoNota');
     if (!container) return;
     container.innerHTML = `
@@ -3396,7 +4054,7 @@ function montarTecladoNumericoNota(ordem) {
     const btnApagar = document.getElementById('btnApagarNumeroNota');
     const btnConfirmar = document.getElementById('btnSalvarNumeroNota');
     if (btnApagar) btnApagar.addEventListener('click', apagarNumeroNota);
-    if (btnConfirmar) btnConfirmar.addEventListener('click', () => salvarNumeroNotaManual(ordem));
+    if (btnConfirmar) btnConfirmar.addEventListener('click', () => salvarNumeroNotaManual(uid));
     atualizarBotaoNumeroNota();
 }
 
@@ -3420,48 +4078,180 @@ function apagarNumeroNota() {
     atualizarBotaoNumeroNota();
 }
 
-async function salvarNumeroNotaManual(ordem) {
+async function salvarNumeroNotaManual(uid) {
     const input = document.getElementById('inputNumeroNota');
     const erroEl = document.getElementById('numeroNotaErro');
     const btn = document.getElementById('btnSalvarNumeroNota');
     const valor = (input && input.value || '').trim();
     if (!valor) return; // botao ja fica desabilitado nesse caso — validacao defensiva
+    const nota = buscarNotaPorUid(uid);
+    if (!nota) { encerrarSalvarDeNotaInexistente(); return; }
     if (btn) btn.disabled = true;
+    definirSaidasModalNotaDesabilitadas(true);
     const geracao = atendimentoGeracao;
     try {
-        await salvarNumeroNota(ordem, valor, 'MANUAL');
+        await salvarNumeroNota(nota, valor, 'MANUAL');
         if (geracao !== atendimentoGeracao) return; // atendimento cancelado durante o salvar
-        marcarNumeroNotaConfirmado(ordem, valor);
+        if (!buscarNotaPorUid(uid)) { encerrarSalvarDeNotaInexistente(); return; }
+        marcarNumeroNotaConfirmado(uid, valor, 'MANUAL');
         fecharModalNumeroNotaAtual();
     } catch (e) {
         if (geracao !== atendimentoGeracao) return;
+        if (!buscarNotaPorUid(uid)) { encerrarSalvarDeNotaInexistente(); return; }
         // erro INLINE, sem fechar o modal, mantendo o foco no campo (item do
         // escopo: nunca perde a imagem ja capturada nem fecha o modal aqui)
         const msg = mensagemErroSalvarNumero(e);
         if (erroEl) { erroEl.textContent = msg; erroEl.style.display = 'block'; }
         if (btn) btn.disabled = false;
+        definirSaidasModalNotaDesabilitadas(false);
     }
 }
 
-function salvarNumeroNota(ordem, numero, origem) {
+function salvarNumeroNota(nota, numero, origem) {
     // normalizacao final (zero a esquerda, so digitos) e SEMPRE do backend
-    // (nota.php?acao=definir-numero) — o front so garante nao-vazio.
-    return api('nota.php', 'definir-numero', {
+    // (nota.php?acao=definir-numero) — o front so garante nao-vazio. A nota vai
+    // por id_nota (nunca junto com a ordem).
+    const ident = identificadorNotaApi(nota);
+    if (!ident) return Promise.reject(new Error('nota sem identificador'));
+    return api('nota.php', 'definir-numero', Object.assign({
         id_atendimento: state.idAtendimento,
-        ordem,
         numero,
         origem,
-    });
+    }, ident));
 }
 
-function marcarNumeroNotaConfirmado(ordem, numero) {
-    const entrada = (state.notasNumeros || []).find(n => n.ordem === ordem);
+function marcarNumeroNotaConfirmado(uid, numero, origem) {
+    const entrada = buscarNotaPorUid(uid);
     if (entrada) {
         entrada.numero = numero;
         entrada.confirmado = true;
         entrada.estado = 'confirmado';
+        entrada.origem = origem || entrada.origem;
+        entrada.destaque = false;
     }
     atualizarRevisaoNumeros();
+}
+
+// -------------------- recebimento: excluir nota --------------------
+// Confirmacao em overlay PROPRIO (#modalConfirmExcluirNotaFundo/Caixa, z-index 56:
+// acima do modal do numero, abaixo do aviso de inatividade). Nao usa abrirModal(),
+// entao o modal do numero permanece intacto por baixo. Toque fora e Esc nao fazem
+// nada (nao ha listener no fundo nem de teclado).
+const EXCLUIR_NOTA_MSG_ERRO = 'Não foi possível excluir. Tente de novo.';
+
+function abrirConfirmacaoExcluirNota(uid) {
+    if (state.excluindoNota) return;
+    const nota = buscarNotaPorUid(uid);
+    if (!nota) return;
+    const caixa = document.getElementById('modalConfirmExcluirNotaCaixa');
+    const fundo = document.getElementById('modalConfirmExcluirNotaFundo');
+    if (!caixa || !fundo) return;
+    caixa.innerHTML = `
+        <div class="titulo excluir-nota-titulo">Excluir a Nota ${escapeHtml(posicaoNotaPorUid(uid))} de ${escapeHtml((state.notasNumeros || []).length)}?</div>
+        <div class="subtitulo excluir-nota-texto">A foto será apagada. Você precisará capturar de novo.</div>
+        <div class="status-scanner erro excluir-nota-erro" id="excluirNotaErro" role="alert" style="display:none"></div>
+        <button type="button" class="btn-excluir-nao" id="btnExcluirNaoVoltar">Não, voltar</button>
+        <button type="button" class="btn-excluir-sim" id="btnExcluirSim">Sim, excluir</button>
+    `;
+    const btnNao = document.getElementById('btnExcluirNaoVoltar');
+    const btnSim = document.getElementById('btnExcluirSim');
+    if (btnNao) btnNao.addEventListener('click', () => {
+        if (state.excluindoNota) return;
+        fecharConfirmacaoExcluirNota();
+        const btnExcluir = document.getElementById('btnExcluirNota');
+        if (btnExcluir) btnExcluir.focus();
+    });
+    if (btnSim) btnSim.addEventListener('click', () => executarExclusaoNota(uid));
+    fundo.classList.add('aberto');
+    if (btnNao) btnNao.focus();
+}
+
+function fecharConfirmacaoExcluirNota() {
+    const fundo = document.getElementById('modalConfirmExcluirNotaFundo');
+    if (fundo) fundo.classList.remove('aberto');
+    limparCaixaModal('modalConfirmExcluirNotaCaixa'); // sem HTML nem handlers da nota anterior
+}
+
+function mostrarErroExclusaoNota(msg) {
+    const el = document.getElementById('excluirNotaErro');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+}
+
+function definirBotoesExclusaoHabilitados(habilitados) {
+    const btnNao = document.getElementById('btnExcluirNaoVoltar');
+    const btnSim = document.getElementById('btnExcluirSim');
+    if (btnNao) btnNao.disabled = !habilitados;
+    if (btnSim) {
+        btnSim.disabled = !habilitados;
+        btnSim.textContent = habilitados ? 'Sim, excluir' : 'Excluindo...';
+    }
+}
+
+// Sequencia: (1) uid existe e nao ha excluindoNota/finalizando/captura;
+// (2) id_nota presente; (3) TRAVA na mesma tick; (4) await excluir com id e
+// geracao capturados; (5) reavalia o guard; (6) SO ENTAO remove do estado.
+async function executarExclusaoNota(uid) {
+    if (state.excluindoNota) return; // segundo clique = no-op
+    const nota = buscarNotaPorUid(uid);
+    if (!nota) { fecharConfirmacaoExcluirNota(); return; }
+    if (state.finalizandoDigitalizacao || state.capturaNotaEmAndamento) return;
+    const idNota = nota.idNota;
+    if (!Number.isInteger(idNota) || idNota <= 0) {
+        mostrarErroExclusaoNota('Não foi possível excluir esta nota agora. Aguarde um instante e tente de novo.');
+        return;
+    }
+    state.excluindoNota = true;
+    definirBotoesExclusaoHabilitados(false);
+    mostrarErroExclusaoNota('');
+    atualizarRevisaoNumeros();
+    const geracao = atendimentoGeracao;
+    const idAtendimentoCapturado = state.idAtendimento;
+    try {
+        const dados = await api('nota.php', 'excluir', { id_atendimento: idAtendimentoCapturado, id_nota: idNota });
+        if (geracao !== atendimentoGeracao) return; // cancelado durante a chamada: estado ja foi reiniciado
+        if (!dados || (dados.excluida !== true && dados.ja_excluida !== true)) throw new Error('resposta invalida');
+        concluirExclusaoNota(uid, dados);
+    } catch (e) {
+        if (geracao !== atendimentoGeracao) return;
+        // erro de rede, 404, 500 ou 503: a nota PERMANECE
+        state.excluindoNota = false;
+        definirBotoesExclusaoHabilitados(true);
+        mostrarErroExclusaoNota(EXCLUIR_NOTA_MSG_ERRO);
+        atualizarRevisaoNumeros();
+    }
+}
+
+// Aplica a exclusao confirmada pelo backend (excluida ou ja_excluida): remove a
+// nota por uid, purga a ocrFila, fecha os modais e atualiza a revisao.
+function concluirExclusaoNota(uid, dados) {
+    const posicao = posicaoNotaPorUid(uid);
+    if (posicao > 0) {
+        const removida = state.notasNumeros[posicao - 1];
+        if (removida && Number.isInteger(removida.idNota)) idNotasExcluidas.add(removida.idNota);
+        state.notasNumeros.splice(posicao - 1, 1);
+        if (avisoOcrEmAndamento && !state.notasNumeros.some(n => n.aguardando) && removida && removida.aguardando) avisoOcrEmAndamento = false;
+    }
+    ocrFila = ocrFila.filter(item => item.uid !== uid);
+    // resultado de OCR em execucao e identificacoes em voo desta nota sao
+    // descartados pelo guard por uid (buscarNotaPorUid) ao terminarem
+    state.excluindoNota = false;
+    fecharConfirmacaoExcluirNota();
+    numeroModalAberta = false;
+    numeroModalOverrideUid = null;
+    fecharModal();
+    if (state.notasNumeros.length === 0) {
+        avisoCapturaVazia = true;
+        ir('rec_digitaliza'); // sem notas: volta sozinho a captura (contador 0, Finalizar desabilitado)
+        notificarFimDeTrabalhoNotas();
+        return;
+    }
+    atualizarRevisaoNumeros();
+    if (posicao > 0) mostrarFaixaExclusaoNota(posicao);
+    const primeiro = document.querySelector('#revisaoLista .rev-cartao');
+    if (primeiro) primeiro.focus();
+    notificarFimDeTrabalhoNotas();
 }
 
 // Cria (uma unica vez) e reaproveita o worker interno do Tesseract.js —
@@ -3475,55 +4265,58 @@ function iniciarOcrWorker() {
             // oem=1 (LSTM_ONLY) — coerente com so termos vendorizado as
             // variantes de core "*-lstm" (sem o core legado). Caminhos
             // relativos a propria pagina (public/totem/index.php), onde
-            // assets/tesseract/tesseract.min.js ja e carregado via <script>.
+            // TESSERACT_VENDOR_PATH/tesseract.min.js ja e carregado via <script>.
+            // cacheMethod 'none' (Tesseract.js 5.1.1, worker.min.js): nao le nem
+            // grava a traineddata no IndexedDB do navegador, entao uma traineddata
+            // antiga em cache nunca substitui o arquivo versionado do servidor.
             tesseractWorkerPromise = Tesseract.createWorker('por', 1, {
-                workerPath: 'assets/tesseract/worker.min.js',
-                corePath: 'assets/tesseract',
-                langPath: 'assets/tesseract',
+                workerPath: TESSERACT_VENDOR_PATH + '/worker.min.js',
+                corePath: TESSERACT_VENDOR_PATH,
+                langPath: TESSERACT_VENDOR_PATH,
                 gzip: true,
+                cacheMethod: 'none',
             });
         } catch (e) {
-            console.warn('[OCR] falha ao iniciar Tesseract.js', e);
+            logFalhaOcr('inicializacao', e);
             tesseractWorkerPromise = null;
         }
     }
     return tesseractWorkerPromise;
 }
 
-// Chama o endpoint de identificacao. Retry simples (2 tentativas extras,
-// backoff curto) so para falha de rede (TypeError do fetch) — nunca para
-// resposta de negocio (NAO_IDENTIFICADA/ERRO), que e tratada como
-// "segue sem identificar automaticamente", sem alarme ao motorista.
+// Chama o endpoint de identificacao, UMA vez por nota (id_nota; sem early-stop).
+// Retry simples (2 tentativas extras, backoff curto) so para falha de rede
+// (TypeError do fetch) — nunca para resposta de negocio (NAO_IDENTIFICADA/ERRO)
+// nem para 404 (nota ja excluida) ou 429 (rate limit): esses sao tratados como
+// "nao identificada", sem alarme ao motorista e sem retry. Quem decide o cliente
+// do atendimento e o backend (concluir-digitalizacao).
 // idAtendimento/geracao vem CAPTURADOS no enfileiramento do OCR (medirSeq: so medicao); o guard e
 // reavaliado antes de CADA chamada api() (inclusive retries) e antes de escrever
-// estado, para nunca chamar a API com id nulo ou do atendimento novo.
+// estado, para nunca chamar a API com id nulo ou do atendimento novo. O guard
+// por uid descarta a identificacao de uma nota que ja foi excluida.
 let identificacoesEmVoo = 0;
-async function identificarClienteNota(ordem, cnpjsCandidatos, razaoSocialCandidata, idAtendimentoCapturado, geracaoCapturada, medirSeq) {
+async function identificarClienteNota(uid, cnpjsCandidatos, razaoSocialCandidata, idAtendimentoCapturado, geracaoCapturada, medirSeq) {
     const alvo = { idAtendimento: idAtendimentoCapturado, geracao: geracaoCapturada };
     const backoffMs = [1000, 2000];
     identificacoesEmVoo++;
     marca('ocr_ini_cli', medirSeq); // so ?medir=1: inicio da identificacao
     try {
         for (let tentativa = 0; tentativa <= backoffMs.length; tentativa++) {
-            if (!atendimentoVigente(alvo)) return;
+            if (digitalizacaoConcluida || !atendimentoVigente(alvo)) return;
+            const ident = identificadorNotaApi(buscarNotaPorUid(uid));
+            if (!ident) return; // nota excluida (ou sem identificador): nada a identificar
             try {
-                const resultado = await api('nota.php', 'identificar-cliente', {
+                await api('nota.php', 'identificar-cliente', Object.assign({
                     id_atendimento: idAtendimentoCapturado,
-                    ordem,
                     chave_ocr: null, // extracao de chave removida do processo (ver extrairCandidatos)
                     cnpjs_candidatos: cnpjsCandidatos,
                     razao_social_candidata: razaoSocialCandidata,
-                });
-                if (!atendimentoVigente(alvo)) return; // resultado tardio: descarta
-                if ((resultado.status === 'IDENTIFICADA' || resultado.ja_identificado_no_atendimento) && !state.clienteIdentificado) {
-                    state.clienteIdentificado = true; // a fila de OCR NAO e purgada: o numero das demais notas ainda e lido
-                    mostrarStatusScanner('Cliente identificado');
-                }
-                return;
+                }, ident));
+                return; // o resultado nao e lido no front: o cliente e decidido pelo backend ao concluir
             } catch (e) {
                 const erroDeRede = e instanceof TypeError;
                 if (!erroDeRede || tentativa === backoffMs.length) {
-                    if (erroDeRede) console.warn('[OCR] falha de rede ao identificar cliente, tentativas esgotadas', e);
+                    if (erroDeRede) logFalhaOcr('identificar', e); // rede, tentativas esgotadas
                     return; // tratado como equivalente a NAO_IDENTIFICADA/ERRO, sem alarme ao motorista
                 }
                 await new Promise(resolve => setTimeout(resolve, backoffMs[tentativa]));
@@ -3540,12 +4333,14 @@ async function identificarClienteNota(ordem, cnpjsCandidatos, razaoSocialCandida
 
 let clienteSelecionado = null;
 
+// Texto neutro e IGUAL para NAO_IDENTIFICADO e ANOMALIA: nunca mostra CNPJ, razao
+// social nem qualquer dado de candidatos das notas, e o campo nao e pre-preenchido.
 function telaCliente() {
     clienteSelecionado = null;
-    return `<div class="subtitulo">Cliente não identificado — digite o nome ou CNPJ</div>
-        <input class="kb-input" id="inputCliente" placeholder="Digite para buscar" style="font-size:16px;padding:12px;border:2px solid var(--brand-primary);border-radius:8px;width:100%;max-width:420px;margin:0 auto">
+    return `<div class="subtitulo cliente-aviso">Não conseguimos identificar o cliente. Digite o nome ou CNPJ.</div>
+        <input class="kb-input cliente-campo" id="inputCliente" placeholder="Digite para buscar" aria-label="Nome ou CNPJ do cliente">
         <div class="lista-sugestoes" id="listaSugestoes"></div>
-        <button class="btn-primario" style="max-width:320px;margin:0 auto" onclick="confirmarCliente()">Avançar</button>`;
+        <button class="btn-primario cliente-avancar" style="max-width:320px;margin:0 auto" onclick="confirmarCliente()">Avançar</button>`;
 }
 function habilitarAutocompleteCliente() {
     const input = document.getElementById('inputCliente');
@@ -4261,8 +5056,9 @@ function iniciarApp() {
         <div class="teclado" id="teclado"></div>
         <div class="modal-fundo" id="modalFundo"><div class="modal-caixa" id="modalCaixa"></div></div>
         <div class="modal-fundo modal-fundo-confirma-nota" id="modalConfirmCancelNotaFundo"><div class="modal-caixa" id="modalConfirmCancelNotaCaixa"></div></div>
+        <div class="modal-fundo modal-fundo-confirma-excluir" id="modalConfirmExcluirNotaFundo"><div class="modal-caixa" id="modalConfirmExcluirNotaCaixa" role="dialog" aria-modal="true"></div></div>
         <div class="modal-fundo modal-fundo-inatividade" id="modalInatividadeFundo"><div class="modal-caixa" id="modalInatividadeCaixa"></div></div>
-        <div id="toastErro" style="display:none;position:fixed;bottom:16px;left:16px;right:16px;background:#a32d2d;color:#fff;padding:12px 16px;border-radius:8px;font-size:14px;text-align:center;z-index:60"></div>
+        <div id="toastErro" class="toast-erro" role="alert" aria-live="assertive" aria-atomic="true"></div>
     `;
     montarTeclado();
     document.getElementById('tela').addEventListener('focusin', e => {

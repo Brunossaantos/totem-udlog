@@ -1,0 +1,8 @@
+7b0f1749aa255a593b14160c75f74690be740edcae94c5a45efc24ab50235f4d *tesseract-5.1.1/por.traineddata.gz
+5db58ea4d1bd4256be81e8ae3b4fa226c4625dfba1850b1b3308dbf3700e9929 *tesseract-5.1.1/tesseract-core-lstm.wasm
+8f04aa0cc81e7bde33f80e92fa01a7a665f0b4884d098acf5de9c7104a11dfaa *tesseract-5.1.1/tesseract-core-lstm.wasm.js
+66b601224a0c4a8977bc9d92dd39841189f9ca22cc4122fcd7208cdb0961eeef *tesseract-5.1.1/tesseract-core-simd-lstm.wasm
+ce20eda9533cbed1e6c2b4276fbae1e0adc61b6754b5513084be601787b457cf *tesseract-5.1.1/tesseract-core-simd-lstm.wasm.js
+a8e29918d098b2b06e1012bdaeffb4aec0445c5d5654709023e0bd1f442a80e8 *tesseract-5.1.1/tesseract.min.js
+aca1229639fc9907d86f96e825955a2b7c5716d17f3bc3acd71f9c7ab66181fc *tesseract-5.1.1/worker.min.js
+3325b0888fa4745c4e6940897d8c4f426fbaae76901fcbfe1871a04e90a51655 *jsqr/jsQR.js

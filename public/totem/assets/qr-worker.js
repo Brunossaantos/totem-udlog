@@ -7,8 +7,9 @@
 // (assets/app.js, obterQrWorker()) e reaproveitado entre capturas.
 //
 // Caminho relativo ao PROPRIO worker (nao aninhado dentro de outro worker):
-// resolve para public/totem/assets/jsqr/jsQR.js.
-importScripts('jsqr/jsQR.js');
+// resolve para public/totem/assets/vendor/jsqr/jsQR.js (versao do arquivo
+// identificada pelo SHA-256 em assets/vendor/MANIFEST.sha256).
+importScripts('vendor/jsqr/jsQR.js');
 
 self.onmessage = function (evento) {
     // evento.data e o proprio ImageData (structured clone), reconstruido com

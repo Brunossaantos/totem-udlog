@@ -44,6 +44,16 @@ $lgpdTermoJson = json_encode(
     $lgpdTermoDados,
     JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS
 );
+
+// Versoes (filemtime) dos assets que o JavaScript nao consegue versionar sozinho:
+// o qr-worker.js e criado por app.js via new Worker() e o Tesseract e
+// carregado a partir de assets/vendor/tesseract-5.1.1/. Mesmo padrao do
+// bloco lgpd-termo-dados (somente inteiros, sem dado de usuario).
+$assetsVersoes = [
+    'qrWorker'  => (int) @filemtime(__DIR__ . '/assets/qr-worker.js'),
+    'tesseract' => (int) @filemtime(__DIR__ . '/assets/vendor/tesseract-5.1.1/tesseract.min.js'),
+];
+$assetsVersoesJson = json_encode($assetsVersoes, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_HEX_APOS);
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -56,7 +66,8 @@ $lgpdTermoJson = json_encode(
 <body data-totem-token="<?= htmlspecialchars($totem['token_api'], ENT_QUOTES, 'UTF-8') ?>" data-totem-nome="<?= htmlspecialchars($totem['nome'], ENT_QUOTES, 'UTF-8') ?>">
 <div id="app"></div>
 <script type="application/json" id="lgpd-termo-dados"><?= $lgpdTermoJson ?></script>
-<script src="assets/tesseract/tesseract.min.js"></script>
+<script type="application/json" id="assets-versoes"><?= $assetsVersoesJson ?></script>
+<script src="assets/vendor/tesseract-5.1.1/tesseract.min.js?v=<?= (int) $assetsVersoes['tesseract'] ?>"></script>
 <script src="assets/app.js?v=<?= (int) @filemtime(__DIR__ . '/assets/app.js') ?>"></script>
 <script src="assets/impressao.js?v=<?= (int) @filemtime(__DIR__ . '/assets/impressao.js') ?>"></script>
 <script src="assets/diagnostico-impressao.js?v=<?= (int) @filemtime(__DIR__ . '/assets/diagnostico-impressao.js') ?>"></script>

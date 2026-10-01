@@ -126,12 +126,6 @@ input.campo-texto {
 .miniaturas { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 .miniatura { position: relative; width: 32px; height: 40px; background: var(--action-primary); border-radius: 5px; display: flex; align-items: center; justify-content: center; color: var(--action-primary-text); font-size: 12px; overflow: visible; }
 .miniatura img { width: 100%; height: 100%; object-fit: cover; border-radius: 5px; }
-/* selo de numero da nota (confirmado/pendente) — demanda talent-doctos-finalizacao-checkin */
-.selo-numero { position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 4px; }
-/* excecoes semanticas mantidas (sucesso/erro) — selo tem TEXTO junto da cor
-   (numero da nota confirmado/pendente), nunca so cor. */
-.selo-numero.ok { background: #1d7a5f; color: #fff; }
-.selo-numero.pendente { background: #a32d2d; color: #fff; }
 
 /* aspect-ratio 4/3 e so o fallback ANTES do stream conectar (e antes do primeiro
    calculo) — 4/3 (horizontal) foi escolhido por ser a proporcao real entregue
@@ -219,7 +213,6 @@ input.campo-texto {
 .tecla-numerica { height: 64px; font-size: 22px; font-weight: 600; background: var(--surface); border: 2px solid var(--brand-primary); border-radius: 10px; color: var(--text-primary); cursor: pointer; }
 .tecla-numerica-apagar { background: #dbe4ea; border-color: #dbe4ea; }
 .tecla-numerica-confirmar { background: var(--action-primary); border-color: var(--action-primary); color: var(--action-primary-text); }
-.tecla-numerica-confirmar:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* botao de saida do modal obrigatorio de numero da nota (achado 1 e achado
    de atencao do /03-revisao, demanda talent-doctos-finalizacao-checkin) —
@@ -665,7 +658,7 @@ input.campo-texto {
 .rev-rotulo { font-size: 22px; font-weight: 800; color: var(--text-primary); }
 .rev-numero { font-size: 20px; color: var(--text-primary); overflow-wrap: anywhere; }
 .rev-numero-grande { font-size: 28px; font-weight: 800; line-height: 1.1; }
-.rev-selo { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px; font-size: 16px; font-weight: 700; border: 2px solid transparent; }
+.rev-selo { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px; font-size: 18px; font-weight: 700; border: 2px solid transparent; }
 .rev-selo-icone { display: inline-flex; }
 .rev-selo-pendente { background: #FFFFFF; color: #3A3A3A; border-color: #B0B0B1; }
 .rev-selo-sugerido { background: #0179AD; color: #FFFFFF; border-color: #0179AD; }
@@ -679,7 +672,6 @@ input.campo-texto {
     font-size: 20px; font-weight: 700; cursor: pointer;
     background: #0179AD; color: #FFFFFF; border: 2px solid #0179AD;
 }
-.rev-continuar:disabled { background: #B0B0B1; color: #3A3A3A; border-color: #B0B0B1; cursor: not-allowed; }
 
 /* Topo dos modais de numero da nota: identificacao "Nota N de M" + miniatura + instrucao */
 .modal-caixa { max-height: calc(100vh - 40px); overflow-y: auto; }
@@ -688,4 +680,111 @@ input.campo-texto {
 .nota-modal-id { font-size: 22px; font-weight: 800; color: #3A3A3A; }
 .nota-modal-instrucao { font-size: 20px; line-height: 1.3; color: #3A3A3A; }
 .nota-modal-numero { font-size: 32px; font-weight: 800; line-height: 1.1; color: #3A3A3A; overflow-wrap: anywhere; }
-#btnConfirmarNumeroSugerido, #btnCorrigirNumeroSugerido { min-height: 64px; }
+/* Confirmar e Corrigir do modal de conferir: 20px/700, a mesma fonte dos demais botoes do
+   modal (Voltar, Excluir nota, Cancelar atendimento) e de Continuar; antes herdavam 18px/600. */
+#btnConfirmarNumeroSugerido, #btnCorrigirNumeroSugerido { min-height: 64px; font-size: 20px; font-weight: 700; }
+
+/* Botao Voltar dos modais de numero da nota: contorno NEUTRO (borda e texto
+   #3A3A3A, contraste alto sobre branco; a borda #B0B0B1 nao serve, 2,2:1), sem
+   seta nem X, alvo de 64px. No modal de digitar ocupa a largura do teclado. */
+.btn-voltar-modal-nota {
+    min-height: 64px; width: 100%; padding: 0 22px; border-radius: 10px;
+    background: #FFFFFF; color: #3A3A3A; border: 2px solid #3A3A3A;
+    font-family: inherit; font-size: 20px; font-weight: 700; cursor: pointer;
+}
+.btn-voltar-modal-nota-larga { max-width: 280px; margin: 0 auto; }
+
+/* Toast de erro (fallback; ver mostrarErroTela em app.js). Abaixo da barra
+   Cancelar, no topo, sem receber toque. Recolhido (sem altura) quando vazio,
+   mas sempre presente no DOM para o leitor de tela anunciar o texto novo. */
+.toast-erro {
+    position: fixed; top: 72px; left: 16px; right: 16px; z-index: 60;
+    max-height: 0; padding: 0 16px; overflow: hidden; opacity: 0;
+    background: #a32d2d; color: #FFFFFF; border-radius: 8px;
+    font-size: 20px; font-weight: 600; line-height: 1.3; text-align: center;
+    pointer-events: none;
+}
+.toast-erro.visivel { max-height: 200px; padding: 14px 16px; opacity: 1; }
+
+/* ---- Fase 3 (hardening-revisao-notas-e-cliente): Excluir nota, Adicionar outra nota, 422, cliente ---- */
+
+/* Adicionar outra nota: contorno azul, na area rolavel abaixo do ultimo cartao (fora do rodape sticky) */
+.rev-adicionar {
+    min-height: 64px; width: 100%; padding: 0 22px; border-radius: 10px;
+    font-family: inherit; font-size: 20px; font-weight: 700; cursor: pointer;
+    background: #FFFFFF; color: #0179AD; border: 2px solid #0179AD;
+}
+
+/* faixa "Nota N excluida." dentro da revisao (role=status), some sozinha */
+.rev-faixa {
+    font-size: 20px; font-weight: 700; text-align: center; color: #3A3A3A;
+    background: #FFFFFF; border: 2px solid #3A3A3A; border-radius: 10px; padding: 10px 12px;
+}
+
+/* destaque do 422: SO borda e selo (sem tinta de fundo) */
+.rev-cartao-destaque { border: 4px solid #a32d2d; padding: 6px 10px; }
+.rev-selo-destaque { background: #a32d2d; color: #FFFFFF; border-color: #a32d2d; }
+
+/* Excluir nota nos modais de numero: vermelho solido, separado por divisor e folga */
+/* margem de 18px: Voltar -> Excluir nota = 14 (gap) + 18 + 1 + 18 + 14 = 65 px (>= 64) */
+.nota-modal-divisor { height: 1px; background: #B0B0B1; margin: 18px 0; width: 100%; }
+.btn-excluir-nota {
+    min-height: 64px; width: 100%; max-width: 280px; margin: 0 auto; padding: 0 22px; border-radius: 10px;
+    background: #a32d2d; color: #FFFFFF; border: 2px solid #a32d2d;
+    font-family: inherit; font-size: 20px; font-weight: 700; cursor: pointer;
+}
+
+/* Secao do atendimento: linha de 2 px + rotulo + folga (>= 64 px entre Excluir nota e Cancelar atendimento) */
+.nota-modal-sep-atendimento { height: 2px; background: #3A3A3A; width: 100%; margin: 24px 0 0; }
+.nota-modal-rotulo-secao { font-size: 22px; font-weight: 700; color: #3A3A3A; }
+.nota-modal-sep-atendimento ~ .btn-saida-modal-nota { font-size: 20px; }
+
+/* confirmacao de exclusao: overlay PROPRIO, acima do modal do numero (50) e da
+   confirmacao de cancelar (55), abaixo do aviso de inatividade (80) */
+.modal-fundo-confirma-excluir { z-index: 56; }
+#modalConfirmExcluirNotaCaixa { max-width: 360px; }
+#modalConfirmExcluirNotaCaixa .titulo { font-size: 22px; font-weight: 700; }
+#modalConfirmExcluirNotaCaixa .subtitulo { font-size: 20px; line-height: 1.3; }
+.excluir-nota-erro { font-size: 20px; }
+.btn-excluir-nao, .btn-excluir-sim {
+    min-height: 64px; width: 100%; padding: 0 22px; border-radius: 10px;
+    font-family: inherit; font-size: 20px; font-weight: 700; cursor: pointer; color: #FFFFFF;
+}
+.btn-excluir-nao { background: #0179AD; border: 2px solid #0179AD; }
+.btn-excluir-sim { background: #a32d2d; border: 2px solid #a32d2d; margin-top: 24px; }
+
+/* tela rec_cliente: texto e campo em 20 px, alvos de 64 px */
+.cliente-aviso { font-size: 20px; line-height: 1.3; }
+.cliente-campo {
+    font-size: 20px; min-height: 64px; padding: 12px; width: 100%; max-width: 420px; margin: 0 auto;
+    border: 2px solid var(--brand-primary); border-radius: 8px;
+}
+.cliente-avancar { min-height: 64px; font-size: 20px; }
+
+/* ---- Botao desabilitado (rodada corretiva F9) ----
+   Sem depender de opacity: fundo #B0B0B1, texto #3A3A3A (contraste 5,25:1) e borda
+   #B0B0B1, distinto de qualquer botao habilitado (azul, vermelho ou branco com
+   contorno escuro). Vale para os botoes da revisao e dos modais de nota. */
+.tecla-numerica-confirmar:disabled, .btn-voltar-modal-nota:disabled, .rev-continuar:disabled,
+.rev-adicionar:disabled, .btn-excluir-nota:disabled, .btn-excluir-nao:disabled, .btn-excluir-sim:disabled {
+    background: #B0B0B1; color: #3A3A3A; border-color: #B0B0B1; opacity: 1; cursor: not-allowed;
+}
+
+/* ---- Fase B (hardening-revisao-notas-e-cliente): 409 OCR_EM_ANDAMENTO e nota recuperada sem foto ---- */
+
+/* aviso do 409: NEUTRO (azul UDLOG sobre branco), nunca vermelho; role=status */
+.rev-aguarde {
+    font-size: 20px; font-weight: 600; line-height: 1.3; text-align: center; color: #3A3A3A;
+    background: #FFFFFF; border: 2px solid #0179AD; border-radius: 10px; padding: 8px 12px;
+}
+/* destaque neutro da nota apontada pelo 409: borda e selo azuis (o numero segue visivel) */
+.rev-cartao-aguardando { border: 4px solid #0179AD; padding: 6px 10px; }
+.rev-selo-aguardando { background: #FFFFFF; color: #3A3A3A; border-color: #0179AD; }
+
+/* nota recuperada do servidor: sem foto (nao ha endpoint de imagem) */
+.rev-sem-foto, .nota-modal-sem-foto, .miniatura-sem-foto {
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    background: #FFFFFF; color: #3A3A3A; font-weight: 700; overflow: hidden;
+}
+.rev-sem-foto, .nota-modal-sem-foto { flex: 0 0 72px; width: 72px; height: 96px; font-size: 13px; line-height: 1.2; padding: 2px; box-sizing: border-box; overflow-wrap: anywhere; }
+.miniatura-sem-foto { background: #FFFFFF; border: 2px dashed #878789; box-sizing: border-box; }
