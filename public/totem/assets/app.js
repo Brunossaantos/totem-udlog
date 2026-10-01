@@ -345,26 +345,20 @@ const state = {
     // motorista navega entre a captura do CRLV e a tela de espera) — demanda
     // migracao-vio-api-br-com-cache, 2026-09-25, ver
     // atualizarStatusDocumento()/rotuloStatusProcessamento().
-    // cnhModo: 'FISICA'|'DIGITAL'|null (ainda nao escolhido) — escolhido pelo
-    // motorista na tela exp_cnh_modo/rec_cnh_modo ANTES de qualquer captura,
-    // espelhando cnh_modo_captura do backend (demanda suporte-cnh-digital,
-    // 2026-09-27). null so existe entre a chegada na etapa e a escolha; o
-    // backend trata ausencia de escolha como FISICA (fail-safe), mas o front
-    // sempre exige a escolha antes de liberar a camera.
-    exp: { previewImg: null, previewCanvas: null, cnhFrenteImg: null, cnhModo: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
+    exp: { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
     // mesmo padrao para Recebimento (REPLANEJAMENTO 2026-09-09 estendeu a
     // validacao VIO Decode tambem para o Recebimento) — telas/estado NOVOS E
     // DEDICADOS, nao compartilhados com a Expedicao nem com o fluxo antigo
     // de rec_cnh/rec_crlv (semantica diferente, sem QR).
-    rec: { previewImg: null, previewCanvas: null, cnhModo: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
+    rec: { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null },
 };
 
 function estadoExpVazio() {
-    return { previewImg: null, previewCanvas: null, cnhFrenteImg: null, cnhModo: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
+    return { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
 }
 
 function estadoRecVazio() {
-    return { previewImg: null, previewCanvas: null, cnhModo: null, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
+    return { previewImg: null, previewCanvas: null, qrTentativas: { cnh: 0, crlv: 0 }, cnhOrigem: null, crlvOrigem: null, emAndamento: false, cnhPromise: null, crlvPromise: null, cnhUltimoStatus: null, crlvUltimoStatus: null, cnhAoAtualizar: null, crlvAoAtualizar: null };
 }
 
 // -------------------- comunicacao com a API --------------------
@@ -700,11 +694,9 @@ function renderTela() {
         case 'exp_placa': tela.innerHTML = telaPlacaExpedicao(); break;
         case 'exp_selecionar_ordem': tela.innerHTML = telaSelecionarOrdem(); ligarCartoesOrdem(); break;
         case 'exp_dados': tela.innerHTML = telaDados(); break;
-        case 'exp_cnh_modo': tela.innerHTML = telaExpCnhModo(); break;
-        case 'exp_cnh_frente': tela.innerHTML = telaExpCnhFrente(); iniciarCameraExp(); break;
-        case 'exp_cnh_verso': tela.innerHTML = telaExpCnhVerso(); iniciarCameraExp(); break;
+        case 'exp_cnh_qr': tela.innerHTML = telaExpCnhQr(); iniciarCameraExp(); break;
         case 'exp_cnh_manual': tela.innerHTML = telaExpCnhManual(); break;
-        case 'exp_crlv': tela.innerHTML = telaExpCrlv(); iniciarCameraExp(); exibirIndicadorProcessamentoCnh(); break;
+        case 'exp_crlv_qr': tela.innerHTML = telaExpCrlvQr(); iniciarCameraExp(); exibirIndicadorProcessamentoCnh(); break;
         case 'exp_crlv_manual': tela.innerHTML = telaExpCrlvManual(); break;
         case 'exp_aguarde_documentos': tela.innerHTML = telaExpAguardeDocumentos(); processarAguardeDocumentosExp(); break;
         case 'exp_confirma': tela.innerHTML = telaConfirma('retirada de carga'); break;
@@ -715,28 +707,9 @@ function renderTela() {
         case 'rec_digitaliza': tela.innerHTML = telaDigitaliza(); medirMontarPainel(tela); iniciarCameraScanner(); break;
         case 'rec_revisao_numeros': tela.innerHTML = telaRevisaoNumeros(); atualizarRevisaoNumeros(); break;
         case 'rec_cliente': tela.innerHTML = telaCliente(); habilitarAutocompleteCliente(); break;
-        // O backend so conhece a etapa UNICA 'rec_cnh' (unificacao da rodada
-        // corretiva de 2026-09-26, mesmo padrao ja usado por 'exp_cnh' na
-        // Expedicao — ver AtendimentoController::SEQUENCIA_RECEBIMENTO_
-        // DOCUMENTOS/ETAPAS_UPLOAD). O front-end, porem, precisa distinguir
-        // localmente a captura da frente da captura do verso (2 fotos, 2
-        // chamadas de upload SEPARADAS — cnh_frente/cnh_verso — mas dentro da
-        // MESMA etapa do backend), entao continua usando 2 sub-telas
-        // client-side dedicadas (rec_cnh_frente/rec_cnh_verso). Nenhum ponto
-        // do front chama mais ir('rec_cnh') com esse literal — todo lugar que
-        // recebe 'rec_cnh' do backend (proxima_tela/etapa) traduz para
-        // 'rec_cnh_frente' antes de chamar ir() (ver finalizarDigitalizacao()/
-        // confirmarCliente()), entao NAO existe mais 'case rec_cnh:' aqui — a
-        // antiga tela do leitor HID sem QR (telaCaptura/iniciarCamera/
-        // habilitarLeitorScanner) fica sem nenhum 'case' que a alcance,
-        // removida nesta rodada por ser justamente a origem do bug corrigido
-        // (o literal 'rec_cnh' virou de novo alcancavel quando o backend
-        // unificou a etapa, e essa tela antiga NAO tem leitura de QR).
-        case 'rec_cnh_modo': tela.innerHTML = telaRecCnhModo(); break;
-        case 'rec_cnh_frente': tela.innerHTML = telaRecCnhFrente(); iniciarCameraRec(); break;
-        case 'rec_cnh_verso': tela.innerHTML = telaRecCnhVerso(); iniciarCameraRec(); break;
+        case 'rec_cnh_qr': tela.innerHTML = telaRecCnhQr(); iniciarCameraRec(); break;
         case 'rec_cnh_manual': tela.innerHTML = telaRecCnhManual(); break;
-        case 'rec_crlv': tela.innerHTML = telaRecCrlv(); iniciarCameraRec(); exibirIndicadorProcessamentoCnhRec(); break;
+        case 'rec_crlv_qr': tela.innerHTML = telaRecCrlvQr(); iniciarCameraRec(); exibirIndicadorProcessamentoCnhRec(); break;
         case 'rec_crlv_manual': tela.innerHTML = telaRecCrlvManual(); break;
         case 'rec_aguarde_documentos': tela.innerHTML = telaRecAguardeDocumentos(); processarAguardeDocumentosRec(); break;
         case 'rec_confirma': tela.innerHTML = telaConfirma('entrega de carga'); break;
@@ -1030,10 +1003,7 @@ async function avancarDados() {
         // o front nunca decide sozinho ir para exp_cnh — so avanca se autorizado.
         const dados = await api('atendimento.php', 'avancar-etapa-documentos', { id_atendimento: state.idAtendimento });
         if (dados.proxima_tela === 'exp_cnh') {
-            // Antes de qualquer captura, o motorista escolhe o modo da CNH
-            // (demanda suporte-cnh-digital, 2026-09-27) — so depois disso a
-            // camera e liberada em exp_cnh_frente.
-            ir('exp_cnh_modo');
+            ir('exp_cnh_qr');
         } else {
             mostrarErroTela('Não foi possível avançar agora.');
             if (btn) btn.disabled = false;
@@ -1105,17 +1075,6 @@ function onLeituraScanner(conteudo) {
     if (status) { status.textContent = 'Código lido com sucesso'; status.classList.add('ok'); }
 }
 
-async function capturarDocumento() {
-    const tipo = (state.tela === 'exp_cnh' || state.tela === 'rec_cnh') ? 'cnh' : 'crlv';
-    const imagem = capturarFotoBase64();
-    try {
-        await api('documento.php', 'upload', { id_atendimento: state.idAtendimento, tipo, imagem });
-    } catch (e) { return mostrarErroTela(e.message); }
-
-    const proxima = { exp_cnh: 'exp_crlv', exp_crlv: 'exp_confirma', rec_cnh: 'rec_crlv', rec_crlv: 'rec_confirma' }[state.tela];
-    ir(proxima);
-}
-
 // ===================================================================
 // EXPEDICAO — captura/validacao de CNH e CRLV via VIO Decode (QR code)
 // Demanda expedicao-vio-cnh-crlv (2026-09-08; REPLANEJAMENTO 2026-09-09
@@ -1136,6 +1095,60 @@ let expCamStream = null;
 let expCamDeviceId = null;
 let expCamVideoPronto = false;
 let expCamDeviceChangeAtivo = false;
+
+// A area de documentos tem a mesma regra visual do scanner de notas: a
+// largura e definida pelo CSS e a altura e derivada da resolucao REAL do
+// stream. Isso e estritamente de layout: nao toca canvas, QR, JPEG ou upload.
+const ajustesProporcaoCameraDocumento = {
+    exp: { observer: null, video: null, aoRedimensionar: null, largura: 0, altura: 0 },
+    rec: { observer: null, video: null, aoRedimensionar: null, largura: 0, altura: 0 }
+};
+
+function limparProporcaoCameraDocumento(chave) {
+    const ajuste = ajustesProporcaoCameraDocumento[chave];
+    if (!ajuste) return;
+    if (ajuste.observer) ajuste.observer.disconnect();
+    if (ajuste.video && ajuste.aoRedimensionar) ajuste.video.removeEventListener('resize', ajuste.aoRedimensionar);
+    ajuste.observer = null;
+    ajuste.video = null;
+    ajuste.aoRedimensionar = null;
+    ajuste.largura = 0;
+    ajuste.altura = 0;
+}
+
+function aplicarProporcaoCameraDocumento(chave, caixaId, previaId) {
+    const ajuste = ajustesProporcaoCameraDocumento[chave];
+    if (!ajuste || !ajuste.largura || !ajuste.altura) return;
+    const caixa = document.getElementById(caixaId);
+    const previa = document.getElementById(previaId);
+    const referencia = caixa && caixa.offsetParent !== null ? caixa : previa;
+    if (!referencia || !referencia.clientWidth) return;
+    const altura = Math.round(referencia.clientWidth * ajuste.altura / ajuste.largura);
+    if (caixa) caixa.style.height = altura + 'px';
+    if (previa) previa.style.height = altura + 'px';
+}
+
+function configurarProporcaoCameraDocumento(chave, video, caixaId, previaId) {
+    limparProporcaoCameraDocumento(chave);
+    const ajuste = ajustesProporcaoCameraDocumento[chave];
+    const atualizar = () => {
+        if (!video.videoWidth || !video.videoHeight) return;
+        ajuste.largura = video.videoWidth;
+        ajuste.altura = video.videoHeight;
+        aplicarProporcaoCameraDocumento(chave, caixaId, previaId);
+    };
+    ajuste.video = video;
+    ajuste.aoRedimensionar = atualizar;
+    video.addEventListener('resize', atualizar);
+    if (typeof ResizeObserver !== 'undefined') {
+        ajuste.observer = new ResizeObserver(atualizar);
+        const caixa = document.getElementById(caixaId);
+        const previa = document.getElementById(previaId);
+        if (caixa) ajuste.observer.observe(caixa);
+        if (previa) ajuste.observer.observe(previa);
+    }
+    atualizar();
+}
 
 function expCamMostrarStatus(msg, isErro) {
     const el = document.getElementById('expCamStatus');
@@ -1218,6 +1231,7 @@ async function expCamAbrirStream(deviceId) {
         if (!video) { stream.getTracks().forEach(t => t.stop()); expCamStream = null; return; }
         video.srcObject = stream;
         video.onloadedmetadata = () => {
+            configurarProporcaoCameraDocumento('exp', video, 'expCamCaixa', 'expCamPreview');
             expCamVideoPronto = true;
             expCamMostrarStatus('Câmera pronta');
             expCamAtualizarBotao();
@@ -1239,7 +1253,7 @@ async function expCamAbrirStream(deviceId) {
 }
 
 async function expCamTratarMudancaDispositivos() {
-    if (!['exp_cnh_frente', 'exp_cnh_verso', 'exp_crlv'].includes(state.tela)) return;
+    if (!['exp_cnh_qr', 'exp_crlv_qr'].includes(state.tela)) return;
     try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         const aindaConectado = devices.some(d => d.kind === 'videoinput' && d.deviceId === expCamDeviceId);
@@ -1275,6 +1289,7 @@ function expCamTratarErro(e) {
 
 function pararCameraExp() {
     if (expCamStream) { expCamStream.getTracks().forEach(t => t.stop()); expCamStream = null; }
+    limparProporcaoCameraDocumento('exp');
     if (expCamDeviceChangeAtivo) { navigator.mediaDevices.ondevicechange = null; expCamDeviceChangeAtivo = false; }
     expCamVideoPronto = false;
     expCamDeviceId = null;
@@ -1288,57 +1303,77 @@ function expCamAtualizarBotao() {
     btn.disabled = !prontoVideo || !expCamVideoPronto;
 }
 
-// -------------------- expedicao: telas de captura (frente/verso CNH, CRLV) --------------------
+// -------------------- expedicao: telas de captura de QR (CNH, CRLV) --------------------
 
-function telaExpCaptura(titulo) {
+function telaExpQr(titulo, tipo) {
     return `<div class="titulo">${titulo}</div>
+        <div class="subtitulo">Aproxime o QR code do guia e mantenha-o bem iluminado.</div>
         <div class="caixa-scanner" id="expCamCaixa">
             <video id="expCamVideo" autoplay playsinline></video>
+            <div class="guia-scanner" aria-hidden="true"></div>
         </div>
-        <img id="expCamPreview" class="previa-nota" style="display:none" alt="Foto capturada">
         <div class="status-scanner" id="expCamStatus">Conectando à câmera...</div>
         <div class="status-leitura" id="expBgStatus" style="display:none"></div>
         <div class="grupo-botoes" id="expCamControles">
-            <button class="btn-primario" id="expCamBtnCapturar" onclick="expCapturarFoto()" disabled>Capturar</button>
+            <button class="btn-primario" id="expCamBtnCapturar" onclick="expCapturarQr('${tipo}')" disabled>Ler QR code</button>
         </div>`;
 }
-// Tela nova (demanda suporte-cnh-digital, 2026-09-27): pergunta o modo de
-// captura da CNH ANTES de liberar a camera — reaproveita o padrao visual de
-// "2 botoes grandes" ja usado em telaHome() (tile/tile-principal/
-// tile-secundaria), nenhuma classe CSS nova. So depois de definir-modo-cnh
-// confirmar (ver escolherModoCnhExp()) e que a tela avanca para
-// exp_cnh_frente.
-function telaExpCnhModo() {
-    return `<div class="titulo">Sua CNH é física (documento impresso) ou digital (app oficial no celular)?</div>
-        <div class="grupo-botoes">
-            <button class="tile tile-principal" id="btnExpCnhFisica" onclick="escolherModoCnhExp('FISICA')">CNH física</button>
-            <button class="tile tile-secundaria" id="btnExpCnhDigital" onclick="escolherModoCnhExp('DIGITAL')">CNH digital</button>
-        </div>`;
+function telaExpCnhQr() { return telaExpQr('Leia o QR code da CNH', 'cnh'); }
+function telaExpCrlvQr() { return telaExpQr('Leia o QR code do CRLV', 'crlv'); }
+
+function expLimparFrameQr() {
+    state.exp.previewImg = null;
+    state.exp.previewCanvas = null;
 }
 
-// Chama definir-modo-cnh e SO avanca a tela apos confirmacao do backend —
-// nunca decide localmente que o modo foi definido. Mensagem de erro sempre
-// generica (mostrarErroTela ja nao propaga detalhe tecnico do backend).
-async function escolherModoCnhExp(modo) {
-    const btnFisica = document.getElementById('btnExpCnhFisica');
-    const btnDigital = document.getElementById('btnExpCnhDigital');
-    if (btnFisica) btnFisica.disabled = true;
-    if (btnDigital) btnDigital.disabled = true;
+async function expCapturarQr(tipo) {
+    if (state.exp.emAndamento) return;
+    const video = document.getElementById('expCamVideo');
+    if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        expCamMostrarStatus('Aguarde o vídeo carregar.', true);
+        return;
+    }
+    state.exp.emAndamento = true;
+    const btn = document.getElementById('expCamBtnCapturar');
+    if (btn) btn.disabled = true;
+    let canvas = null;
     try {
-        await api('documento.php', 'definir-modo-cnh', { id_atendimento: state.idAtendimento, modo });
-        state.exp.cnhModo = modo;
-        ir('exp_cnh_frente');
+        expCamMostrarStatus('Lendo QR code...');
+        canvas = expCamCapturarFrame(video);
+        const qr = await lerQrDoCanvas(canvas);
+        if (!qr || !qr.ok) {
+            expLimparFrameQr();
+            const tentativa = ++state.exp.qrTentativas[tipo];
+            if (tentativa >= 3) {
+                ir(tipo === 'cnh' ? 'exp_cnh_manual' : 'exp_crlv_manual');
+                return;
+            }
+            expCamMostrarStatus(`Não encontramos o QR. Aproxime e tente novamente. Tentativa ${tentativa} de 3.`, true);
+            return;
+        }
+
+        // O resultado do jsQR nunca e enviado. Ele apenas impede chamada de
+        // rede quando o frame nao contem QR; o backend recebe o JPEG sozinho.
+        const imagemQr = canvas.toDataURL('image/jpeg', 0.85);
+        expLimparFrameQr();
+        canvas = null;
+        state.exp.qrTentativas[tipo] = 0;
+        expCamMostrarStatus('QR lido. Enviando para validação...');
+        state.exp[tipo + 'Promise'] = iniciarProcessamentoDocumento(
+            state.idAtendimento,
+            tipo,
+            imagemQr,
+            (status) => atualizarStatusDocumento('exp', tipo, status),
+        );
+        await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
     } catch (e) {
-        mostrarErroTela(e.message);
-        if (btnFisica) btnFisica.disabled = false;
-        if (btnDigital) btnDigital.disabled = false;
+        expCamMostrarStatus('Não foi possível iniciar a validação agora.', true);
+    } finally {
+        canvas = null;
+        state.exp.emAndamento = false;
+        if (btn && document.getElementById('expCamBtnCapturar') === btn) expCamAtualizarBotao();
     }
 }
-
-function telaExpCnhFrente() { return telaExpCaptura('Fotografe a frente da CNH'); }
-function telaExpCnhVerso() { return telaExpCaptura('Fotografe o verso da CNH (o QR code geralmente fica aqui)'); }
-function telaExpCrlv() { return telaExpCaptura('Fotografe o CRLV completo'); }
-
 // Indicador DISCRETO e NAO BLOQUANTE (nunca modal, nunca header fixo) de que
 // a CNH ainda esta sendo validada em segundo plano enquanto o motorista ja
 // esta fotografando o CRLV — item 2 do escopo do REPLANEJAMENTO 2026-09-09.
@@ -1352,7 +1387,7 @@ function exibirIndicadorProcessamentoCnh() {
     // exibido aqui vem do status_processamento EXPLICITO do backend (nunca
     // inferido) via atualizarStatusDocumento()/rotuloStatusProcessamento() —
     // redireciona o callback ja associado a este documento (ver
-    // expProcessarCnhVerso) para esta tela enquanto ela estiver visivel.
+    // processamento do documento) para esta tela enquanto ela estiver visivel.
     state.exp.cnhAoAtualizar = (status) => {
         const alvo = document.getElementById('expBgStatus');
         if (!alvo) return;
@@ -1419,214 +1454,6 @@ function expCamCapturarFrame(video) {
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas;
-}
-
-function expCapturarFoto() {
-    const video = document.getElementById('expCamVideo');
-    if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
-        expCamMostrarStatus('Aguarde o vídeo carregar.', true);
-        return;
-    }
-    expCamMostrarStatus('Capturando imagem...');
-    const canvas = expCamCapturarFrame(video);
-    state.exp.previewCanvas = canvas;
-    state.exp.previewImg = canvas.toDataURL('image/jpeg', 0.85);
-    expExibirPreview();
-}
-
-function expExibirPreview() {
-    const caixa = document.getElementById('expCamCaixa');
-    if (caixa) caixa.style.display = 'none';
-    const img = document.getElementById('expCamPreview');
-    if (img) { img.src = state.exp.previewImg; img.style.display = 'block'; }
-    const controles = document.getElementById('expCamControles');
-    if (controles) {
-        controles.innerHTML = `
-            <button class="btn-primario" id="expCamBtnUsar" onclick="expConfirmarFoto()">Usar foto</button>
-            <button class="btn-fantasma" id="expCamBtnRefazer" onclick="expRefazerFoto()">Refazer</button>`;
-    }
-}
-
-function expVoltarParaVideoAoVivo() {
-    const img = document.getElementById('expCamPreview');
-    if (img) img.style.display = 'none';
-    const caixa = document.getElementById('expCamCaixa');
-    if (caixa) caixa.style.display = '';
-    const controles = document.getElementById('expCamControles');
-    if (controles) controles.innerHTML = `<button class="btn-primario" id="expCamBtnCapturar" onclick="expCapturarFoto()">Capturar</button>`;
-    expCamAtualizarBotao();
-}
-
-function expRefazerFoto() {
-    state.exp.previewImg = null;
-    state.exp.previewCanvas = null;
-    expVoltarParaVideoAoVivo();
-    expCamMostrarStatus(expCamVideoPronto ? 'Câmera pronta' : 'Conectando à câmera...');
-}
-
-// oferece ao motorista as duas saidas quando o QR nao pode ser lido/aprovado
-// — nunca trava sem saida (item 3 do escopo)
-function expOferecerFallback(tipo) {
-    const rotulo = tipo === 'cnh' ? 'CNH' : 'CRLV';
-    const telaManual = tipo === 'cnh' ? 'exp_cnh_manual' : 'exp_crlv_manual';
-    abrirModal(`
-        <div class="titulo">Não foi possível validar a ${rotulo}</div>
-        <div class="subtitulo">Você pode tentar capturar novamente ou preencher os dados manualmente.</div>
-        <button class="btn-primario" onclick="fecharModal(); expRefazerFoto();">Tentar novamente</button>
-        <button class="btn-fantasma" onclick="fecharModal(); ir('${telaManual}');">Preencher dados manualmente</button>
-    `);
-}
-
-// botao "Capturar"/"Usar foto" desabilitado durante qualquer chamada de rede
-// em andamento (item 3 do escopo) — reabilitado so apos a resposta
-async function expConfirmarFoto() {
-    if (state.exp.emAndamento) return;
-    state.exp.emAndamento = true;
-    const btnUsar = document.getElementById('expCamBtnUsar');
-    const btnRefazer = document.getElementById('expCamBtnRefazer');
-    if (btnUsar) btnUsar.disabled = true;
-    if (btnRefazer) btnRefazer.disabled = true;
-    try {
-        if (state.tela === 'exp_cnh_frente') {
-            if (state.exp.cnhModo === 'DIGITAL') {
-                // Modo DIGITAL (demanda suporte-cnh-digital, 2026-09-27): so
-                // 1 foto, nunca ha verso — envia direto, sem passar por
-                // exp_cnh_verso.
-                await expProcessarCnhDigital();
-            } else {
-                // CNH frente/verso sao enviadas JUNTAS num unico upload
-                // (contrato do backend) — aqui so guarda a frente e avanca
-                // localmente para a captura do verso (mesma macro-etapa
-                // exp_cnh, sem chamada ao backend ainda)
-                state.exp.cnhFrenteImg = state.exp.previewImg;
-                ir('exp_cnh_verso');
-            }
-        } else if (state.tela === 'exp_cnh_verso') {
-            await expProcessarCnhVerso();
-        } else if (state.tela === 'exp_crlv') {
-            await expProcessarCrlv();
-        }
-    } finally {
-        state.exp.emAndamento = false;
-        if (btnUsar) btnUsar.disabled = false;
-        if (btnRefazer) btnRefazer.disabled = false;
-    }
-}
-
-// Modo DIGITAL (CNH do app oficial do Detran/Senatran, 1 foto so — nunca
-// existe "verso" nesse modo, demanda suporte-cnh-digital, 2026-09-27). Mesmo
-// padrao ja usado no modo FISICA (expProcessarCnhVerso): QR lido/validado
-// LOCALMENTE (jsQR) ANTES de qualquer upload — se nao for possivel ler,
-// oferece o mesmo fallback (tentar novamente / preencher manual), sem gastar
-// rede. So a frente e enviada (upload tipo='cnh' com imagem_frente sozinha —
-// o backend aceita isso quando cnh_modo_captura === 'DIGITAL'), e o
-// processamento assincrono e disparado exatamente como no modo FISICA.
-async function expProcessarCnhDigital() {
-    const frenteImg = state.exp.previewImg;
-    expCamMostrarStatus('Lendo QR code...');
-    const qr = await expLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        expOferecerFallback('cnh');
-        return;
-    }
-
-    expCamMostrarStatus('Enviando documento...');
-    try {
-        await api('documento.php', 'upload', {
-            id_atendimento: state.idAtendimento,
-            tipo: 'cnh',
-            imagem_frente: frenteImg,
-        });
-    } catch (e) {
-        expCamMostrarStatus(e.message, true);
-        mostrarErroTela(e.message);
-        return;
-    }
-
-    state.exp.cnhPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'cnh', qr.binaryData, (status) => atualizarStatusDocumento('exp', 'cnh', status));
-    expCamMostrarStatus('CNH enviada para validação');
-
-    await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
-}
-
-// ORDEM INVERTIDA (demanda migracao-vio-api-br-com-cache, 2026-09-25, decisao
-// explicita do usuario): o QR do verso e lido/validado LOCALMENTE (jsQR, sem
-// nenhuma chamada de rede) ANTES do upload — nunca mais faz upload de um
-// documento cujo QR ja se sabe ilegivel, evitando envio desperdicado. So
-// depois de confirmado o QR e que a CNH (frente+verso, mesmo par de imagens
-// ja capturado) e enviada ao backend numa unica chamada. Modo FISICA/NULL
-// (fail-safe) apenas — modo DIGITAL nunca chega a esta funcao (ver
-// expProcessarCnhDigital() acima).
-async function expProcessarCnhVerso() {
-    const versoImg = state.exp.previewImg;
-    expCamMostrarStatus('Lendo QR code...');
-    const qr = await expLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        expOferecerFallback('cnh');
-        return;
-    }
-
-    expCamMostrarStatus('Enviando documento...');
-    try {
-        await api('documento.php', 'upload', {
-            id_atendimento: state.idAtendimento,
-            tipo: 'cnh',
-            imagem_frente: state.exp.cnhFrenteImg,
-            imagem_verso: versoImg,
-        });
-    } catch (e) {
-        expCamMostrarStatus(e.message, true);
-        mostrarErroTela(e.message);
-        return;
-    }
-
-    // ASSINCRONO (REPLANEJAMENTO 2026-09-09, item 1 do escopo original):
-    // dispara a validacao em segundo plano SEM aguardar (fire-and-forget) e
-    // libera a captura do CRLV imediatamente — a Promise fica guardada para a
-    // tela de espera (exp_aguarde_documentos) usar depois via Promise.all.
-    // ATUALIZADO nesta demanda: a Promise so resolve apos o backend chegar a
-    // um estado TERMINAL (ver iniciarProcessamentoDocumento/pollarAteTerminal),
-    // nunca mais so a confirmacao do envio inicial. O callback repassa cada
-    // estado intermediario explicito do backend para quem estiver "escutando"
-    // no momento (indicador discreto aqui ou a tela de espera depois).
-    state.exp.cnhPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'cnh', qr.binaryData, (status) => atualizarStatusDocumento('exp', 'cnh', status));
-    expCamMostrarStatus('CNH enviada para validação');
-
-    await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
-}
-
-// Mesma inversao de ordem do CRLV (QR local ANTES do upload) — decisao
-// explicita do usuario nesta demanda, corrigindo o achado do proprio plano
-// anterior (upload acontecia antes da leitura do QR).
-async function expProcessarCrlv() {
-    const crlvImg = state.exp.previewImg;
-    expCamMostrarStatus('Lendo QR code...');
-    const qr = await expLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        expOferecerFallback('crlv');
-        return;
-    }
-
-    expCamMostrarStatus('Enviando documento...');
-    try {
-        await api('documento.php', 'upload', {
-            id_atendimento: state.idAtendimento,
-            tipo: 'crlv',
-            imagem: crlvImg,
-        });
-    } catch (e) {
-        expCamMostrarStatus(e.message, true);
-        mostrarErroTela(e.message);
-        return;
-    }
-
-    // ASSINCRONO — dispara a validacao do CRLV em segundo plano (fire-and-
-    // -forget) e segue direto para a tela de espera (exp_aguarde_documentos
-    // so aparece a partir daqui, nunca entre CNH e CRLV).
-    state.exp.crlvPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'crlv', qr.binaryData, (status) => atualizarStatusDocumento('exp', 'crlv', status));
-    expCamMostrarStatus('CRLV enviado para validação');
-
-    await tentarAvancarEtapaDocumentos('exp_cnh_manual', 'exp_crlv_manual');
 }
 
 // -------------------- expedicao: preenchimento manual (fallback do QR) --------------------
@@ -1785,27 +1612,6 @@ function lerQrDoCanvas(canvas) {
     });
 }
 
-async function expLerQrDaImagemCapturada() {
-    if (!state.exp.previewCanvas) return { ok: false };
-    try {
-        return await lerQrDoCanvas(state.exp.previewCanvas);
-    } catch (e) {
-        return { ok: false };
-    }
-}
-
-// bytes do QR (array de numeros 0-255, vindo do jsQR) -> base64, para envio
-// ao backend em documento.php?acao=validar-qr (nunca string UTF-8 direta —
-// item 5 do escopo)
-function bytesArrayParaBase64(bytesArray) {
-    let binario = '';
-    const tamanhoBloco = 0x8000;
-    for (let i = 0; i < bytesArray.length; i += tamanhoBloco) {
-        binario += String.fromCharCode.apply(null, bytesArray.slice(i, i + tamanhoBloco));
-    }
-    return btoa(binario);
-}
-
 // ===================================================================
 // PROCESSAMENTO ASSINCRONO DE CNH/CRLV (VIO Decode) — Expedicao E Recebimento
 // (REPLANEJAMENTO 2026-09-09). Reaproveitado pelos dois fluxos por ser
@@ -1813,7 +1619,7 @@ function bytesArrayParaBase64(bytesArray) {
 // de Expedicao ou Recebimento — os endpoints documento.php?acao=iniciar-
 // -processamento/status-processamento e atendimento.php?acao=avancar-etapa-
 // -documentos ja sao agnosticos de tipo_atendimento. Mesmo espirito de
-// reaproveitamento ja usado para obterQrWorker()/bytesArrayParaBase64().
+// reaproveitamento ja usado para obterQrWorker().
 // ===================================================================
 
 const PROCESSAMENTO_TIMEOUT_MS = 45000;
@@ -1876,12 +1682,14 @@ function atualizarStatusDocumento(prefixo, doc, status) {
 // retornada aqui SEMPRE representa o resultado FINAL do documento, nunca so
 // a confirmacao de envio (correcao de uma suposicao antiga que nao valia
 // mais para o novo backend assincrono).
-function iniciarProcessamentoDocumento(idAtendimento, tipo, qrBytesArray, aoAtualizar) {
+function iniciarProcessamentoDocumento(idAtendimento, tipo, imagemQrBase64, aoAtualizar) {
     const minhaGeracao = pollGeracao;
     return api('documento.php', 'iniciar-processamento', {
         id_atendimento: idAtendimento,
         tipo,
-        qr_bytes_base64: bytesArrayParaBase64(qrBytesArray),
+        // QR local e somente um gate de UX. O backend recebe exclusivamente
+        // o JPEG do mesmo frame e nao recebe os bytes do QR nem qualquer valor QR.
+        imagem_qr_base64: imagemQrBase64,
     }).then(resultado => {
         if (typeof aoAtualizar === 'function') aoAtualizar(resultado);
         if (resultado.terminal) return resultado;
@@ -3313,12 +3121,10 @@ async function concluirDigitalizacaoRevisao() {
         if (geracao !== atendimentoGeracao) return; // cancelado durante a chamada
         state.finalizandoDigitalizacao = false;
         digitalizacaoConcluida = true;
-        // O backend decide: 'rec_cnh' (etapa unica; o front traduz para a sub-tela
-        // client-side de escolha do modo, mesmo padrao de avancarDados() com
-        // 'exp_cnh'->'exp_cnh_modo', demanda suporte-cnh-digital) ou 'rec_cliente'
-        // (confirmacao manual). Valor ausente/desconhecido = confirmacao manual
-        // (nunca pula o cliente por engano).
-        ir(dados.proxima_tela === 'rec_cnh' ? 'rec_cnh_modo' : 'rec_cliente');
+        // O backend decide: 'rec_cnh' (etapa unica; o front traduz para a tela
+        // de QR da CNH) ou 'rec_cliente' (confirmacao manual). Valor ausente/
+        // desconhecido = confirmacao manual (nunca pula o cliente por engano).
+        ir(dados.proxima_tela === 'rec_cnh' ? 'rec_cnh_qr' : 'rec_cliente');
     } catch (e) {
         if (geracao !== atendimentoGeracao) return;
         const ehNotasSemNumero = e.status === 422 && e.codigo === 'NOTAS_SEM_NUMERO';
@@ -4379,11 +4185,9 @@ async function confirmarCliente() {
         await api('atendimento.php', 'salvar-etapa', { id_atendimento: state.idAtendimento, etapa: 'cliente', dados: { nome, cnpj } });
         state.dados = Object.assign({}, state.dados, { cliente_nome: nome, cliente_cnpj: cnpj });
         // AtendimentoController::salvarEtapa (case 'cliente') ja atualiza
-        // etapa_atual para a etapa unica 'rec_cnh' no backend (rodada
-        // corretiva de 2026-09-26) — o front traduz direto para a sub-tela
-        // client-side de escolha do modo, mesmo padrao usado em
-        // finalizarDigitalizacao() (demanda suporte-cnh-digital, 2026-09-27).
-        ir('rec_cnh_modo');
+        // etapa_atual para a etapa unica 'rec_cnh' no backend; o front traduz
+        // direto para a tela de QR da CNH.
+        ir('rec_cnh_qr');
     } catch (e) { mostrarErroTela(e.message); }
 }
 
@@ -4391,24 +4195,10 @@ async function confirmarCliente() {
 // RECEBIMENTO — captura/validacao de CNH e CRLV via VIO Decode (QR code)
 // (REPLANEJAMENTO 2026-09-09 da demanda expedicao-vio-cnh-crlv: VIO Decode
 // passa a valer tambem para o Recebimento). Telas e funcoes NOVAS E
-// DEDICADAS (prefixo recCam/rec, mesmo padrao ja usado para expCam/exp) —
-// NAO reaproveitam telaCaptura/iniciarCamera/capturarFotoBase64/
-// capturarDocumento/habilitarLeitorScanner (leitor HID antigo, semantica
-// diferente sem QR — codigo morto desde a remocao do 'case rec_cnh:' em
-// renderTela(), nao alcancavel por nenhuma tela real).
-// Unificacao da rodada corretiva de 2026-09-26: a CNH do Recebimento agora
-// vive numa UNICA etapa no backend ('rec_cnh', mesmo padrao ja usado por
-// 'exp_cnh' na Expedicao — ver AtendimentoController::ETAPAS_UPLOAD/
-// SEQUENCIA_RECEBIMENTO_DOCUMENTOS). Diferenca que PERMANECE em relacao a
-// Expedicao (decisao explicita do usuario, nao uma limitacao do backend):
-// aqui a frente e o verso continuam em 2 CHAMADAS de upload separadas
-// (tipo 'cnh_frente' / 'cnh_verso'), em vez de uma unica chamada com
-// imagem_frente+imagem_verso — a leitura do QR e o disparo do
-// processamento em segundo plano so acontecem na etapa do VERSO (mesmo
-// lugar onde o QR costuma estar), e SO DEPOIS de ambos os uploads e que o
-// front chama avancar-etapa-documentos (o gate 'upload_cnh' do backend
-// exige os 2 arquivos em disco). Recebimento NAO tem ordem de coleta —
-// nenhuma UI/logica deste bloco pressupoe isso.
+// DEDICADAS (prefixo recCam/rec, mesmo padrao ja usado para expCam/exp).
+// A CNH do Recebimento vive numa UNICA etapa no backend ('rec_cnh'), validada
+// por QR exclusivo (id_atendimento, tipo, imagem_qr_base64). Recebimento NAO
+// tem ordem de coleta — nenhuma UI/logica deste bloco pressupoe isso.
 // ===================================================================
 
 // -------------------- recebimento: camera dedicada (Netum, mesmo deviceId salvo do scanner de notas) --------------------
@@ -4499,6 +4289,7 @@ async function recCamAbrirStream(deviceId) {
         if (!video) { stream.getTracks().forEach(t => t.stop()); recCamStream = null; return; }
         video.srcObject = stream;
         video.onloadedmetadata = () => {
+            configurarProporcaoCameraDocumento('rec', video, 'recCamCaixa', 'recCamPreview');
             recCamVideoPronto = true;
             recCamMostrarStatus('Câmera pronta');
             recCamAtualizarBotao();
@@ -4520,7 +4311,7 @@ async function recCamAbrirStream(deviceId) {
 }
 
 async function recCamTratarMudancaDispositivos() {
-    if (!['rec_cnh_frente', 'rec_cnh_verso', 'rec_crlv'].includes(state.tela)) return;
+    if (!['rec_cnh_qr', 'rec_crlv_qr'].includes(state.tela)) return;
     try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         const aindaConectado = devices.some(d => d.kind === 'videoinput' && d.deviceId === recCamDeviceId);
@@ -4556,6 +4347,7 @@ function recCamTratarErro(e) {
 
 function pararCameraRec() {
     if (recCamStream) { recCamStream.getTracks().forEach(t => t.stop()); recCamStream = null; }
+    limparProporcaoCameraDocumento('rec');
     if (recCamDeviceChangeAtivo) { navigator.mediaDevices.ondevicechange = null; recCamDeviceChangeAtivo = false; }
     recCamVideoPronto = false;
     recCamDeviceId = null;
@@ -4569,53 +4361,75 @@ function recCamAtualizarBotao() {
     btn.disabled = !prontoVideo || !recCamVideoPronto;
 }
 
-// -------------------- recebimento: telas de captura (frente/verso CNH, CRLV) --------------------
+// -------------------- recebimento: telas de captura de QR (CNH, CRLV) --------------------
 
-function telaRecCaptura(titulo) {
+function telaRecQr(titulo, tipo) {
     return `<div class="titulo">${titulo}</div>
+        <div class="subtitulo">Aproxime o QR code do guia e mantenha-o bem iluminado.</div>
         <div class="caixa-scanner" id="recCamCaixa">
             <video id="recCamVideo" autoplay playsinline></video>
+            <div class="guia-scanner" aria-hidden="true"></div>
         </div>
-        <img id="recCamPreview" class="previa-nota" style="display:none" alt="Foto capturada">
         <div class="status-scanner" id="recCamStatus">Conectando à câmera...</div>
         <div class="status-leitura" id="recBgStatus" style="display:none"></div>
         <div class="grupo-botoes" id="recCamControles">
-            <button class="btn-primario" id="recCamBtnCapturar" onclick="recCapturarFoto()" disabled>Capturar</button>
+            <button class="btn-primario" id="recCamBtnCapturar" onclick="recCapturarQr('${tipo}')" disabled>Ler QR code</button>
         </div>`;
 }
-// Tela nova (demanda suporte-cnh-digital, 2026-09-27): mesmo padrao/copia da
-// Expedicao (ver telaExpCnhModo()/escolherModoCnhExp()) — pergunta o modo de
-// captura da CNH ANTES de liberar a camera, reaproveitando o mesmo par de
-// botoes grandes (tile/tile-principal/tile-secundaria), nenhuma classe CSS
-// nova.
-function telaRecCnhModo() {
-    return `<div class="titulo">Sua CNH é física (documento impresso) ou digital (app oficial no celular)?</div>
-        <div class="grupo-botoes">
-            <button class="tile tile-principal" id="btnRecCnhFisica" onclick="escolherModoCnhRec('FISICA')">CNH física</button>
-            <button class="tile tile-secundaria" id="btnRecCnhDigital" onclick="escolherModoCnhRec('DIGITAL')">CNH digital</button>
-        </div>`;
+function telaRecCnhQr() { return telaRecQr('Leia o QR code da CNH', 'cnh'); }
+function telaRecCrlvQr() { return telaRecQr('Leia o QR code do CRLV', 'crlv'); }
+
+function recLimparFrameQr() {
+    state.rec.previewImg = null;
+    state.rec.previewCanvas = null;
 }
 
-async function escolherModoCnhRec(modo) {
-    const btnFisica = document.getElementById('btnRecCnhFisica');
-    const btnDigital = document.getElementById('btnRecCnhDigital');
-    if (btnFisica) btnFisica.disabled = true;
-    if (btnDigital) btnDigital.disabled = true;
+async function recCapturarQr(tipo) {
+    if (state.rec.emAndamento) return;
+    const video = document.getElementById('recCamVideo');
+    if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        recCamMostrarStatus('Aguarde o vídeo carregar.', true);
+        return;
+    }
+    state.rec.emAndamento = true;
+    const btn = document.getElementById('recCamBtnCapturar');
+    if (btn) btn.disabled = true;
+    let canvas = null;
     try {
-        await api('documento.php', 'definir-modo-cnh', { id_atendimento: state.idAtendimento, modo });
-        state.rec.cnhModo = modo;
-        ir('rec_cnh_frente');
+        recCamMostrarStatus('Lendo QR code...');
+        canvas = recCamCapturarFrame(video);
+        const qr = await lerQrDoCanvas(canvas);
+        if (!qr || !qr.ok) {
+            recLimparFrameQr();
+            const tentativa = ++state.rec.qrTentativas[tipo];
+            if (tentativa >= 3) {
+                ir(tipo === 'cnh' ? 'rec_cnh_manual' : 'rec_crlv_manual');
+                return;
+            }
+            recCamMostrarStatus(`Não encontramos o QR. Aproxime e tente novamente. Tentativa ${tentativa} de 3.`, true);
+            return;
+        }
+
+        const imagemQr = canvas.toDataURL('image/jpeg', 0.85);
+        recLimparFrameQr();
+        canvas = null;
+        state.rec.qrTentativas[tipo] = 0;
+        recCamMostrarStatus('QR lido. Enviando para validação...');
+        state.rec[tipo + 'Promise'] = iniciarProcessamentoDocumento(
+            state.idAtendimento,
+            tipo,
+            imagemQr,
+            (status) => atualizarStatusDocumento('rec', tipo, status),
+        );
+        await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
     } catch (e) {
-        mostrarErroTela(e.message);
-        if (btnFisica) btnFisica.disabled = false;
-        if (btnDigital) btnDigital.disabled = false;
+        recCamMostrarStatus('Não foi possível iniciar a validação agora.', true);
+    } finally {
+        canvas = null;
+        state.rec.emAndamento = false;
+        if (btn && document.getElementById('recCamBtnCapturar') === btn) recCamAtualizarBotao();
     }
 }
-
-function telaRecCnhFrente() { return telaRecCaptura('Fotografe a frente da CNH'); }
-function telaRecCnhVerso() { return telaRecCaptura('Fotografe o verso da CNH (o QR code geralmente fica aqui)'); }
-function telaRecCrlv() { return telaRecCaptura('Fotografe o CRLV completo'); }
-
 // Indicador DISCRETO e NAO BLOQUANTE (nunca modal, nunca header fixo) de que
 // a CNH ainda esta sendo validada em segundo plano enquanto o motorista ja
 // esta fotografando o CRLV — mesmo espirito de exibirIndicadorProcessamentoCnh()
@@ -4654,248 +4468,6 @@ function recCamCapturarFrame(video) {
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas;
-}
-
-function recCapturarFoto() {
-    const video = document.getElementById('recCamVideo');
-    if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
-        recCamMostrarStatus('Aguarde o vídeo carregar.', true);
-        return;
-    }
-    recCamMostrarStatus('Capturando imagem...');
-    const canvas = recCamCapturarFrame(video);
-    state.rec.previewCanvas = canvas;
-    state.rec.previewImg = canvas.toDataURL('image/jpeg', 0.85);
-    recExibirPreview();
-}
-
-function recExibirPreview() {
-    const caixa = document.getElementById('recCamCaixa');
-    if (caixa) caixa.style.display = 'none';
-    const img = document.getElementById('recCamPreview');
-    if (img) { img.src = state.rec.previewImg; img.style.display = 'block'; }
-    const controles = document.getElementById('recCamControles');
-    if (controles) {
-        controles.innerHTML = `
-            <button class="btn-primario" id="recCamBtnUsar" onclick="recConfirmarFoto()">Usar foto</button>
-            <button class="btn-fantasma" id="recCamBtnRefazer" onclick="recRefazerFoto()">Refazer</button>`;
-    }
-}
-
-function recVoltarParaVideoAoVivo() {
-    const img = document.getElementById('recCamPreview');
-    if (img) img.style.display = 'none';
-    const caixa = document.getElementById('recCamCaixa');
-    if (caixa) caixa.style.display = '';
-    const controles = document.getElementById('recCamControles');
-    if (controles) controles.innerHTML = `<button class="btn-primario" id="recCamBtnCapturar" onclick="recCapturarFoto()">Capturar</button>`;
-    recCamAtualizarBotao();
-}
-
-function recRefazerFoto() {
-    state.rec.previewImg = null;
-    state.rec.previewCanvas = null;
-    recVoltarParaVideoAoVivo();
-    recCamMostrarStatus(recCamVideoPronto ? 'Câmera pronta' : 'Conectando à câmera...');
-}
-
-// oferece ao motorista as duas saidas quando o QR nao pode ser lido — nunca
-// trava sem saida (mesmo espirito de expOferecerFallback)
-function recOferecerFallback(tipo) {
-    const rotulo = tipo === 'cnh' ? 'CNH' : 'CRLV';
-    const telaManual = tipo === 'cnh' ? 'rec_cnh_manual' : 'rec_crlv_manual';
-    abrirModal(`
-        <div class="titulo">Não foi possível validar a ${rotulo}</div>
-        <div class="subtitulo">Você pode tentar capturar novamente ou preencher os dados manualmente.</div>
-        <button class="btn-primario" onclick="fecharModal(); recRefazerFoto();">Tentar novamente</button>
-        <button class="btn-fantasma" onclick="fecharModal(); ir('${telaManual}');">Preencher dados manualmente</button>
-    `);
-}
-
-// botao "Capturar"/"Usar foto" desabilitado durante qualquer chamada de rede
-// em andamento — reabilitado so apos a resposta
-async function recConfirmarFoto() {
-    if (state.rec.emAndamento) return;
-    state.rec.emAndamento = true;
-    const btnUsar = document.getElementById('recCamBtnUsar');
-    const btnRefazer = document.getElementById('recCamBtnRefazer');
-    if (btnUsar) btnUsar.disabled = true;
-    if (btnRefazer) btnRefazer.disabled = true;
-    try {
-        if (state.tela === 'rec_cnh_frente') {
-            if (state.rec.cnhModo === 'DIGITAL') {
-                // Modo DIGITAL (demanda suporte-cnh-digital, 2026-09-27): so
-                // 1 foto, nunca ha verso — envia direto, sem passar por
-                // rec_cnh_verso.
-                await recProcessarCnhDigital();
-            } else {
-                await recProcessarCnhFrente();
-            }
-        } else if (state.tela === 'rec_cnh_verso') {
-            await recProcessarCnhVerso();
-        } else if (state.tela === 'rec_crlv') {
-            await recProcessarCrlv();
-        }
-    } finally {
-        state.rec.emAndamento = false;
-        if (btnUsar) btnUsar.disabled = false;
-        if (btnRefazer) btnRefazer.disabled = false;
-    }
-}
-
-// Modo DIGITAL (CNH do app oficial do Detran/Senatran, 1 foto so — nunca
-// existe "verso" nesse modo, demanda suporte-cnh-digital, 2026-09-27).
-// Diferente do modo FISICA (recProcessarCnhFrente() abaixo, que envia a
-// frente sem ler QR e so le o QR no verso), aqui o QR precisa ser lido JA na
-// unica foto capturada, ANTES do upload (mesmo padrao de leitura local ja
-// usado no verso do modo FISICA / no CRLV) — se nao for possivel ler,
-// oferece o mesmo fallback (tentar novamente / preencher manual), sem gastar
-// rede. So a frente e enviada (upload tipo='cnh_frente', nunca 'cnh_verso'
-// neste modo), e o processamento assincrono e disparado exatamente como no
-// modo FISICA.
-async function recProcessarCnhDigital() {
-    const frenteImg = state.rec.previewImg;
-    recCamMostrarStatus('Lendo QR code...');
-    const qr = await recLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        recOferecerFallback('cnh');
-        return;
-    }
-
-    recCamMostrarStatus('Enviando documento...');
-    try {
-        await api('documento.php', 'upload', {
-            id_atendimento: state.idAtendimento,
-            tipo: 'cnh_frente',
-            imagem: frenteImg,
-        });
-    } catch (e) {
-        recCamMostrarStatus(e.message, true);
-        mostrarErroTela(e.message);
-        return;
-    }
-
-    state.rec.cnhPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'cnh', qr.binaryData, (status) => atualizarStatusDocumento('rec', 'cnh', status));
-    recCamMostrarStatus('CNH enviada para validação');
-
-    await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
-}
-
-// Diferenca intencional em relacao a Expedicao, MANTIDA nesta demanda: a
-// frente da CNH do Recebimento e enviada numa chamada de upload PROPRIA
-// (tipo 'cnh_frente'), sem leitura de QR (o QR normalmente esta no verso) —
-// so envia a foto e segue LOCALMENTE (sem chamada de rede alguma alem do
-// upload) para a captura do verso. Desde a unificacao da rodada corretiva de
-// 2026-09-26 a frente e o verso vivem na MESMA etapa 'rec_cnh' do backend —
-// isso corrigiu o bug real desta rodada: o front NAO chama mais
-// avancar-etapa-documentos nem iniciar-processamento aqui, so depois do
-// verso (ver recProcessarCnhVerso() abaixo). Chamar avancar-etapa-documentos
-// logo apos a frente falharia sempre o gate 'upload_cnh' (que exige os 2
-// arquivos em disco) e acabava desviando incorretamente para a tela de
-// preenchimento manual mesmo com o fluxo normal em andamento. Modo FISICA/
-// NULL (fail-safe) apenas — modo DIGITAL nunca chega a esta funcao (ver
-// recProcessarCnhDigital() acima).
-async function recProcessarCnhFrente() {
-    const frenteImg = state.rec.previewImg;
-    recCamMostrarStatus('Enviando documento...');
-    try {
-        await api('documento.php', 'upload', {
-            id_atendimento: state.idAtendimento,
-            tipo: 'cnh_frente',
-            imagem: frenteImg,
-        });
-    } catch (e) {
-        recCamMostrarStatus(e.message, true);
-        mostrarErroTela(e.message);
-        return;
-    }
-
-    ir('rec_cnh_verso');
-}
-
-// ORDEM INVERTIDA (demanda migracao-vio-api-br-com-cache, 2026-09-25,
-// decisao explicita do usuario): o QR do verso e lido/validado LOCALMENTE
-// (jsQR, sem chamada de rede) ANTES do upload do verso — evita subir uma foto
-// cujo QR ja se sabe ilegivel. A frente ja foi enviada por recProcessarCnhFrente()
-// (mesma etapa 'rec_cnh' do backend, so a sub-tela client-side mudou), entao
-// so o verso e enviado aqui. So DEPOIS deste upload e que
-// tentarAvancarEtapaDocumentos() e chamado (gate 'upload_cnh' so libera com
-// os 2 arquivos em disco) e o processamento externo (vio.api.br) e disparado.
-async function recProcessarCnhVerso() {
-    const versoImg = state.rec.previewImg;
-    recCamMostrarStatus('Lendo QR code...');
-    const qr = await recLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        recOferecerFallback('cnh');
-        return;
-    }
-
-    recCamMostrarStatus('Enviando documento...');
-    try {
-        await api('documento.php', 'upload', {
-            id_atendimento: state.idAtendimento,
-            tipo: 'cnh_verso',
-            imagem: versoImg,
-        });
-    } catch (e) {
-        recCamMostrarStatus(e.message, true);
-        mostrarErroTela(e.message);
-        return;
-    }
-
-    // ASSINCRONO (mesmo padrao da Expedicao, ver comentario em
-    // expProcessarCnhVerso() sobre a Promise so resolver apos estado
-    // terminal): dispara a validacao em segundo plano SEM aguardar e libera a
-    // captura do CRLV imediatamente.
-    state.rec.cnhPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'cnh', qr.binaryData, (status) => atualizarStatusDocumento('rec', 'cnh', status));
-    recCamMostrarStatus('CNH enviada para validação');
-
-    await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
-}
-
-// Mesma inversao de ordem do CRLV (QR local ANTES do upload) da Expedicao —
-// decisao explicita do usuario nesta demanda.
-async function recProcessarCrlv() {
-    const crlvImg = state.rec.previewImg;
-    recCamMostrarStatus('Lendo QR code...');
-    const qr = await recLerQrDaImagemCapturada();
-    if (!qr.ok) {
-        recOferecerFallback('crlv');
-        return;
-    }
-
-    recCamMostrarStatus('Enviando documento...');
-    try {
-        await api('documento.php', 'upload', {
-            id_atendimento: state.idAtendimento,
-            tipo: 'crlv',
-            imagem: crlvImg,
-        });
-    } catch (e) {
-        recCamMostrarStatus(e.message, true);
-        mostrarErroTela(e.message);
-        return;
-    }
-
-    // ASSINCRONO — dispara a validacao do CRLV em segundo plano e segue
-    // direto para a tela de espera (rec_aguarde_documentos so aparece a
-    // partir daqui, nunca entre CNH e CRLV).
-    state.rec.crlvPromise = iniciarProcessamentoDocumento(state.idAtendimento, 'crlv', qr.binaryData, (status) => atualizarStatusDocumento('rec', 'crlv', status));
-    recCamMostrarStatus('CRLV enviado para validação');
-
-    await tentarAvancarEtapaDocumentos('rec_cnh_manual', 'rec_crlv_manual');
-}
-
-// leitura de QR reaproveitando o MESMO Web Worker ja criado para a
-// Expedicao (obterQrWorker()/lerQrDoCanvas(), genericos, sem estado
-// especifico de exp/rec)
-async function recLerQrDaImagemCapturada() {
-    if (!state.rec.previewCanvas) return { ok: false };
-    try {
-        return await lerQrDoCanvas(state.rec.previewCanvas);
-    } catch (e) {
-        return { ok: false };
-    }
 }
 
 // -------------------- recebimento: preenchimento manual (fallback do QR) --------------------

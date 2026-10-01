@@ -143,12 +143,17 @@ input.campo-texto {
 .caixa-scanner video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .guia-scanner { position: absolute; inset: 8%; border: 2px dashed rgba(255,255,255,0.85); border-radius: 8px; pointer-events: none; }
 .previa-nota { width: 100%; max-width: 360px; margin: 0 auto; display: block; border-radius: 12px; object-fit: contain; background: #000; flex-shrink: 0; }
-/* Caixa de digitalizacao de notas (Recebimento) ampliada a pedido do usuario —
-   seletor por ID (maior especificidade que a classe) atinge so essas 2
-   instancias, sem afetar #expCamCaixa/#expCamPreview (CNH/CRLV da Expedicao,
-   que continuam em 360px via .caixa-scanner/.previa-nota). .guia-scanner usa
-   inset em % e escala junto automaticamente. */
-#caixaScanner, #previaNota { max-width: min(92%, 900px); }
+/* O quadro de notas e a captura de documentos usam a mesma largura util.
+   Os IDs de documento preservam a classe-base e, portanto, nao alteram a
+   rotacao/previa particular das notas. A altura real continua sendo escrita
+   pelo JS depois que o stream negocia sua resolucao. */
+#caixaScanner, #previaNota,
+#expCamCaixa, #expCamPreview,
+#recCamCaixa, #recCamPreview { max-width: min(92%, 900px); }
+/* Os controles que confirmam/refazem documento continuam visiveis no totem
+   vertical e atingem o alvo minimo de toque sem afetar a captura de notas. */
+#expCamControles .btn-primario, #expCamControles .btn-fantasma,
+#recCamControles .btn-primario, #recCamControles .btn-fantasma { min-height: 64px; }
 /* AJUSTE (2026-09-28, demanda foto-nota-em-pe): a previa da nota agora
    nasce em pe (rotacionada 270 graus na captura, ver capturarFotoScannerNota()
    em app.js) — mas a altura inline aplicada via JS em ambos os elementos
