@@ -992,7 +992,12 @@ input.campo-texto { font-size: 48px; min-height: 108px; padding: 18px 24px; max-
 #modalConfirmExcluirNotaCaixa { max-width: min(100%, 680px); }
 #modalConfirmExcluirNotaCaixa .titulo { font-size: 30px; }
 #modalConfirmExcluirNotaCaixa .subtitulo { font-size: 24px; }
-#btnConfirmarNumeroSugerido, #btnCorrigirNumeroSugerido { min-height: 96px; font-size: 30px; }
+#btnConfirmarNumeroSugerido, #btnCorrigirNumeroSugerido { min-height: 88px; font-size: 28px; font-weight: 700; border-radius: 16px; touch-action: manipulation; }
+/* Padronizacao dos modais de numero da nota: teclas iguais (grade 3x4, mesmo peso) e botoes de acao
+   com a mesma largura (560px, a do teclado), altura (88px), fonte (28px/700) e cantos (16px). */
+.tecla-numerica { font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; }
+.modal-caixa .grupo-botoes:has(#btnConfirmarNumeroSugerido) { max-width: 560px; gap: 18px; }
+.modal-caixa .btn-saida-modal-nota { width: 100%; margin-left: auto; margin-right: auto; font-weight: 700; }
 .btn-saida-modal-nota:active, .btn-voltar-modal-nota:active:not(:disabled) { background: #3A3A3A; color: #FFFFFF; }
 .btn-excluir-nota:active:not(:disabled), .btn-excluir-sim:active:not(:disabled) { background: #6f1c1c; border-color: #6f1c1c; }
 .btn-excluir-nao:active:not(:disabled) { background: #015a82; border-color: #015a82; }

@@ -951,12 +951,16 @@ async function exercitarAlvosToque(page) {
             confirmarCancelar(); medirModal('modalCaixa', 'cancelar'); fecharModal();
             abrirModal('<div class="titulo">Selecione a câmera</div><div class="grupo-botoes"><button class="btn-fantasma">Câmera 1</button><button class="btn-fantasma">Câmera 2</button></div>'); medirModal('modalCaixa', 'camera'); fecharModal();
             state.tela = 'rec_revisao_numeros';
+            const detalhar = cx => [...cx.querySelectorAll('button')].filter(visivel).map(b => { const c = b.getBoundingClientRect(), s = getComputedStyle(b); return { t: b.textContent.trim().slice(0, 24), w: Math.round(c.width * 10) / 10, h: Math.round(c.height * 10) / 10, left: Math.round(c.left * 10) / 10, top: Math.round(c.top * 10) / 10, right: Math.round(c.right * 10) / 10, bottom: Math.round(c.bottom * 10) / 10, fonte: s.fontSize, peso: s.fontWeight, raio: s.borderTopLeftRadius, alin: s.textAlign, tecla: b.classList.contains('tecla-numerica') }; });
             abrirModalNumeroNotaSugestao('n2', '12345'); medirModal('modalCaixa', 'nota_sugestao');
+            r.modais.nota_sugestao.detalhe = detalhar(document.getElementById('modalCaixa'));
             abrirModalNumeroNotaManual('n2', '', '');
             const caixa = medirModal('modalCaixa', 'nota_manual');
+            r.modais.nota_manual.detalhe = detalhar(caixa);
             r.modais.nota_manual.teclas = [...caixa.querySelectorAll('.tecla-numerica')].map(k => { const c = k.getBoundingClientRect(); return { t: k.textContent.trim(), h: Math.round(c.height), w: Math.round(c.width), fonte: parseFloat(getComputedStyle(k).fontSize), noViewport: c.top >= 0 && c.bottom <= innerHeight, dentro: c.left >= 0 && c.right <= innerWidth }; });
             r.modais.nota_manual.campoH = Math.round(document.getElementById('inputNumeroNota').getBoundingClientRect().height);
             r.modais.nota_manual.rolagem = caixa.scrollHeight > caixa.clientHeight;
+            r.modais.nota_manual.horizontal = caixa.scrollWidth > caixa.clientWidth + 1;
             fecharModal();
             abrirConfirmacaoExcluirNota('n2'); medirModal('modalConfirmExcluirNotaCaixa', 'excluir_nota'); fecharConfirmacaoExcluirNota();
             state.tela = 'exp_placa'; mostrarInatividade();
@@ -1241,8 +1245,32 @@ async function main() {
                 ok(m.caixaDentro && m.semOverflowX, `${tg} dentro do viewport e sem overflow horizontal`);
             }
             const nm = at.modais.nota_manual;
+            if (process.env.DETALHE) for (const k of ['nota_sugestao', 'nota_manual']) console.log('DET ' + W + ' ' + k + '\n' + at.modais[k].detalhe.map(d => `  ${d.t.padEnd(24)} ${d.w}x${d.h} L${d.left} T${d.top} R${d.right} B${d.bottom} ${d.fonte}/${d.peso} r${d.raio}`).join('\n') + `\n  rolagem=${at.modais[k].rolagem}`);
             ok(nm.teclas.length === 12 && nm.teclas.every(k => k.h >= 120 && k.dentro && k.noViewport), `${W}: teclado numerico da nota: 12 teclas >= 120px, dentro do viewport sem rolar (${nm.teclas.map(k => k.h).join(',')})`);
             ok(nm.teclas.filter(k => /^\d$/.test(k.t)).length === 10 && nm.teclas.filter(k => /^\d$/.test(k.t)).every(k => k.fonte >= 48 && k.w >= 120), `${W}: digitos do teclado numerico com fonte >= 48px e largura >= 120px (${nm.teclas[0].w}px)`);
+            {
+                // Padronizacao dos modais de numero da nota (teclas e botoes de acao)
+                const tk = nm.detalhe.filter(d => d.tecla), ac = d => d.filter(x => !x.tecla);
+                const dig = tk.filter(d => /^\d$/.test(d.t)), apg = tk.find(d => d.t === 'Apagar'), cfm = tk.find(d => d.t === 'Confirmar');
+                const iguais = (a, b) => Math.abs(a - b) <= 1;
+                ok(tk.length === 12 && tk.every(d => iguais(d.w, tk[0].w) && iguais(d.h, tk[0].h)), `${W}: 12 teclas do numerico com a mesma largura e altura (${tk[0].w}x${tk[0].h})`);
+                ok(tk.every(d => d.h >= 120), `${W}: teclas do numerico >= 120px de altura`);
+                ok(new Set(dig.map(d => d.fonte + '/' + d.peso)).size === 1 && dig.length === 10, `${W}: digitos com a mesma fonte (${dig[0].fonte}/${dig[0].peso})`);
+                ok(apg && cfm && apg.fonte === cfm.fonte && apg.peso === cfm.peso, `${W}: Apagar e Confirmar com a mesma fonte (${apg.fonte}/${apg.peso})`);
+                ok(new Set(tk.map(d => d.raio)).size === 1, `${W}: teclas com o mesmo raio de canto`);
+                const col = [...new Set(tk.map(d => Math.round(d.left)))].sort((a, b) => a - b), lin = [...new Set(tk.map(d => Math.round(d.top)))].sort((a, b) => a - b);
+                const gH = col.slice(1).map((v, i) => v - col[i] - tk[0].w), gV = lin.slice(1).map((v, i) => v - lin[i] - tk[0].h);
+                ok(col.length === 3 && lin.length === 4 && [...gH, ...gV].every(g => iguais(g, gH[0])), `${W}: grade regular 3x4 com gap uniforme (${gH.map(g => Math.round(g)).join('/')} x ${gV.map(g => Math.round(g)).join('/')})`);
+                ok(tk.every(d => d.left >= 0 && d.right <= W && d.top >= 0 && d.bottom <= viewport.height || nm.rolagem), `${W}: teclas dentro do viewport (ou na rolagem interna do modal)`);
+                for (const [rot, det] of [['manual', nm.detalhe], ['sugestao', at.modais.nota_sugestao.detalhe]]) {
+                    const b = ac(det);
+                    ok(b.length >= 3 && b.every(x => iguais(x.h, b[0].h) && iguais(x.w, b[0].w) && x.fonte === b[0].fonte && x.peso === b[0].peso && x.raio === b[0].raio && x.h >= 88), `${W}: botoes de acao do modal ${rot} (${b.map(x => x.t.replace('✕ ', '')).join(', ')}) com mesma largura, altura, fonte e cantos (${b[0].w}x${b[0].h}, ${b[0].fonte}/${b[0].peso}, ${b[0].raio})`);
+                    ok(b.every(x => x.left >= 0 && x.right <= W), `${W}: botoes de acao do modal ${rot} sem sair da largura do viewport`);
+                }
+                ok(iguais(ac(nm.detalhe)[0].w, tk[2].right - tk[0].left), `${W}: botoes de acao com a largura do teclado numerico`);
+                ok(!nm.horizontal, `${W}: modal do numero sem overflow horizontal`);
+                console.log(`  padronizacao ${W}x${viewport.height}: teclas ${tk[0].w}x${tk[0].h} (digitos ${dig[0].fonte}, Apagar/Confirmar ${apg.fonte}), gap ${Math.round(gH[0])}px; acoes ${ac(nm.detalhe)[0].w}x${ac(nm.detalhe)[0].h}`);
+            }
             ok(nm.campoH >= 100, `${W}: campo do numero da nota >= 100px (${nm.campoH}px)`);
             console.log(`  numerico ${W}x${viewport.height}: tecla ${nm.teclas[0].w}x${nm.teclas[0].h}px, fonte ${nm.teclas[0].fonte}px, modal ${nm.caixaW}px, rolagem interna ${nm.rolagem ? 'sim' : 'nao'}; botoes de modal min ${Math.min(...Object.values(at.modais).flatMap(m => m.botoes.map(b => b.h)))}px`);
             // feedback visual ao toque (:active, cor solida) e nenhum :hover no bloco novo
@@ -1304,6 +1332,23 @@ async function main() {
     const blocoNovo = cssAtual.slice(cssAtual.lastIndexOf('.barra-cancelar { padding: 12px 20px 0; }'));
     ok(blocoNovo.length > 500 && !/:hover/.test(blocoNovo) && /\.tecla:active/.test(blocoNovo) && /\.tecla-numerica:active/.test(blocoNovo), 'bloco de ampliacao sem :hover e com estado :active nas teclas');
     ok(!/Ã[\u0080-¿]|â€|�/.test(fs.readFileSync(APPCSS, 'utf8')), 'app.css sem mojibake');
+    // Titulo e favicon (index.php e a unica pagina HTML servida ao navegador)
+    const indexPhp = fs.readFileSync(path.join(RAIZ, 'public', 'totem', 'index.php'), 'utf8');
+    ok(/<title>Totem<\/title>/.test(indexPhp) && (indexPhp.match(/<title>/g) || []).length === 1, 'index.php: title === Totem (unico)');
+    ok(!/document\.title/.test(semComentarios) && !/document\.title/.test(fs.readFileSync(IMPRJS, 'utf8')), 'JS nao altera document.title');
+    const linkVersionado = (rel, arq, extra) => indexPhp.includes('<link rel="' + rel + '"' + extra + ' href="assets/' + arq + '?v=<?= (int) @filemtime(__DIR__ . \'/assets/' + arq + '\') ?>"');
+    ok(linkVersionado('icon', 'favicon.svg', ' type="image/svg+xml"'), 'index.php: link rel=icon svg versionado');
+    ok(linkVersionado('icon', 'favicon-32.png', ' type="image/png" sizes="32x32"'), 'index.php: link rel=icon png 32 versionado');
+    ok(linkVersionado('apple-touch-icon', 'apple-touch-icon.png', ' sizes="180x180"'), 'index.php: apple-touch-icon versionado');
+    const dirAssets = path.join(RAIZ, 'public', 'totem', 'assets');
+    for (const [arq, ass] of [['favicon.svg', null], ['favicon-32.png', [32, 32]], ['favicon-192.png', [192, 192]], ['apple-touch-icon.png', [180, 180]], ['favicon.ico', null]]) {
+        const buf = fs.existsSync(path.join(dirAssets, arq)) ? fs.readFileSync(path.join(dirAssets, arq)) : Buffer.alloc(0);
+        ok(buf.length > 100, arq + ' existe e nao esta vazio');
+        if (ass) ok(buf.subarray(1, 4).toString() === 'PNG' && buf.readUInt32BE(16) === ass[0] && buf.readUInt32BE(20) === ass[1], arq + ' e PNG ' + ass.join('x'));
+    }
+    const svgTxt = fs.readFileSync(path.join(dirAssets, 'favicon.svg'), 'utf8');
+    const svgPage = await (async () => { const b2 = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox'] }); try { const pg = await b2.newPage(); await pg.setContent('<body></body>'); return await pg.evaluate(t => { const d = new DOMParser().parseFromString(t, 'image/svg+xml'); return { erro: !!d.querySelector('parsererror'), raiz: d.documentElement.localName, vb: d.documentElement.getAttribute('viewBox') }; }, svgTxt); } finally { await b2.close(); } })();
+    ok(!svgPage.erro && svgPage.raiz === 'svg' && svgPage.vb === '0 0 64 64' && !/href=|<text|@import|url\(http/.test(svgTxt), 'favicon.svg parseavel, sem recursos externos/fontes');
     console.log(`vio_captura_layout: ${passou} verificacoes, ${falhou} falhas`);
     process.exitCode = falhou ? 1 : 0;
 }

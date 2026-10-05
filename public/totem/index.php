@@ -60,7 +60,10 @@ $assetsVersoesJson = json_encode($assetsVersoes, JSON_HEX_TAG | JSON_HEX_AMP | J
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>UDLOG — Totem de autoatendimento</title>
+<title>Totem</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg?v=<?= (int) @filemtime(__DIR__ . '/assets/favicon.svg') ?>">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png?v=<?= (int) @filemtime(__DIR__ . '/assets/favicon-32.png') ?>">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png?v=<?= (int) @filemtime(__DIR__ . '/assets/apple-touch-icon.png') ?>">
 <link rel="stylesheet" href="assets/app.css?v=<?= (int) @filemtime(__DIR__ . '/assets/app.css') ?>">
 </head>
 <body data-totem-token="<?= htmlspecialchars($totem['token_api'], ENT_QUOTES, 'UTF-8') ?>" data-totem-nome="<?= htmlspecialchars($totem['nome'], ENT_QUOTES, 'UTF-8') ?>">
