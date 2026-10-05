@@ -155,11 +155,22 @@ class AtendimentoRn
             $snapshotRntc = $atendimento['crlv_snapshot_rntc'] !== null ? (string) $atendimento['crlv_snapshot_rntc'] : null;
             $snapshotTipoVeiculo = $atendimento['crlv_snapshot_tipo_veiculo'] !== null ? (string) $atendimento['crlv_snapshot_tipo_veiculo'] : null;
 
+            // RNTRC que a API NAO trouxe (snapshot NULL/vazio) e preenchido
+            // pelo motorista na confirmacao: nao e "edicao de dado validado",
+            // entao nao rebaixa a origem (decisao 2026-10-02). Se o snapshot
+            // TEM RNTRC, qualquer alteracao continua rebaixando.
+            $snapshotRntcVazio = $snapshotRntc === null || trim($snapshotRntc) === '';
+            $rntcDivergiu = !$snapshotRntcVazio && $crlvRntcNormalizado !== $snapshotRntc;
+
+            // Mesma regra para o Tipo do veiculo (decisao 2026-10-02).
+            $snapshotTipoVazio = $snapshotTipoVeiculo === null || trim($snapshotTipoVeiculo) === '';
+            $tipoDivergiu = !$snapshotTipoVazio && $crlvTipoVeiculoNormalizado !== $snapshotTipoVeiculo;
+
             $crlvDivergiu = $placaNormalizada !== $snapshotPlaca
                 || $crlvAnoNormalizado !== $snapshotExercicio
                 || $crlvUfNormalizada !== $snapshotUf
-                || $crlvRntcNormalizado !== $snapshotRntc
-                || $crlvTipoVeiculoNormalizado !== $snapshotTipoVeiculo;
+                || $rntcDivergiu
+                || $tipoDivergiu;
 
             if ($crlvDivergiu) {
                 $crlvOrigem = 'MANUAL';
@@ -181,6 +192,65 @@ class AtendimentoRn
             $crlvOrigem,
             $crlvStatusRevisao
         );
+    }
+
+    /**
+     * Campos exibidos na tela de confirmacao (exp_confirma/rec_confirma) e
+     * necessarios ao Talent que estao ausentes/invalidos. Decisao de produto
+     * 2026-10-02: o RNTRC (que o QR do CRLV nem sempre traz) e OBRIGATORIO
+     * aqui. Valores editaveis vem de $dados (o que o motorista confirma);
+     * placa, ordem de coleta (Expedicao) e cliente (Recebimento) nao sao
+     * editaveis na tela e vem do atendimento. Retorna chave => rotulo fixo
+     * (nunca valores).
+     *
+     * @return array<string,string>
+     */
+    public function camposObrigatoriosAusentes(array $atendimento, array $dados): array
+    {
+        $ausentes = [];
+        $texto = static fn (mixed $v): string => is_scalar($v) ? trim((string) $v) : '';
+
+        $placa = preg_replace('/[^A-Za-z0-9]/', '', (string) ($atendimento['placa'] ?? ''));
+        if ($placa === '') {
+            $ausentes['placa'] = 'placa';
+        }
+        if ($texto($dados['motorista_nome'] ?? null) === '') {
+            $ausentes['motorista_nome'] = 'nome do motorista';
+        }
+        if (\Util\CpfValidador::normalizarEValidar(is_scalar($dados['motorista_cpf'] ?? null) ? (string) $dados['motorista_cpf'] : null) === null) {
+            $ausentes['motorista_cpf'] = 'CPF';
+        }
+        $validadeNorm = $this->normalizarDataParaComparacao(is_scalar($dados['cnh_validade'] ?? null) ? $dados['cnh_validade'] : null);
+        if ($validadeNorm === null
+            || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $validadeNorm, $m)
+            || !checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+            $ausentes['cnh_validade'] = 'validade da CNH';
+        }
+        $ano = $texto($dados['crlv_ano'] ?? null);
+        if (!ctype_digit($ano) || (int) $ano <= 0) {
+            $ausentes['crlv_ano'] = 'ano do CRLV';
+        }
+        if (!in_array(strtoupper($texto($dados['crlv_uf'] ?? null)), DocumentoRn::UFS_VALIDAS, true)) {
+            $ausentes['crlv_uf'] = 'UF do CRLV';
+        }
+        $rntc = $texto($dados['crlv_rntc'] ?? null);
+        if ($rntc === '' || strlen($rntc) > 20) {
+            $ausentes['crlv_rntc'] = 'RNTRC';
+        }
+        $tipo = $texto($dados['crlv_tipo_veiculo'] ?? null);
+        if ($tipo === '' || strlen($tipo) > 60) {
+            $ausentes['crlv_tipo_veiculo'] = 'tipo de veiculo';
+        }
+
+        if (($atendimento['tipo'] ?? '') === 'expedicao') {
+            if (trim((string) ($atendimento['ordem_coleta'] ?? '')) === '') {
+                $ausentes['ordem_coleta'] = 'ordem de coleta';
+            }
+        } elseif (trim((string) ($atendimento['cliente_nome'] ?? '')) === '') {
+            $ausentes['cliente'] = 'cliente';
+        }
+
+        return $ausentes;
     }
 
     /**
@@ -217,9 +287,48 @@ class AtendimentoRn
         $this->atendimentoDao->salvarCliente($idAtendimento, $nome, $cnpj);
     }
 
-    public function salvarAjudante(int $idAtendimento, ?string $nome, ?string $cpf): void
+    /**
+     * Valida/normaliza os dados do ajudante vindos do front. "Sem ajudante" =
+     * nome E cpf vazios/null -> ['nome' => null, 'cpf' => null]. Com ajudante:
+     * nome nao vazio (<= 150 chars, sem caracteres de controle) E CPF com
+     * EXATAMENTE 11 digitos apos remover tudo que nao for digito (com ou sem
+     * pontuacao; gravado so com os 11 digitos). Decisao do usuario: o CPF do
+     * ajudante NAO e validado pelo digito verificador (diferente do motorista).
+     * Qualquer outra combinacao (so um dos dois, tipo nao-string, CPF com
+     * menos/mais de 11 digitos) -> null.
+     *
+     * @return array{nome:?string,cpf:?string}|null
+     */
+    public function normalizarAjudante(mixed $nome, mixed $cpf): ?array
     {
-        $this->atendimentoDao->salvarAjudante($idAtendimento, $nome, $cpf);
+        if (($nome !== null && !is_string($nome)) || ($cpf !== null && !is_string($cpf))) {
+            return null;
+        }
+        $nomeLimpo = $nome === null ? '' : trim((string) preg_replace('/\s+/u', ' ', $nome));
+        $cpfBruto = $cpf === null ? '' : trim($cpf);
+
+        if ($nomeLimpo === '' && $cpfBruto === '') {
+            return ['nome' => null, 'cpf' => null];
+        }
+        if ($nomeLimpo === '' || mb_strlen($nomeLimpo, 'UTF-8') > 150 || preg_match('/[\x00-\x1F\x7F]/', $nomeLimpo) === 1) {
+            return null;
+        }
+        $cpfDigitos = (string) preg_replace('/\D/', '', $cpfBruto);
+        if (strlen($cpfDigitos) !== 11) {
+            return null;
+        }
+
+        return ['nome' => $nomeLimpo, 'cpf' => $cpfDigitos];
+    }
+
+    /**
+     * Regrava o ajudante so se o atendimento ainda for editavel (em_andamento
+     * e check-in NAO_ENVIADO/ERRO_REPROCESSAVEL, checado sob lock no DAO).
+     * Retorna false (nada gravado) se o estado nao permitir.
+     */
+    public function salvarAjudante(int $idAtendimento, ?string $nome, ?string $cpf): bool
+    {
+        return $this->atendimentoDao->salvarAjudanteSeEditavel($idAtendimento, $nome, $cpf);
     }
 
     /**

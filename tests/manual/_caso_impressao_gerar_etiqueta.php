@@ -6,7 +6,7 @@
  * (sem HTTP real). NUNCA chama TalentClient/TalentRn (o controller so le
  * dados ja persistidos).
  *
- * Uso: php _caso_impressao_gerar_etiqueta.php <id_totem> <id_atendimento> [reimpressao=0|1]
+ * Uso: php _caso_impressao_gerar_etiqueta.php <id_totem> <id_atendimento> [reimpressao=0|1] [destinatario]
  */
 
 require_once __DIR__ . '/../../vendor/autoload.php';
@@ -34,4 +34,9 @@ register_shutdown_function(function () {
     echo "\nHTTP_CODE:" . http_response_code() . "\n";
 });
 
-$controller->gerarEtiqueta(['id_atendimento' => $idAtendimento], $idTotem, $reimpressao);
+$entrada = ['id_atendimento' => $idAtendimento];
+if (isset($argv[4]) && $argv[4] !== '') {
+    $entrada['destinatario'] = $argv[4];
+}
+
+$controller->gerarEtiqueta($entrada, $idTotem, $reimpressao);

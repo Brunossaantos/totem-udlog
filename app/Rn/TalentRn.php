@@ -94,6 +94,10 @@ class TalentRn
         }
 
         try {
+            // Releitura APOS o CAS: uma correcao de ajudante gravada entre a
+            // leitura acima e o CAS (ainda editavel) nao pode ser perdida. Depois
+            // do CAS (ENVIANDO) o ajudante fica imutavel (salvarAjudanteSeEditavel).
+            $atual = $this->atendimentoDao->buscarPorId($idAtendimento) ?? $atual;
             $payload = $this->montarPayload($atual, $notas, $empresa);
         } catch (\Throwable $e) {
             // Falha ANTES de qualquer requisicao HTTP sair (dado invalido,
@@ -120,7 +124,10 @@ class TalentRn
             // seguranca apos revisao do security-especialista).
             $statusFinal = $e->ehIndeterminado() ? 'ENVIO_INDETERMINADO' : 'ERRO_REPROCESSAVEL';
             $this->atendimentoDao->gravarResultadoEnvioTalent($idAtendimento, $tentativaId, $statusFinal, null, null);
-            return ['status' => $statusFinal, 'senha' => null, 'protocolo' => null, 'erro_categoria' => $e->categoria()];
+            // 'mensagem_api' (aditivo): mensagem de negocio da Talent ja
+            // sanitizada, so para exibicao ao usuario — nunca logada nem
+            // persistida; null se a falha nao veio de resposta HTTP da Talent.
+            return ['status' => $statusFinal, 'senha' => null, 'protocolo' => null, 'erro_categoria' => $e->categoria(), 'mensagem_api' => $e->mensagemApi()];
         }
 
         $this->atendimentoDao->gravarResultadoEnvioTalent($idAtendimento, $tentativaId, 'ENVIADO', $resultado['senha'], $resultado['protocolo']);
@@ -172,12 +179,12 @@ class TalentRn
         $placa = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($atendimento['placa'] ?? '')));
         $uf = strtoupper(trim((string) ($atendimento['crlv_uf'] ?? '')));
         // rntc/tipo (obrigatorios pelo Talent, confirmados por teste real de
-        // Producao em 2026-09-10) — SO chegam preenchidos aqui se
-        // App\Rn\DocumentoRn::crlvAprovado() ja tiver aprovado o atendimento
-        // (responsabilidade do chamador, ver AtendimentoController::finalizar()/
-        // cron/reenviar-fila.php, que so acionam processarCheckin() depois
-        // desse gate). Validado explicitamente aqui tambem como defesa em
-        // profundidade — nunca confia cegamente no chamador.
+        // Producao em 2026-09-10) — chegam preenchidos aqui por causa do gate
+        // de CONFIRMACAO_INCOMPLETA no `finalizar`
+        // (AtendimentoController::finalizar()), que bloqueia a finalizacao
+        // sem eles; DocumentoRn::crlvAprovado() NAO os exige mais. A checagem
+        // abaixo (veiculo_invalido) fica como defesa em profundidade — nunca
+        // confia cegamente no chamador.
         $rntc = trim((string) ($atendimento['crlv_rntc'] ?? ''));
         $tipoVeiculo = trim((string) ($atendimento['crlv_tipo_veiculo'] ?? ''));
         if ($placa === '' || !in_array($uf, DocumentoRn::UFS_VALIDAS, true) || $rntc === '' || $tipoVeiculo === '') {

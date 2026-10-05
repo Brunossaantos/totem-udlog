@@ -57,7 +57,13 @@ qrAfirmarRn('CRLV valida persiste somente via CAS falso vigente', $dao->crlvGrav
 $cnhSemCampo = $cnhDados; unset($cnhSemCampo['CPF']);
 qrAfirmarRn('CNH com campo obrigatorio ausente permanece fail-closed', $rn->avaliarResultadoVioApiBrCnh($atendimentoCnh, qrResultado($cnhSemCampo))['pode_avancar'] === false);
 $crlvSemCampo = $crlvDados; unset($crlvSemCampo['RNTRC']);
-qrAfirmarRn('CRLV com RNTRC ausente permanece fail-closed', $rn->avaliarResultadoVioApiBrCrlv($atendimentoCrlv, qrResultado($crlvSemCampo))['pode_avancar'] === false);
+qrAfirmarRn('CRLV com RNTRC ausente aprova (decisao 2026-10-02)', $rn->avaliarResultadoVioApiBrCrlv($atendimentoCrlv, qrResultado($crlvSemCampo))['pode_avancar'] === true);
+$crlvSemTipo = $crlvDados; unset($crlvSemTipo['Tipo']);
+qrAfirmarRn('CRLV sem Tipo aprova (decisao 2026-10-02)', $rn->avaliarResultadoVioApiBrCrlv($atendimentoCrlv, qrResultado($crlvSemTipo))['pode_avancar'] === true);
+$crlvSemExercicio = $crlvDados; unset($crlvSemExercicio['Exercício']);
+qrAfirmarRn('CRLV com Exercicio ausente permanece fail-closed', $rn->avaliarResultadoVioApiBrCrlv($atendimentoCrlv, qrResultado($crlvSemExercicio))['pode_avancar'] === false);
+$crlvTipoPlaceholder = $crlvDados; $crlvTipoPlaceholder['Tipo'] = 'xxxxx';
+qrAfirmarRn('CRLV com placeholder em Tipo reprova', $rn->avaliarResultadoVioApiBrCrlv($atendimentoCrlv, qrResultado($crlvTipoPlaceholder))['pode_avancar'] === false);
 qrAfirmarRn('CNH rejeita tipo QR normal', $rn->avaliarResultadoVioApiBrCnh($atendimentoCnh, array_replace(qrResultado($cnhDados), ['qr_type' => 'normal']))['pode_avancar'] === false);
 qrAfirmarRn('CRLV rejeita leitura principal failed', $rn->avaliarResultadoVioApiBrCrlv($atendimentoCrlv, array_replace(qrResultado($crlvDados), ['estado_leitura' => 'failed']))['pode_avancar'] === false);
 qrAfirmarRn('CNH nao aceita campos de CRLV como resultado CNH', $rn->avaliarResultadoVioApiBrCnh($atendimentoCnh, qrResultado($crlvDados))['pode_avancar'] === false);

@@ -33,6 +33,12 @@ switch ($acao) {
     case 'configuracao-servico-local':
         $controller->configuracaoServicoLocal();
         break;
+    case 'configuracao-etiqueta':
+        $controller->configuracaoEtiqueta();
+        break;
+    case 'etiqueta-pronta':
+        $controller->etiquetaPronta();
+        break;
     default:
         Resposta::erro('Acao invalida', 404);
 }

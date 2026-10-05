@@ -1,54 +1,47 @@
 <?php
 
 /**
- * Teste E2E (mock, SEM chamada real ao Talent, SEM impressao fisica) —
+ * Teste E2E (mock, SEM chamada real ao Talent/VIO, SEM impressao fisica) —
  * demanda talent-doctos-finalizacao-checkin (2026-09-14), item "E2E" do
  * roteiro de /02-testes. Todo o percurso roda via subprocessos que chamam os
- * Controllers reais diretamente (mesmo padrao ja usado por
- * teste_fluxo_recebimento_documentos.php/teste_talent_idor_finalizar.php
- * deste projeto — Resposta::sucesso()/erro() chamam exit(), entao cada
- * chamada roda isolada em processo proprio).
+ * Controllers reais diretamente (Resposta::sucesso()/erro() chamam exit(),
+ * entao cada chamada roda isolada em processo proprio).
  *
- * Fluxo Recebimento completo:
- *   iniciar (via fixture direta, mesmo padrao ja usado por
- *   talentCriarAtendimentoPronto para nao depender de API externa fora de
- *   escopo) -> digitalizar 3 notas (mock upload) -> definir numero de cada
- *   uma (incluindo 1 tentativa DUPLICADA rejeitada) -> concluirDigitalizacao()
- *   -> identificacao manual do cliente -> upload+aprovacao manual de CNH/CRLV
- *   -> avancar ate rec_confirmacao -> confirmar dados do motorista ->
- *   finalizar() -> confirma 503 TALENT_CHECKIN_DESATIVADO limpo, com TODOS os
- *   gates (doctos/posse/tipo/status/etapa/documentos) ja tendo passado (i.e.
- *   o UNICO bloqueio restante e a ativacao, nao mais falta de doctos).
+ * PORTADO ao fluxo QR-only de CNH/CRLV (2026-10-02): DocumentoController::
+ * upload() foi removido; CNH/CRLV agora entram por iniciar-processamento
+ * (JPEG sintetico do QR em memoria) + status-processamento com VIO FALSO
+ * injetado so pela factory do construtor (_caso_documento_qr_vio_falso.php).
+ * Nao ha mais cnh_frente/cnh_verso/crlv em disco nem gate de upload: o gate
+ * que bloqueia a confirmacao e 'ambos_aprovados' (CNH E CRLV aprovados),
+ * coberto por assercao de bloqueio com so a CNH aprovada. Cada confirmacao
+ * agora exige RNTRC e Tipo do veiculo (CONFIRMACAO_INCOMPLETA/422 se vazios).
  *
- * Fluxo Expedicao completo:
- *   atendimento com ordem_coleta ja selecionada (fixture direta — selecao
- *   real depende do banco externo de gestao de coletas, fora de escopo desta
- *   demanda) -> aprovar CNH/CRLV -> avancar ate exp_confirmacao -> finalizar()
- *   -> mesma confirmacao de bloqueio limpo.
+ * BANCO: roda 100% em banco descartavel `qa_qr_exclusivo_<hex>` (criado e
+ * removido no finally; subprocessos apontados via auto_prepend_file), com
+ * STORAGE_PATH temporario. Nunca toca em udlog_totem.
  *
- * Zero chamada de rede real ao Talent: cada chamada de finalizar() usa
- * _caso_trava_doctos_pendente.php, que instancia TalentClient com
- * TALENT_API_URL/TALENT_API_KEY REAIS do .env + um TalentRnEspiao que lanca
- * excecao se processarCheckin() for sequer invocado — a auséncia do marcador
- * ESPIAO_PROCESSARCHECKIN_CHAMADO na saida PROVA estruturalmente que nenhuma
- * tentativa de montar payload/chamar o Talent ocorreu (o bloqueio acontece
- * ANTES disso, no gate TALENT_CHECKIN_ATIVO).
+ * Fluxo Recebimento: fixture direta do atendimento -> 3 notas (mock upload)
+ * -> numeros (incl. 1 DUPLICADO rejeitado) -> concluirDigitalizacao() ->
+ * cliente manual -> CNH/CRLV por QR (VIO falso) -> confirmacao -> finalizar()
+ * com 503 TALENT_CHECKIN_DESATIVADO limpo, todos os gates ja passados.
+ *
+ * Fluxo Expedicao: atendimento com ordem_coleta (fixture direta; selecao real
+ * depende do banco externo de coletas) -> CNH/CRLV por QR -> confirmacao ->
+ * finalizar() com o mesmo bloqueio limpo.
+ *
+ * Zero chamada de rede ao Talent: _caso_trava_doctos_pendente.php usa um
+ * TalentRnEspiao que imprime ESPIAO_PROCESSARCHECKIN_CHAMADO se
+ * processarCheckin() for invocado; a ausencia do marcador prova que o
+ * bloqueio ocorre antes (gate TALENT_CHECKIN_ATIVO).
  *
  * Uso: php tests/manual/teste_e2e_recebimento_expedicao_mock.php
  */
 
-require_once __DIR__ . '/../../vendor/autoload.php';
+require_once __DIR__ . '/qa_qr_exclusivo_legado.php';
 require_once __DIR__ . '/_fixtures_talent.php';
 
-use Dotenv\Dotenv;
-use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
-
-$dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
-$dotenv->load();
-
-$pdo = Conexao::obter();
 
 $totalTestes = 0;
 $totalFalhas = 0;
@@ -57,20 +50,32 @@ function afirmar(string $descricao, bool $condicao): void
 {
     global $totalTestes, $totalFalhas;
     $totalTestes++;
-    echo ($condicao ? 'OK   - ' : 'FALHA - ') . $descricao . "\n";
+    echo ($condicao ? 'OK   - ' : 'FALHA - ') . $descricao . "
+";
     if (!$condicao) $totalFalhas++;
 }
 
 function rodar(string $script, array $args): array
 {
-    $php = PHP_BINARY;
-    $cmd = escapeshellarg($php) . ' ' . escapeshellarg($script);
-    foreach ($args as $a) {
-        $cmd .= ' ' . escapeshellarg((string) $a);
-    }
-    exec($cmd, $saida, $codigo);
-    return ['saida' => implode("\n", $saida), 'codigo' => $codigo];
+    return qaLegadoRodar($script, $args);
 }
+
+/** CNH/CRLV por QR-only: iniciar + status (VIO falso, resultado aprovavel). */
+function qaDocumentoQr(string $dir, int $idTotem, int $idAtendimento, string $tipo, string $placa = 'ABC1234'): array
+{
+    $ini = rodar($dir . '/_caso_documento_qr_vio_falso.php', [$idTotem, $idAtendimento, 'iniciar', $tipo]);
+    $res = base64_encode(json_encode(qaLegadoResultadoVio($tipo, [], $placa), JSON_THROW_ON_ERROR));
+    $sta = rodar($dir . '/_caso_documento_qr_vio_falso.php', [$idTotem, $idAtendimento, 'status', $tipo, $res]);
+    return ['iniciar' => $ini['saida'], 'status' => $sta['saida']];
+}
+
+$banco = null;
+$storage = null;
+$pdo = null;
+try {
+[$pdo, $banco, $storage] = qaLegadoCriarAmbiente();
+// Seed da empresa Maua I (migration 008 nao esta no schema QA base): totem do teste usa id_empresa=1.
+$pdo->exec("INSERT INTO tb_empresa (nome, cnpj) VALUES ('Maua I', '14706199000182')");
 
 $dir = __DIR__;
 $atendimentoDao = new AtendimentoDao($pdo);
@@ -83,7 +88,7 @@ $idsAtendimento = [];
 // ============================================================
 // FLUXO RECEBIMENTO COMPLETO
 // ============================================================
-$idAtRec = $atendimentoDao->criar($idTotem, 'recebimento', 'E2EREC01');
+$idAtRec = $atendimentoDao->criar($idTotem, 'recebimento', 'REC1A23');
 $idsAtendimento[] = $idAtRec;
 $pastaRec = 'teste_e2e_rec_' . bin2hex(random_bytes(4));
 $atendimentoDao->definirPasta($idAtRec, $pastaRec);
@@ -147,42 +152,40 @@ $dadosCliente = base64_encode(json_encode(['nome' => 'CLIENTE E2E LTDA', 'cnpj' 
 $rCliente = rodar($dir . '/_caso_salvar_etapa.php', [$idTotem, $idAtRec, 'cliente', $dadosCliente]);
 afirmar('[Recebimento] cliente identificado manualmente, avanca para rec_cnh', str_contains($rCliente['saida'], '"sucesso":true'));
 
-// --- upload CNH frente/verso + CRLV (mock) ---
-$imagemJpegBase64 = 'data:image/jpeg;base64,' . base64_encode(
-    base64_decode('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=')
-);
-$rUploadCnhF = rodar($dir . '/_caso_upload_documento.php', [$idTotem, $idAtRec, 'cnh_frente', $imagemJpegBase64]);
-afirmar('[Recebimento] upload CNH frente (mock)', str_contains($rUploadCnhF['saida'], '"sucesso":true'));
-$rAvancaBloqueado = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtRec]);
-afirmar('[Recebimento] rec_cnh -> rec_crlv BLOQUEADO so com a frente (gate upload_cnh exige os 2 arquivos, etapa unica desde 2026-09-26)', str_contains($rAvancaBloqueado['saida'], 'documentos pendentes'));
+// --- CNH/CRLV por QR-only (VIO falso via factory; JPEG sintetico em memoria) ---
+$cnhRec = qaDocumentoQr($dir, $idTotem, $idAtRec, 'cnh');
+afirmar('[Recebimento] CNH: iniciar-processamento QR responde sucesso', str_contains($cnhRec['iniciar'], '"sucesso":true'));
+afirmar('[Recebimento] CNH: status-processamento aprova (pode_avancar=true)', str_contains($cnhRec['status'], '"pode_avancar":true'));
+$atCnh = $atendimentoDao->buscarPorId($idAtRec);
+afirmar('[Recebimento] CNH aprovada via VIO falso (origem VIO_API_BR, CPF persistido)', ($atCnh['cnh_origem_validacao'] ?? '') === 'VIO_API_BR' && ($atCnh['motorista_cpf'] ?? '') === '52998224725');
+afirmar('[Recebimento] sem arquivos de CNH/CRLV no storage temporario (QR-only)', !is_dir($pastaRecCompleta) || array_filter(glob($pastaRecCompleta . '/*') ?: [], fn($f) => preg_match('/(cnh|crlv)/i', basename($f))) === []);
 
-$rUploadCnhV = rodar($dir . '/_caso_upload_documento.php', [$idTotem, $idAtRec, 'cnh_verso', $imagemJpegBase64]);
-afirmar('[Recebimento] upload CNH verso (mock)', str_contains($rUploadCnhV['saida'], '"sucesso":true'));
 $rAvanca2 = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtRec]);
-afirmar('[Recebimento] rec_cnh -> rec_crlv (apos os 2 lados salvos)', str_contains($rAvanca2['saida'], '"etapa":"rec_crlv"'));
-
-$rUploadCrlv = rodar($dir . '/_caso_upload_documento.php', [$idTotem, $idAtRec, 'crlv', $imagemJpegBase64]);
-afirmar('[Recebimento] upload CRLV (mock)', str_contains($rUploadCrlv['saida'], '"sucesso":true'));
+afirmar('[Recebimento] rec_cnh -> rec_crlv', str_contains($rAvanca2['saida'], '"etapa":"rec_crlv"'));
 $rAvanca3 = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtRec]);
-afirmar('[Recebimento] rec_crlv -> rec_aguarde_documentos', str_contains($rAvanca3['saida'], '"etapa":"rec_aguarde_documentos"'));
+afirmar('[Recebimento] rec_crlv -> rec_aguarde_documentos (gate de upload liberado no QR-only)', str_contains($rAvanca3['saida'], '"etapa":"rec_aguarde_documentos"'));
 
-// --- aprovacao MANUAL de CNH/CRLV (mock/fixture, sem VIO real) ---
-$rManualCnh = rodar($dir . '/_caso_preencher_manual.php', [$idTotem, $idAtRec, 'cnh', 'MOTORISTA E2E', '11144477735', '2031-01-01']);
-afirmar('[Recebimento] CNH aprovada manualmente', str_contains($rManualCnh['saida'], '"origem":"MANUAL"'));
-$rManualCrlv = rodar($dir . '/_caso_preencher_manual.php', [$idTotem, $idAtRec, 'crlv', 'E2EREC01', '2025', 'SP', '12345678', 'CAMINHAO']);
-afirmar('[Recebimento] CRLV aprovado manualmente', str_contains($rManualCrlv['saida'], '"origem":"MANUAL"'));
+// gate 'ambos_aprovados': com so a CNH aprovada, rec_aguarde_documentos NAO avanca
+$rAvancaBloqueado = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtRec]);
+afirmar('[Recebimento] rec_aguarde_documentos -> rec_confirmacao BLOQUEADO com CRLV nao aprovado (gate ambos_aprovados)', str_contains($rAvancaBloqueado['saida'], 'documentos pendentes') && ($atendimentoDao->buscarPorId($idAtRec)['etapa_atual'] ?? '') === 'rec_aguarde_documentos');
+
+$crlvRec = qaDocumentoQr($dir, $idTotem, $idAtRec, 'crlv', 'REC1A23');
+afirmar('[Recebimento] CRLV: iniciar + status aprovam (pode_avancar=true)', str_contains($crlvRec['iniciar'], '"sucesso":true') && str_contains($crlvRec['status'], '"pode_avancar":true'));
+$atCrlv = $atendimentoDao->buscarPorId($idAtRec);
+afirmar('[Recebimento] CRLV aprovado via VIO falso (origem VIO_API_BR, RNTRC/Tipo persistidos)', ($atCrlv['crlv_origem_validacao'] ?? '') === 'VIO_API_BR' && ($atCrlv['crlv_rntc'] ?? '') === 'QA-RNTRC' && ($atCrlv['crlv_tipo_veiculo'] ?? '') === 'CAMINHAO');
 
 $rAvanca4 = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtRec]);
 afirmar('[Recebimento] rec_aguarde_documentos -> rec_confirmacao (ambos aprovados)', str_contains($rAvanca4['saida'], '"etapa":"rec_confirmacao"'));
+afirmar('[Recebimento] avanco devolve dados_confirmacao com RNTRC e Tipo', str_contains($rAvanca4['saida'], '"dados_confirmacao"') && str_contains($rAvanca4['saida'], 'QA-RNTRC') && str_contains($rAvanca4['saida'], 'CAMINHAO'));
 
-// --- confirmar dados do motorista ---
+// --- confirmar dados do motorista (RNTRC e Tipo obrigatorios na confirmacao) ---
 $dadosConfirmacao = base64_encode(json_encode([
-    'motorista_nome' => 'MOTORISTA E2E',
-    'motorista_cpf' => '11144477735',
-    'cnh_validade' => '2031-01-01',
-    'crlv_ano' => 2025,
+    'motorista_nome' => 'QA MOTORISTA',
+    'motorista_cpf' => '52998224725',
+    'cnh_validade' => '2035-12-31',
+    'crlv_ano' => 2026,
     'crlv_uf' => 'SP',
-    'crlv_rntc' => '12345678',
+    'crlv_rntc' => 'QA-RNTRC',
     'crlv_tipo_veiculo' => 'CAMINHAO',
 ]));
 $rConfirma = rodar($dir . '/_caso_salvar_etapa.php', [$idTotem, $idAtRec, 'confirmacao', $dadosConfirmacao]);
@@ -199,21 +202,29 @@ afirmar('[Recebimento] finalizar(): NAO e mais bloqueado por falta de doctos/NOT
 // FLUXO EXPEDICAO COMPLETO
 // ============================================================
 // Selecao real de ordem depende do banco externo de gestao de coletas (fora
-// de escopo desta demanda) — ordem_coleta gravada via fixture direta, mesmo
-// padrao ja usado por talentCriarAtendimentoPronto/outros testes deste
-// projeto.
-$fixExp = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'E2EEXP01', '11222333000181', 'SP', true, '12345678', 'CAMINHAO', 'OC-E2EEXP01');
-$pastas[] = $fixExp['pasta_completa'];
-$idsAtendimento[] = $fixExp['id_atendimento'];
-// talentCriarAtendimentoPronto ja deixa em exp_confirmacao com CNH/CRLV
-// aprovados (MANUAL) — reproduzimos aqui so a etapa final (finalizar), ja
-// que a sequencia de avanco de etapas (exp_cnh -> exp_crlv ->
-// exp_aguarde_documentos -> exp_confirmacao) e a MESMA maquina de estados ja
-// coberta pelo fluxo de Recebimento acima e por
-// teste_avancar_etapa_expedicao.php (fora do escopo desta demanda especifica
-// de doctos/finalizacao).
+// de escopo): ordem_coleta e cliente gravados via fixture direta; CNH/CRLV
+// seguem o MESMO caminho QR-only (VIO falso) do Recebimento.
+$idAtExp = $atendimentoDao->criar($idTotem, 'expedicao', 'EXP1A23');
+$idsAtendimento[] = $idAtExp;
+$pdo->prepare('UPDATE tb_atendimento SET ordem_coleta = :oc WHERE id_atendimento = :id')->execute(['oc' => 'OC-E2EEXP01', 'id' => $idAtExp]);
+$atendimentoDao->salvarCliente($idAtExp, 'CLIENTE E2E LTDA', '11222333000181');
+$atendimentoDao->atualizarEtapa($idAtExp, 'exp_cnh');
 
-$rFinalizarExp = rodar($dir . '/_caso_trava_doctos_pendente.php', [$idTotem, $fixExp['id_atendimento']]);
+$cnhExp = qaDocumentoQr($dir, $idTotem, $idAtExp, 'cnh');
+afirmar('[Expedicao] CNH aprovada por QR (VIO falso)', str_contains($cnhExp['status'], '"pode_avancar":true') && ($atendimentoDao->buscarPorId($idAtExp)['cnh_origem_validacao'] ?? '') === 'VIO_API_BR');
+$rExp1 = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtExp]);
+afirmar('[Expedicao] exp_cnh -> exp_crlv', str_contains($rExp1['saida'], '"etapa":"exp_crlv"'));
+$crlvExp = qaDocumentoQr($dir, $idTotem, $idAtExp, 'crlv', 'EXP1A23');
+afirmar('[Expedicao] CRLV aprovado por QR (VIO falso)', str_contains($crlvExp['status'], '"pode_avancar":true') && ($atendimentoDao->buscarPorId($idAtExp)['crlv_origem_validacao'] ?? '') === 'VIO_API_BR');
+$rExp2 = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtExp]);
+afirmar('[Expedicao] exp_crlv -> exp_aguarde_documentos', str_contains($rExp2['saida'], '"etapa":"exp_aguarde_documentos"'));
+$rExp3 = rodar($dir . '/_caso_avancar_etapa_generico.php', [$idTotem, $idAtExp]);
+afirmar('[Expedicao] exp_aguarde_documentos -> exp_confirmacao (dados_confirmacao presente)', str_contains($rExp3['saida'], '"etapa":"exp_confirmacao"') && str_contains($rExp3['saida'], '"dados_confirmacao"'));
+$dadosConfExp = base64_encode(json_encode(['motorista_nome' => 'QA MOTORISTA', 'motorista_cpf' => '52998224725', 'cnh_validade' => '2035-12-31', 'crlv_ano' => 2026, 'crlv_uf' => 'SP', 'crlv_rntc' => 'QA-RNTRC', 'crlv_tipo_veiculo' => 'CAMINHAO']));
+$rConfExp = rodar($dir . '/_caso_salvar_etapa.php', [$idTotem, $idAtExp, 'confirmacao', $dadosConfExp]);
+afirmar('[Expedicao] confirmacao dos dados aceita', str_contains($rConfExp['saida'], '"sucesso":true'));
+
+$rFinalizarExp = rodar($dir . '/_caso_trava_doctos_pendente.php', [$idTotem, $idAtExp]);
 afirmar('[Expedicao] finalizar(): bloqueio LIMPO por TALENT_CHECKIN_DESATIVADO (503) — gates de doctos/ordem_coleta ja passaram', str_contains($rFinalizarExp['saida'], 'TALENT_CHECKIN_DESATIVADO') && str_contains($rFinalizarExp['saida'], 'HTTP_CODE:503'));
 afirmar('[Expedicao] finalizar(): NENHUMA chamada de rede real ao Talent (TalentRnEspiao nao foi acionado)', !str_contains($rFinalizarExp['saida'], 'ESPIAO_PROCESSARCHECKIN_CHAMADO'));
 
@@ -245,20 +256,16 @@ $dadosImp2 = json_decode(trim(explode("\nHTTP_CODE:", $rImpressao2['saida'])[0])
 $identificadorImp2 = $dadosImp2['dados']['identificador'] ?? null;
 afirmar('[Impressao] reimpressao (reimpressao=1) gera identificador DIFERENTE da 1a geracao', !empty($identificadorImp2) && $identificadorImp2 !== $identificadorImp1);
 
-// ============================================================
-// Limpeza
-// ============================================================
-foreach ($pastas as $p) {
-    talentLimparPasta($p);
-}
-foreach ($idsAtendimento as $id) {
-    $pdo->prepare('DELETE FROM tb_fila_envio WHERE id_atendimento = :id')->execute(['id' => $id]);
-    $pdo->prepare('DELETE FROM tb_atendimento_nota WHERE id_atendimento = :id')->execute(['id' => $id]);
-    $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $id]);
-}
-$pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotem]);
-if ($idClienteTmp !== null) {
-    $pdo->prepare('DELETE FROM tb_cliente WHERE id_cliente = :id')->execute(['id' => $idClienteTmp]);
+} finally {
+    // Teardown garantido: banco QA descartavel e storage temporario.
+    unset($pdo);
+    try {
+        qaLegadoLimparAmbiente($banco, $storage);
+        echo "Banco QA e storage temporario removidos.\n";
+    } catch (Throwable) {
+        fwrite(STDERR, "FALHA: banco QA nao removido.\n");
+        $totalFalhas++;
+    }
 }
 
 echo "\n=== RESULTADO: {$totalTestes} testes, " . ($totalTestes - $totalFalhas) . " passaram, {$totalFalhas} falharam ===\n";

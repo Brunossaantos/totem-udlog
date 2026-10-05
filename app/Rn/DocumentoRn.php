@@ -275,17 +275,12 @@ class DocumentoRn
             return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'placa_divergente', 'motivo' => 'Placa do CRLV nao confere com a placa do atendimento', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
         }
 
-        // RNTC/tipo de veiculo — obrigatorios pelo Talent (veiculo.rntc/
-        // veiculo.tipo), confirmados por teste real de Producao em
-        // 2026-09-10 (extensao desta demanda). Validados na mesma sequencia
-        // (exercicio -> placeholder -> UF -> placa -> RNTC -> tipo) dos
-        // demais campos.
-        if ($rntc === '') {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'rntrc_ausente', 'motivo' => 'RNTC do CRLV nao informado/invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
-        }
-        if ($tipoVeiculo === '') {
-            return ['ok' => false, 'pode_avancar' => false, 'motivo_codigo' => 'tipo_ausente', 'motivo' => 'Tipo de veiculo do CRLV nao informado/invalido', 'origem' => $origemAtual, 'status_revisao' => $statusRevisaoAtual];
-        }
+        // RNTRC e OPCIONAL na aprovacao do CRLV (decisao de produto
+        // 2026-10-02): o QR do CRLV nem sempre traz o RNTRC. Ele passa a ser
+        // obrigatorio so na tela de confirmacao (AtendimentoRn::
+        // camposObrigatoriosAusentes), que garante o dado exigido pelo Talent.
+        // O Tipo do veiculo segue a mesma regra (decisao 2026-10-02): vazio
+        // nao reprova; placeholder em Tipo continua reprovando (acima).
 
         $statusRevisao = $origem === 'MANUAL' ? 'PENDENTE_REVISAO' : 'OK';
         if ($persistir) {
@@ -682,10 +677,9 @@ class DocumentoRn
 
         $exercicio = (int) ($atendimento['crlv_ano'] ?? 0);
         $uf = strtoupper(trim((string) ($atendimento['crlv_uf'] ?? '')));
-        $rntc = trim((string) ($atendimento['crlv_rntc'] ?? ''));
-        $tipoVeiculo = trim((string) ($atendimento['crlv_tipo_veiculo'] ?? ''));
 
-        return $exercicio > 0 && in_array($uf, self::UFS_VALIDAS, true) && $rntc !== '' && $tipoVeiculo !== '';
+        // RNTRC e Tipo opcionais aqui (decisao 2026-10-02); exigidos na confirmacao.
+        return $exercicio > 0 && in_array($uf, self::UFS_VALIDAS, true);
     }
 
     // ============================================================

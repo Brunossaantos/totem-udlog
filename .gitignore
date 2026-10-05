@@ -53,3 +53,8 @@ ia_development_state_bkp.md
 # Fixtures de teste: nada em tests/fixtures/ e versionado (fotos de documentos
 # reais contem dado pessoal; os testes geram imagens sinteticas em memoria).
 tests/fixtures/*
+
+# Imagens de exemplo locais (CNH/CRLV podem conter dado pessoal) e material
+# de referencia da impressora — nunca versionar.
+exemplos/
+epson/

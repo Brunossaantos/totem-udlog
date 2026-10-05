@@ -74,7 +74,10 @@ $controller = new AtendimentoController(
 );
 
 $acao = $_GET['acao'] ?? '';
-$entrada = json_decode(file_get_contents('php://input'), true) ?? [];
+$entrada = json_decode(file_get_contents('php://input'), true);
+if (!is_array($entrada)) {
+    $entrada = [];
+}
 
 switch ($acao) {
     case 'iniciar':

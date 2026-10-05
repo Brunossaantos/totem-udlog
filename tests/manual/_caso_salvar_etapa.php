@@ -47,6 +47,10 @@ $talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), new A
 // fechado, 500).
 $controller = new AtendimentoController($atendimentoRn, $talentRn, new AtendimentoNotaDao($pdo), pdo: $pdo);
 
+register_shutdown_function(function () {
+    echo "\nHTTP_CODE:" . (http_response_code() ?: 200) . "\n";
+});
+
 $controller->salvarEtapa([
     'id_atendimento' => $idAtendimento,
     'etapa' => $etapa,

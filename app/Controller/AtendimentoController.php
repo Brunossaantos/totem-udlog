@@ -296,6 +296,20 @@ class AtendimentoController
                     Resposta::erro('Atendimento nao esta na etapa esperada para confirmar os dados');
                 }
 
+                // Decisao de produto 2026-10-02: RNTRC (e todo campo exibido
+                // na confirmacao e exigido pelo Talent) e obrigatorio AQUI.
+                // Faltando algo, nada e gravado e a etapa nao avanca.
+                $ausentes = $this->atendimentoRn->camposObrigatoriosAusentes($atendimento, is_array($dados) ? $dados : []);
+                if ($ausentes !== []) {
+                    Resposta::erroComDados(
+                        'Nao e possivel continuar: preencha ' . implode(', ', array_values($ausentes)),
+                        'CONFIRMACAO_INCOMPLETA',
+                        ['campos' => array_keys($ausentes), 'rotulos' => array_values($ausentes)],
+                        422
+                    );
+                    return;
+                }
+
                 $this->atendimentoRn->salvarDadosMotorista($idAtendimento, $dados);
                 break;
             case 'cliente':
@@ -369,6 +383,10 @@ class AtendimentoController
                 if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
                     Resposta::erro('Atendimento nao encontrado', 404);
                 }
+                if ($atendimento['status'] === 'concluido') {
+                    Resposta::erro('Atendimento ja concluido, nao pode mais ser alterado', 409);
+                    return;
+                }
                 if ($atendimento['status'] !== 'em_andamento') {
                     Resposta::erro('Atendimento nao esta em andamento');
                 }
@@ -377,7 +395,20 @@ class AtendimentoController
                     Resposta::erro('Atendimento nao esta na etapa esperada para informar o ajudante');
                 }
 
-                $this->atendimentoRn->salvarAjudante($idAtendimento, $dados['nome'] ?? null, $dados['cpf'] ?? null);
+                // Correcao de ajudante apos falha do check-in (2026-10-02): a
+                // etapa_atual NAO muda no ERRO_REPROCESSAVEL (continua
+                // *_confirmacao), entao basta o estado do check-in permitir.
+                // Validacao de entrada ANTES de tocar no banco.
+                $ajudante = $this->atendimentoRn->normalizarAjudante($dados['nome'] ?? null, $dados['cpf'] ?? null);
+                if ($ajudante === null) {
+                    Resposta::erro('Dados do ajudante invalidos: informe o nome completo e o CPF com 11 digitos', 422);
+                    return;
+                }
+                // Gravacao atomica sob lock de linha (estado do check-in checado no DAO).
+                if (!$this->atendimentoRn->salvarAjudante($idAtendimento, $ajudante['nome'], $ajudante['cpf'])) {
+                    Resposta::erro('Nao e possivel alterar o ajudante: o check-in ja esta em processamento ou foi enviado', 409);
+                    return;
+                }
                 break;
             case 'digitalizacao_notas':
                 // marca a etapa formal da digitalizacao de notas do recebimento;
@@ -916,6 +947,25 @@ class AtendimentoController
         if ($this->documentoRn === null || !$this->documentoRn->cnhAprovada($atendimento) || !$this->documentoRn->crlvAprovado($atendimento)) {
             Resposta::erro('Documentos obrigatorios pendentes/invalidos');
         }
+        // Gate final (decisao 2026-10-02): o Talent exige veiculo.rntc e tipo
+        // e o CRLV aprovado ja nao garante nenhum dos dois; so a confirmacao
+        // os preenche.
+        $ausentesFinal = [];
+        if (trim((string) ($atendimento['crlv_rntc'] ?? '')) === '') {
+            $ausentesFinal['crlv_rntc'] = 'RNTRC';
+        }
+        if (trim((string) ($atendimento['crlv_tipo_veiculo'] ?? '')) === '') {
+            $ausentesFinal['crlv_tipo_veiculo'] = 'tipo de veiculo';
+        }
+        if ($ausentesFinal !== []) {
+            Resposta::erroComDados(
+                'Nao e possivel continuar: preencha ' . implode(', ', array_values($ausentesFinal)),
+                'CONFIRMACAO_INCOMPLETA',
+                ['campos' => array_keys($ausentesFinal), 'rotulos' => array_values($ausentesFinal)],
+                422
+            );
+            return;
+        }
 
         if ($this->totemDao === null || $this->empresaDao === null) {
             Resposta::erro('Nao foi possivel processar o check-in agora', 500);
@@ -1001,6 +1051,14 @@ class AtendimentoController
             case 'ERRO_REPROCESSAVEL':
                 $this->talentRn->registrarFalhaParaReenvio($idAtendimento, $resultado['erro_categoria'] ?? 'erro_desconhecido');
                 // 202: aceito, mas ainda sendo processado — o totem mostra "aguarde" e o cron finaliza depois
+                // dados.mensagem_api (aditivo): mensagem de negocio da Talent
+                // ja sanitizada (<= 300 chars, texto puro); so existe quando a
+                // falha veio de resposta HTTP da Talent. Nunca logada.
+                $mensagemApi = $resultado['mensagem_api'] ?? null;
+                if (is_string($mensagemApi) && $mensagemApi !== '') {
+                    Resposta::erroComDadosSemCodigo('Nao foi possivel enviar agora — sua senha sera processada em instantes', ['mensagem_api' => $mensagemApi], 202);
+                    return;
+                }
                 Resposta::erro('Nao foi possivel enviar agora — sua senha sera processada em instantes', 202);
                 return;
             case 'ENVIO_INDETERMINADO':

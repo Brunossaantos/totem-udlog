@@ -5,7 +5,9 @@ namespace App\Controller;
 use FPDF;
 use App\Dao\AtendimentoDao;
 use Util\ConfiguracaoServicoImpressao;
+use Util\EtiquetaLayout;
 use Util\Resposta;
+use Util\TextoEtiqueta;
 
 /**
  * Endpoint de impressao REAL (demanda talent-doctos-finalizacao-checkin,
@@ -31,6 +33,21 @@ class ImpressaoAtendimentoController
     public function __construct(private AtendimentoDao $atendimentoDao) {}
 
     /**
+     * Flag de reimpressao (so para log): aceita `reimpressao` na query OU no
+     * corpo JSON, com valor verdadeiro `1`, `true` ou `'1'`.
+     */
+    public static function flagReimpressao(array $query, array $entrada): bool
+    {
+        foreach ([$query['reimpressao'] ?? null, $entrada['reimpressao'] ?? null] as $valor) {
+            if ($valor === 1 || $valor === true || $valor === '1') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Devolve URL/token do servico local de impressao (mini PC Windows) para
      * o fluxo REAL de impressao — equivalente de producao da rota exclusiva
      * de diagnostico App\Controller\ImpressaoTesteController::configuracaoServicoLocal()
@@ -50,7 +67,7 @@ class ImpressaoAtendimentoController
         try {
             $config = ConfiguracaoServicoImpressao::obter();
         } catch (\RuntimeException $e) {
-            error_log('impressao configuracao-servico-local: ' . $e->getMessage());
+            error_log('impressao configuracao-servico-local: ' . get_class($e));
             Resposta::erro('Servico local de impressao nao configurado', 503);
             return;
         }
@@ -72,6 +89,16 @@ class ImpressaoAtendimentoController
             return;
         }
 
+        // Destinatario da etiqueta (allowlist): motorista (padrao) ou ajudante.
+        $destinatario = 'motorista';
+        if (array_key_exists('destinatario', $entrada) && $entrada['destinatario'] !== null && $entrada['destinatario'] !== '') {
+            $destinatario = $entrada['destinatario'];
+            if (!is_string($destinatario) || !in_array($destinatario, ['motorista', 'ajudante'], true)) {
+                Resposta::erro('Destinatario invalido: use motorista ou ajudante', 422);
+                return;
+            }
+        }
+
         $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
         if (
@@ -83,10 +110,22 @@ class ImpressaoAtendimentoController
             return;
         }
 
-        $nomeMotorista = trim((string) ($atendimento['motorista_nome'] ?? ''));
-        $nrRegAcesso = trim((string) $atendimento['talent_senha']);
-        if ($nomeMotorista === '' || $nrRegAcesso === '') {
+        $nomeMotorista = TextoEtiqueta::paraAscii((string) ($atendimento['motorista_nome'] ?? ''));
+        $nrRegAcesso = TextoEtiqueta::paraAscii((string) $atendimento['talent_senha']);
+        if ($nrRegAcesso === '' || ($destinatario === 'motorista' && $nomeMotorista === '')) {
             Resposta::erro('Dados da etiqueta incompletos — procure um atendente', 500);
+            return;
+        }
+
+        // Ajudante (opcional): so o NOME, nunca o CPF. Lido do mesmo registro
+        // ja carregado (SELECT * por id, prepared statement no DAO).
+        $nomeAjudante = '';
+        if ((int) ($atendimento['possui_ajudante'] ?? 0) === 1) {
+            $nomeAjudante = $this->sanitizarNomeAjudante($atendimento['ajudante_nome'] ?? '');
+        }
+
+        if ($destinatario === 'ajudante' && $nomeAjudante === '') {
+            Resposta::erro('Este atendimento nao possui ajudante — nao ha etiqueta de ajudante para imprimir', 409);
             return;
         }
 
@@ -98,9 +137,9 @@ class ImpressaoAtendimentoController
         $identificador = bin2hex(random_bytes(16));
 
         try {
-            $pdfBytes = $this->montarPdf($config, $nomeMotorista, $nrRegAcesso);
+            $pdfBytes = $this->montarPdf($config, $nomeMotorista, $nrRegAcesso, $nomeAjudante, $destinatario);
         } catch (\Throwable $e) {
-            error_log('impressao gerar-etiqueta: falha ao gerar PDF: ' . $e->getMessage());
+            error_log('impressao gerar-etiqueta: falha ao gerar PDF: ' . get_class($e));
             Resposta::erro('Nao foi possivel gerar a etiqueta agora', 500);
             return;
         }
@@ -109,20 +148,28 @@ class ImpressaoAtendimentoController
         // se e reimpressao. Sem dado pessoal alem do proprio id_atendimento
         // (ja e um identificador interno, nao dado pessoal em si).
         error_log(sprintf(
-            'impressao gerar-etiqueta: id_atendimento=%d reimpressao=%s timestamp=%s',
+            'impressao gerar-etiqueta: id_atendimento=%d destinatario=%s reimpressao=%s timestamp=%s',
             $idAtendimento,
+            $destinatario,
             $reimpressao ? 'sim' : 'nao',
             date('Y-m-d H:i:s')
         ));
 
-        Resposta::sucesso([
+        $resposta = [
             'pdf_base64' => base64_encode($pdfBytes),
             'identificador' => $identificador,
             'largura_mm' => $config['largura_mm'],
             'comprimento_mm' => $config['comprimento_mm'],
             'orientacao' => $config['orientacao'],
             'corte_apos_impressao' => $config['corte_apos_impressao'],
-        ]);
+            'destinatario' => $destinatario,
+        ];
+        if ($destinatario === 'motorista') {
+            // Aditivo: ha uma segunda etiqueta (ajudante) para imprimir.
+            $resposta['tem_etiqueta_ajudante'] = $nomeAjudante !== '';
+        }
+
+        Resposta::sucesso($resposta);
     }
 
     /**
@@ -180,8 +227,27 @@ class ImpressaoAtendimentoController
      * front-end para a TELA; aqui usamos um rotulo tecnico neutro so para
      * legibilidade da etiqueta impressa em si). NUNCA CPF/CNH/placa.
      */
-    private function montarPdf(array $config, string $nomeMotorista, string $nrRegAcesso): string
+    /**
+     * Nome do ajudante para a fonte core do FPDF: transliterado para ASCII
+     * (Util\TextoEtiqueta::paraAscii: sem acentos, sem controles, espacos
+     * normalizados) e limitado a 150 caracteres (tamanho da coluna). Vazio => sem bloco de ajudante.
+     */
+    private function sanitizarNomeAjudante(mixed $nome): string
     {
+        if (!is_string($nome)) {
+            return '';
+        }
+        // ASCII puro (sem acentos), sem controles, espacos normalizados, 150 chars.
+        return TextoEtiqueta::paraAscii($nome, 150);
+    }
+
+    private function montarPdf(array $config, string $nomeMotorista, string $nrRegAcesso, string $nomeAjudante = '', string $destinatario = 'motorista'): string
+    {
+        // Todo texto variavel impresso passa por paraAscii (idempotente).
+        $nomeMotorista = TextoEtiqueta::paraAscii($nomeMotorista);
+        $nrRegAcesso = TextoEtiqueta::paraAscii($nrRegAcesso);
+        $nomeAjudante = TextoEtiqueta::paraAscii($nomeAjudante, 150);
+
         $orientacaoFpdf = $config['orientacao'] === 'landscape' ? 'L' : 'P';
 
         $pdf = new FPDF($orientacaoFpdf, 'mm', [$config['largura_mm'], $config['comprimento_mm']]);
@@ -189,23 +255,28 @@ class ImpressaoAtendimentoController
         $pdf->SetMargins(2, 2, 2);
         $pdf->AddPage();
 
-        $larguraUtil = $pdf->GetPageWidth() - 4;
+        // Layout (topo, fontes grandes, ajuste automatico a largura/altura da
+        // pagina) centralizado em Util\EtiquetaLayout — so conteudo muda aqui.
+        if ($destinatario === 'ajudante') {
+            // Etiqueta do ajudante (papel separado): "AJUDANTE" no lugar de
+            // "UDLOG", nome, mesmo nrRegAcesso do motorista e "Gerado em".
+            EtiquetaLayout::desenhar($pdf, [
+                ['texto' => 'AJUDANTE', 'estilo' => 'B', 'pt' => 22, 'max_linhas' => 1, 'espaco_antes_mm' => 0],
+                ['texto' => $nomeAjudante, 'estilo' => '', 'pt' => 15, 'max_linhas' => 3, 'espaco_antes_mm' => 2],
+                ['texto' => $nrRegAcesso, 'estilo' => 'B', 'pt' => 60, 'max_linhas' => 1, 'espaco_antes_mm' => 3],
+                ['texto' => 'Gerado em: ' . date('Y-m-d H:i:s'), 'estilo' => '', 'pt' => 9, 'max_linhas' => 1, 'espaco_antes_mm' => 3],
+            ]);
+            return $pdf->Output('S');
+        }
 
-        $pdf->SetFont('Arial', 'B', 10);
-        $pdf->SetXY(2, 4);
-        $pdf->MultiCell($larguraUtil, 5, 'UDLOG', 0, 'C');
-
-        $pdf->SetFont('Arial', '', 8);
-        $pdf->SetXY(2, $pdf->GetY() + 2);
-        $pdf->MultiCell($larguraUtil, 4, $nomeMotorista, 0, 'C');
-
-        $pdf->SetFont('Arial', 'B', 14);
-        $pdf->SetXY(2, $pdf->GetY() + 3);
-        $pdf->MultiCell($larguraUtil, 7, $nrRegAcesso, 0, 'C');
-
-        $pdf->SetFont('Arial', '', 6);
-        $pdf->SetXY(2, $pdf->GetY() + 3);
-        $pdf->MultiCell($larguraUtil, 3.5, 'Gerado em: ' . date('Y-m-d H:i:s'), 0, 'C');
+        // Etiqueta do MOTORISTA: nunca desenha o nome do ajudante (ele tem
+        // etiqueta propria; $nomeAjudante e ignorado aqui).
+        EtiquetaLayout::desenhar($pdf, [
+            ['texto' => 'UDLOG', 'estilo' => 'B', 'pt' => 22, 'max_linhas' => 1, 'espaco_antes_mm' => 0],
+            ['texto' => $nomeMotorista, 'estilo' => '', 'pt' => 15, 'max_linhas' => 3, 'espaco_antes_mm' => 2],
+            ['texto' => $nrRegAcesso, 'estilo' => 'B', 'pt' => 60, 'max_linhas' => 1, 'espaco_antes_mm' => 3],
+            ['texto' => 'Gerado em: ' . date('Y-m-d H:i:s'), 'estilo' => '', 'pt' => 9, 'max_linhas' => 1, 'espaco_antes_mm' => 3],
+        ]);
 
         return $pdf->Output('S');
     }

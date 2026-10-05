@@ -29,7 +29,10 @@ $totem = Auth::validarTotem($pdo);
 // (classe mantida como codigo morto documentado, ver o proprio arquivo).
 $notaFiscalRn = new NotaFiscalRn(new AtendimentoNotaDao($pdo), new ClienteDao($pdo));
 $controller = new NotaController($notaFiscalRn, new AtendimentoDao($pdo), new RateLimitOcrDao($pdo));
-$entrada = json_decode(file_get_contents('php://input'), true) ?? [];
+$entrada = json_decode(file_get_contents('php://input'), true);
+if (!is_array($entrada)) {
+    $entrada = [];
+}
 
 switch ($_GET['acao'] ?? '') {
     case 'processar':

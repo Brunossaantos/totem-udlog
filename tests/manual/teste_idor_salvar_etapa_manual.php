@@ -105,15 +105,51 @@ afirmar(
     $atendimentoAposInvasorConfirmacao['motorista_nome'] !== 'INVASOR TENTOU SOBRESCREVER'
 );
 
+// Decisao 2026-10-02: confirmacao incompleta (sem RNTRC etc.) e recusada com
+// 422/CONFIRMACAO_INCOMPLETA, sem gravar nada (nem avancar etapa).
+$pdo->prepare("UPDATE tb_atendimento SET ordem_coleta = '123' WHERE id_atendimento = ?")->execute([$idAtConfirmacao]);
+$dadosIncompleta = base64_encode(json_encode([
+    'motorista_nome' => 'MOTORISTA LEGITIMO',
+    'motorista_cpf' => '11144477735',
+]));
+$rIncompleta = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotemVitima, $idAtConfirmacao, 'confirmacao', $dadosIncompleta]);
+afirmar("'confirmacao' incompleta responde erro CONFIRMACAO_INCOMPLETA com mensagem fixa e lista de campos", str_contains($rIncompleta['saida'], '"sucesso":false') && str_contains($rIncompleta['saida'], 'CONFIRMACAO_INCOMPLETA') && str_contains($rIncompleta['saida'], 'Nao e possivel continuar: preencha ') && str_contains($rIncompleta['saida'], 'RNTRC') && str_contains($rIncompleta['saida'], '"crlv_rntc"'));
+afirmar("'confirmacao' incompleta tambem lista o tipo de veiculo ausente", str_contains($rIncompleta['saida'], '"crlv_tipo_veiculo"'));
+$atIncompleta = $atendimentoDao->buscarPorId($idAtConfirmacao);
+afirmar("'confirmacao' incompleta NAO grava dados nem avanca etapa", $atIncompleta['motorista_nome'] !== 'MOTORISTA LEGITIMO' && $atIncompleta['etapa_atual'] === 'exp_confirmacao');
+
+// Decisao 2026-10-02: Tipo do veiculo ausente (demais campos completos) -> 422
+// listando so crlv_tipo_veiculo, sem gravar nem avancar.
+$dadosSemTipo = base64_encode(json_encode([
+    'motorista_nome' => 'MOTORISTA LEGITIMO', 'motorista_cpf' => '11144477735', 'cnh_validade' => '2030-01-01',
+    'crlv_ano' => '2025', 'crlv_uf' => 'SP', 'crlv_rntc' => '87654321', 'crlv_tipo_veiculo' => '',
+]));
+$rSemTipo = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotemVitima, $idAtConfirmacao, 'confirmacao', $dadosSemTipo]);
+afirmar("'confirmacao' sem tipo de veiculo e recusada (CONFIRMACAO_INCOMPLETA, campos=[crlv_tipo_veiculo])", str_contains($rSemTipo['saida'], '"sucesso":false') && str_contains($rSemTipo['saida'], 'CONFIRMACAO_INCOMPLETA') && str_contains($rSemTipo['saida'], '"crlv_tipo_veiculo"') && !str_contains($rSemTipo['saida'], '"crlv_rntc"'));
+$atSemTipo = $atendimentoDao->buscarPorId($idAtConfirmacao);
+afirmar("'confirmacao' sem tipo NAO grava dados nem avanca etapa", $atSemTipo['motorista_nome'] !== 'MOTORISTA LEGITIMO' && $atSemTipo['etapa_atual'] === 'exp_confirmacao');
+
 // dono legitimo continua funcionando normalmente (sem regressao)
 $dadosConfirmacaoDono = base64_encode(json_encode([
     'motorista_nome' => 'MOTORISTA LEGITIMO',
     'motorista_cpf' => '11144477735',
+    'cnh_validade' => '2030-01-01',
+    'crlv_ano' => '2025',
+    'crlv_uf' => 'SP',
+    'crlv_rntc' => '87654321',
+    'crlv_tipo_veiculo' => 'CAMINHAO',
 ]));
 $rDonoConfirmacao = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotemVitima, $idAtConfirmacao, 'confirmacao', $dadosConfirmacaoDono]);
 afirmar("'confirmacao' (dono legitimo, etapa correta) continua respondendo sucesso", str_contains($rDonoConfirmacao['saida'], '"sucesso":true'));
 $atendimentoAposDonoConfirmacao = $atendimentoDao->buscarPorId($idAtConfirmacao);
 afirmar("'confirmacao' (dono legitimo) grava motorista_nome corretamente", $atendimentoAposDonoConfirmacao['motorista_nome'] === 'MOTORISTA LEGITIMO');
+afirmar("'confirmacao' (dono legitimo) persiste crlv_rntc digitado", $atendimentoAposDonoConfirmacao['crlv_rntc'] === '87654321');
+
+// Gate final do finalizar (decisao 2026-10-02): tipo vazio no atendimento
+// (documentos aprovados, etapa de confirmacao) -> 422 com campos=[crlv_tipo_veiculo].
+$pdo->prepare("UPDATE tb_atendimento SET cnh_origem_validacao = 'MANUAL', crlv_origem_validacao = 'MANUAL', crlv_tipo_veiculo = NULL, etapa_atual = 'exp_confirmacao' WHERE id_atendimento = ?")->execute([$idAtConfirmacao]);
+$rFinalSemTipo = rodarSubprocesso(__DIR__ . '/_caso_finalizar.php', [$idTotemVitima, $idAtConfirmacao]);
+afirmar("finalizar com tipo de veiculo vazio responde CONFIRMACAO_INCOMPLETA com campos=[crlv_tipo_veiculo]", str_contains($rFinalSemTipo['saida'], 'CONFIRMACAO_INCOMPLETA') && str_contains($rFinalSemTipo['saida'], '"campos":["crlv_tipo_veiculo"]'));
 
 // ============================================================
 // Caso 2: 'cliente' — recebimento, etapa 'cliente'
@@ -163,7 +199,7 @@ $idAtAjudante = $atendimentoDao->criar($idTotemVitima, 'recebimento', 'IDR3333')
 $idsAtendimento[] = $idAtAjudante;
 $atendimentoDao->atualizarEtapa($idAtAjudante, 'rec_confirmacao');
 
-$dadosAjudante = base64_encode(json_encode(['nome' => 'AJUDANTE FORJADO PELO INVASOR', 'cpf' => '99999999999']));
+$dadosAjudante = base64_encode(json_encode(['nome' => 'AJUDANTE FORJADO PELO INVASOR', 'cpf' => '52998224725']));
 $rInvasorAjudante = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotemInvasor, $idAtAjudante, 'ajudante', $dadosAjudante]);
 afirmar(
     "IDOR 'ajudante': totem invasor NAO recebe sucesso ao usar id_atendimento alheio",
@@ -176,7 +212,7 @@ afirmar(
 );
 
 // dono legitimo continua funcionando normalmente (sem regressao)
-$dadosAjudanteDono = base64_encode(json_encode(['nome' => 'AJUDANTE LEGITIMO', 'cpf' => '22233344456']));
+$dadosAjudanteDono = base64_encode(json_encode(['nome' => 'AJUDANTE LEGITIMO', 'cpf' => '39053344705']));
 $rDonoAjudante = rodarSubprocesso(__DIR__ . '/_caso_salvar_etapa.php', [$idTotemVitima, $idAtAjudante, 'ajudante', $dadosAjudanteDono]);
 afirmar("'ajudante' (dono legitimo, etapa correta) continua respondendo sucesso", str_contains($rDonoAjudante['saida'], '"sucesso":true'));
 $atendimentoAposDonoAjudante = $atendimentoDao->buscarPorId($idAtAjudante);

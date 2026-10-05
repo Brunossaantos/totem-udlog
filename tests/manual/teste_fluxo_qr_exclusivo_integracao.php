@@ -135,8 +135,21 @@ try {
 
     $incompleto = qaNovo($dao, $totem, 'exp_crlv');
     qaChamarWorker($banco, ['acao'=>'iniciar','id_atendimento'=>$incompleto,'id_totem'=>$totem,'tipo'=>'crlv','imagem_qr_base64'=>$jpeg]);
-    qaChamarWorker($banco, ['acao'=>'status','id_atendimento'=>$incompleto,'id_totem'=>$totem,'tipo'=>'crlv','resultado'=>qaResultado('crlv', ['RNTRC'=>''])]);
-    qaAfirmar('campo obrigatorio ausente e fail-closed', ($dao->buscarPorId($incompleto)['crlv_origem_validacao'] ?? '') === 'NAO_VALIDADO');
+    qaChamarWorker($banco, ['acao'=>'status','id_atendimento'=>$incompleto,'id_totem'=>$totem,'tipo'=>'crlv','resultado'=>qaResultado('crlv', ['UF'=>''])]);
+    qaAfirmar('campo obrigatorio ausente (UF) e fail-closed', ($dao->buscarPorId($incompleto)['crlv_origem_validacao'] ?? '') === 'NAO_VALIDADO');
+
+    $semTipo = qaNovo($dao, $totem, 'exp_crlv');
+    qaChamarWorker($banco, ['acao'=>'iniciar','id_atendimento'=>$semTipo,'id_totem'=>$totem,'tipo'=>'crlv','imagem_qr_base64'=>$jpeg]);
+    $r = qaChamarWorker($banco, ['acao'=>'status','id_atendimento'=>$semTipo,'id_totem'=>$totem,'tipo'=>'crlv','resultado'=>qaResultado('crlv', ['Tipo'=>''])]);
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    $rowSemTipo = $dao->buscarPorId($semTipo);
+    qaAfirmar('Tipo ausente (decisao 2026-10-02): CRLV aprova, sem motivo_usuario, tipo e snapshot NULL', ($d['motivo_usuario'] ?? null) === null && ($rowSemTipo['crlv_origem_validacao'] ?? '') === 'VIO_API_BR' && $rowSemTipo['crlv_tipo_veiculo'] === null && $rowSemTipo['crlv_snapshot_tipo_veiculo'] === null);
+
+    $tipoPh = qaNovo($dao, $totem, 'exp_crlv');
+    qaChamarWorker($banco, ['acao'=>'iniciar','id_atendimento'=>$tipoPh,'id_totem'=>$totem,'tipo'=>'crlv','imagem_qr_base64'=>$jpeg]);
+    $r = qaChamarWorker($banco, ['acao'=>'status','id_atendimento'=>$tipoPh,'id_totem'=>$totem,'tipo'=>'crlv','resultado'=>qaResultado('crlv', ['Tipo'=>'xxxxx'])]);
+    $d = $r['body']['dados'] ?? $r['body'] ?? [];
+    qaAfirmar('placeholder em Tipo reprova (dados_invalidos) e nao valida', ($d['motivo_usuario'] ?? null) === 'dados_invalidos' && ($dao->buscarPorId($tipoPh)['crlv_origem_validacao'] ?? '') === 'NAO_VALIDADO');
 
     $idor = qaNovo($dao, $totem, 'exp_cnh'); $antes = qaContador($pdo, 'posts');
     $r = qaChamarWorker($banco, ['acao'=>'iniciar','id_atendimento'=>$idor,'id_totem'=>$outroTotem,'tipo'=>'cnh','imagem_qr_base64'=>$jpeg]);
@@ -211,7 +224,8 @@ try {
     qaChamarWorker($banco, $ent('iniciar', $rntrcSem, 'crlv'));
     $r = qaChamarWorker($banco, $ent('status', $rntrcSem, 'crlv', ['resultado'=>qaResultado('crlv', ['RNTRC'=>''])]));
     $d = $r['body']['dados'] ?? $r['body'] ?? [];
-    qaAfirmar('(b) RNTRC ausente: motivo_usuario=rntrc_ausente', ($d['motivo_usuario'] ?? null) === 'rntrc_ausente');
+    $rowSem = $dao->buscarPorId($rntrcSem);
+    qaAfirmar('(b) RNTRC ausente (decisao 2026-10-02): CRLV aprova, sem motivo_usuario', ($d['motivo_usuario'] ?? null) === null && ($rowSem['crlv_origem_validacao'] ?? '') === 'VIO_API_BR' && $rowSem['crlv_rntc'] === null);
     $venc = qaNovo($dao, $totem, 'exp_cnh');
     qaChamarWorker($banco, $ent('iniciar', $venc, 'cnh'));
     $r = qaChamarWorker($banco, $ent('status', $venc, 'cnh', ['resultado'=>qaResultado('cnh', ['Validade'=>'2001-01-01'])]));
@@ -288,9 +302,9 @@ try {
     qaAfirmar('controle positivo: error_log capturado em arquivo temporario com falha tecnica registrada', $log !== '' && str_contains($log, 'RuntimeException'));
     // Observabilidade de reprovacao VIO: codigo de allowlist no log, sem valores.
     $linhaDiv = preg_match('/\[DocumentoController\] vio_reprovado id=' . $placaDiv . ' tipo=crlv estado_leitura=completed qr_type=vio motivo=placa_divergente( chaves_vio_result=.*)?$/m', $log, $mDiv) === 1;
-    $linhaRntrc = preg_match('/\[DocumentoController\] vio_reprovado id=' . $incompleto . ' tipo=crlv estado_leitura=completed qr_type=vio motivo=rntrc_ausente( chaves_vio_result=.*)?$/m', $log, $mRn) === 1;
+    $linhaRntrc = preg_match('/\[DocumentoController\] vio_reprovado id=' . $incompleto . ' tipo=crlv estado_leitura=completed qr_type=vio motivo=uf_invalida( chaves_vio_result=.*)?$/m', $log, $mRn) === 1;
     qaAfirmar('log vio_reprovado traz motivo=placa_divergente para CRLV com placa divergente', $linhaDiv);
-    qaAfirmar('log vio_reprovado traz motivo=rntrc_ausente para CRLV sem RNTRC', $linhaRntrc);
+    qaAfirmar('log vio_reprovado traz motivo=uf_invalida para CRLV sem UF', $linhaRntrc);
     qaAfirmar('log vio_reprovado lista apenas NOMES de chaves (Placa, UF, RNTRC), sem valores', $linhaDiv && str_contains($mDiv[1] ?? '', 'chaves_vio_result=Placa,Exerc') && str_contains($mDiv[1], 'RNTRC'));
     qaAfirmar('motivo_codigo nao vaza na resposta HTTP do controller', !str_contains($http ?? implode("
 ", $qaSaidas), 'motivo_codigo'));

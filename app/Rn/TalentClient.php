@@ -148,9 +148,14 @@ class TalentClient
             ];
         }
 
-        unset($resposta); // corpo bruto de erro NUNCA persistido/logado
+        // Mensagem de negocio da Talent (`msg` string do JSON; senao texto cru
+        // truncado — contrato do corpo de erro NAO documentado), sanitizada
+        // (controles removidos, <= 300 chars). So transita na excecao para
+        // exibicao ao usuario; NUNCA logada/persistida. Corpo bruto descartado.
+        $mensagemApi = is_string($resposta) ? \Util\MensagemApi::extrairDoCorpo($resposta) : null;
+        unset($resposta);
 
-        throw new TalentClientException(match ($codigoHttp) {
+        throw (new TalentClientException(match ($codigoHttp) {
             400 => 'erro_validacao',
             401 => 'erro_autenticacao',
             404 => 'nao_encontrado',
@@ -160,6 +165,6 @@ class TalentClient
             409 => 'conflito',
             500 => 'erro_servidor',
             default => 'erro_http',
-        });
+        }))->comMensagemApi($mensagemApi);
     }
 }

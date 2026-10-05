@@ -26,10 +26,13 @@ try {
 $totem = Auth::validarTotem($pdo);
 
 $controller = new ImpressaoAtendimentoController(new AtendimentoDao($pdo));
-$entrada = json_decode(file_get_contents('php://input'), true) ?? [];
+$entrada = json_decode(file_get_contents('php://input'), true);
+if (!is_array($entrada)) {
+    $entrada = [];
+}
 
 $acao = $_GET['acao'] ?? '';
-$reimpressao = ($_GET['reimpressao'] ?? '') === '1';
+$reimpressao = ImpressaoAtendimentoController::flagReimpressao($_GET, $entrada);
 
 switch ($acao) {
     case 'gerar-etiqueta':

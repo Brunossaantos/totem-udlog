@@ -398,7 +398,7 @@ class DocumentoController
 
     /**
      * Allowlist FECHADA de apresentacao: converte o codigo interno de
-     * reprovacao (DocumentoRn / log) em um dos 5 codigos que o front pode
+     * reprovacao (DocumentoRn / log) em um dos 4 codigos que o front pode
      * mostrar ao motorista. Qualquer outro valor (incluindo
      * persistencia_nao_vigente e motivo_indisponivel) vira null. Nunca
      * devolve valor do documento nem mensagem crua.
@@ -407,10 +407,9 @@ class DocumentoController
     {
         return match ($codigo) {
             'placa_divergente' => 'placa_divergente',
-            'rntrc_ausente' => 'rntrc_ausente',
             'cnh_vencida' => 'cnh_vencida',
             'leitura_failed', 'vio_result_ausente', 'qr_type_inesperado', 'paginas_divergentes', 'excecao_avaliacao' => 'documento_ilegivel',
-            'placeholder', 'uf_invalida', 'exercicio_invalido', 'tipo_ausente', 'tipo_invalido_campo', 'campos_cnh_invalidos' => 'dados_invalidos',
+            'placeholder', 'uf_invalida', 'exercicio_invalido', 'tipo_invalido_campo', 'campos_cnh_invalidos' => 'dados_invalidos',
             default => null,
         };
     }
@@ -532,7 +531,8 @@ class DocumentoController
                 $exercicioAusente = $exercicioBruto === null
                     || (is_string($exercicioBruto) && trim($exercicioBruto) === '');
 
-                if ($placa === '' || $exercicioAusente || $uf === '' || $rntc === '' || $tipoVeiculo === '') {
+                // RNTRC e Tipo opcionais no preenchimento manual (decisao 2026-10-02).
+                if ($placa === '' || $exercicioAusente || $uf === '') {
                     Resposta::erro('Dados incompletos');
                 }
 

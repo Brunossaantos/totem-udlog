@@ -40,6 +40,42 @@ switch ($cenario) {
         http_response_code(200);
         echo json_encode(['msg' => 'sucesso sem nrRegAcesso']);
         break;
+    // Cenarios de erro com corpo {msg} (teste_talent_mensagem_api_finalizar.php)
+    case 'msg_409':
+    case 'msg_422':
+    case 'msg_400':
+        http_response_code((int) substr($cenario, 4));
+        echo json_encode(['nrRegAcesso' => null, 'msg' => 'Reg. acesso ajudante. Cracha ja associado a outro ajudante. Acao nao permitida.']);
+        break;
+    // Recusa so quando o ajudante enviado tem o CPF "ja associado" (52998224725);
+    // qualquer outro ajudante (ou nenhum) e aceito (teste_talent_correcao_ajudante.php).
+    case 'ajudante_cracha':
+        $corpo = json_decode((string) file_get_contents('php://input'), true);
+        $cpfAjudante = is_array($corpo) ? ($corpo['ajudantes'][0]['cpf'] ?? null) : null;
+        if ($cpfAjudante === '52998224725') {
+            http_response_code(409);
+            echo json_encode(['nrRegAcesso' => null, 'msg' => 'Reg. acesso ajudante. Cracha ja associado a outro ajudante. Acao nao permitida.']);
+        } else {
+            http_response_code(200);
+            echo json_encode(['nrRegAcesso' => 'AJU' . substr((string) $cpfAjudante, 0, 3), 'msg' => null]);
+        }
+        break;
+    case 'msg_suja_longa':
+        http_response_code(409);
+        echo json_encode(['msg' => "  Linha1\r\n\t\x00\x07\x1b[31mLinha2   " . str_repeat('A', 400)]);
+        break;
+    case 'msg_html':
+        http_response_code(422);
+        echo json_encode(['msg' => '<script>alert(1)</script><b>x</b> & "aspas"']);
+        break;
+    case 'texto_cru_400':
+        http_response_code(400);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Falha\tde validacao sem JSON";
+        break;
+    case 'corpo_vazio_500':
+        http_response_code(500);
+        break;
     default:
         http_response_code(404);
         echo json_encode(['erro' => 'cenario de teste desconhecido']);

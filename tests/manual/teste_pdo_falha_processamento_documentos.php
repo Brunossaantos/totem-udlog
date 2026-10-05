@@ -403,10 +403,12 @@ try {
     $atendimentoBase = $dao->buscarPorId(novoAtendimentoCrlv($pdo, $dao, $idTotem, $pastaScratch));
     $documentoRnBase = new DocumentoRn(new \App\Dao\VioCacheDao($pdo), $dao);
 
-    $resultadoSemRntc = $resultadoCompleto6;
-    unset($resultadoSemRntc['dados_leitura']['RNTRC']);
-    $avaliacaoSemRntc = $documentoRnBase->avaliarResultadoVioApiBrCrlv($atendimentoBase, $resultadoSemRntc);
-    afirmar('Prova negativa: CRLV sem RNTC em vio_result e REJEITADO (checagem de presenca em dados_leitura, nao em comparacao.campos)', $avaliacaoSemRntc['pode_avancar'] === false);
+    // RNTRC e Tipo deixaram de ser criticos (decisao 2026-10-02): o campo
+    // critico de presenca exercitado aqui passa a ser a UF.
+    $resultadoSemUf = $resultadoCompleto6;
+    unset($resultadoSemUf['dados_leitura']['UF']);
+    $avaliacaoSemUf = $documentoRnBase->avaliarResultadoVioApiBrCrlv($atendimentoBase, $resultadoSemUf);
+    afirmar('Prova negativa: CRLV sem UF em vio_result e REJEITADO (checagem de presenca em dados_leitura, nao em comparacao.campos)', $avaliacaoSemUf['pode_avancar'] === false);
 
     $resultadoSemPlaca = $resultadoCompleto6;
     unset($resultadoSemPlaca['dados_leitura']['Placa']);

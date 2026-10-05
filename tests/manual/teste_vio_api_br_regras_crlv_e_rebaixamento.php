@@ -135,7 +135,7 @@ try {
     $r1 = $documentoRn->avaliarResultadoVioApiBrCrlv($at1, resultadoCrlvBaseRegras([], [
         'Placa' => 'PAR0001', 'RNTRC' => null, 'Tipo' => 'PARTICULAR',
     ]));
-    afirmar('Cenario 1 (achado registrado): RNTC ausente NUNCA e aceito, mesmo com Tipo="PARTICULAR" (nao existe excecao de "veiculo particular" no codigo)', $r1['pode_avancar'] === false);
+    afirmar('Cenario 1 (decisao 2026-10-02): RNTC ausente NAO reprova mais o CRLV (RNTRC opcional na aprovacao)', $r1['pode_avancar'] === true);
     // RNTC nao e campo CRITICO em respostaVioApiBrAprovavel() (so placa/
     // renavam/exercicio/uf) -- a rejeicao acontece DENTRO de avaliarCrlv(),
     // que devolve o motivo GRANULAR real diretamente (avaliarResultadoVioApiBrCrlv
@@ -143,7 +143,7 @@ try {
     // pode_avancar=false por essa via -- so respostaVioApiBrNaoAprovada()
     // usa a mensagem generica fixa, e essa so e usada quando
     // respostaVioApiBrAprovavel() falha ANTES de chegar em avaliarCrlv()).
-    afirmar('Cenario 1: motivo devolvido ao chamador menciona RNTC (motivo granular real de avaliarCrlv(), nunca um valor inventado/generico demais para este caso)', str_contains($r1['motivo'], 'RNTC'));
+    afirmar('Cenario 1: motivo de aprovacao nao menciona RNTC', !str_contains($r1['motivo'], 'RNTC'));
 
     // ============================================================
     // Cenario 2 — RNTC ausente NUNCA convertido em placeholder: nenhum
@@ -153,8 +153,8 @@ try {
     // outro texto inventado.
     // ============================================================
     $at1Depois = $atendimentoDao->buscarPorId((int) $at1['id_atendimento']);
-    afirmar('Cenario 2: crlv_rntc permanece NULL apos a rejeicao (nada foi inventado/persistido)', $at1Depois['crlv_rntc'] === null);
-    afirmar('Cenario 2: crlv_origem_validacao permanece NAO_VALIDADO apos a rejeicao', $at1Depois['crlv_origem_validacao'] === 'NAO_VALIDADO');
+    afirmar('Cenario 2: crlv_rntc persiste NULL (nao string vazia nem texto inventado) com CRLV aprovado sem RNTRC', $at1Depois['crlv_rntc'] === null && $at1Depois['crlv_snapshot_rntc'] === null);
+    afirmar('Cenario 2: crlv_origem_validacao = VIO_API_BR apos aprovacao sem RNTRC', $at1Depois['crlv_origem_validacao'] === 'VIO_API_BR');
 
     // ============================================================
     // Cenario 3 — RNTC presente e valido: preservado corretamente (exato,
@@ -169,16 +169,17 @@ try {
     afirmar('Cenario 3: crlv_rntc gravado com o valor EXATO extraido de "RNTRC" (chave real confirmada)', $at3Depois['crlv_rntc'] === '87654321');
 
     // ============================================================
-    // Cenario 4 — Tipo de veiculo ausente: rejeita (regra real confirmada
-    // em avaliarCrlv(): `if ($tipoVeiculo === '') { ... }`)
+    // Cenario 4 (decisao 2026-10-02) — Tipo de veiculo ausente NAO reprova
+    // (mesma regra do RNTRC): aprova e persiste NULL.
     // ============================================================
     $at4 = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'TIP0004');
     $fp4 = bin2hex(random_bytes(32));
     $at4 = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at4['id_atendimento'], $fp4);
     $r4 = $documentoRn->avaliarResultadoVioApiBrCrlv($at4, resultadoCrlvBaseRegras([], ['Placa' => 'TIP0004', 'Tipo' => null]));
-    afirmar('Cenario 4: CRLV com Tipo de veiculo ausente e rejeitado', $r4['pode_avancar'] === false);
+    afirmar('Cenario 4: CRLV com Tipo de veiculo ausente APROVA (Tipo opcional na leitura)', $r4['pode_avancar'] === true);
     $at4Depois = $atendimentoDao->buscarPorId((int) $at4['id_atendimento']);
-    afirmar('Cenario 4: crlv_tipo_veiculo permanece NULL apos a rejeicao', $at4Depois['crlv_tipo_veiculo'] === null);
+    afirmar('Cenario 4: crlv_tipo_veiculo e snapshot persistem NULL (nao string vazia)', $at4Depois['crlv_tipo_veiculo'] === null && $at4Depois['crlv_snapshot_tipo_veiculo'] === null);
+    afirmar('Cenario 4: origem VIO_API_BR apos aprovacao sem Tipo', $at4Depois['crlv_origem_validacao'] === 'VIO_API_BR');
 
     // ============================================================
     // Cenario 5 — Tipo presente e valido: preservado corretamente
@@ -441,8 +442,8 @@ try {
     // Confirma a premissa do cenario (chave literalmente ausente, nao null).
     afirmar('Cenario 17 (premissa): fixture nao contem a chave RNTRC de forma alguma', !array_key_exists('RNTRC', $dadosSemChaveRntc));
     $r17 = $documentoRn->avaliarResultadoVioApiBrCrlv($at17, resultadoCrlvComDadosLeituraExplicitos($dadosSemChaveRntc));
-    afirmar('Cenario 17: RNTRC com a CHAVE ausente (nao so null) e rejeitado, cai no fallback MANUAL (pode_avancar=false)', $r17['pode_avancar'] === false);
-    afirmar('Cenario 17: motivo menciona RNTC', str_contains($r17['motivo'], 'RNTC'));
+    afirmar('Cenario 17: RNTRC com a CHAVE ausente (nao so null) aprova (RNTRC opcional)', $r17['pode_avancar'] === true);
+    afirmar('Cenario 17: crlv_rntc NULL persistido', $atendimentoDao->buscarPorId((int) $at17['id_atendimento'])['crlv_rntc'] === null);
 
     // ------------------------------------------------------------
     // Cenario 18 -- RNTRC null EXPLICITO isolado (Tipo valido, sem misturar
@@ -453,8 +454,7 @@ try {
     $fp18 = bin2hex(random_bytes(32));
     $at18 = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at18['id_atendimento'], $fp18);
     $r18 = $documentoRn->avaliarResultadoVioApiBrCrlv($at18, resultadoCrlvBaseRegras([], ['Placa' => 'RNT0018', 'RNTRC' => null]));
-    afirmar('Cenario 18: RNTRC null explicito (Tipo valido) e rejeitado, fallback MANUAL', $r18['pode_avancar'] === false);
-    afirmar('Cenario 18: motivo menciona RNTC', str_contains($r18['motivo'], 'RNTC'));
+    afirmar('Cenario 18: RNTRC null explicito (Tipo valido) aprova (RNTRC opcional)', $r18['pode_avancar'] === true);
 
     // ------------------------------------------------------------
     // Cenario 19 -- RNTRC vazio ('') isolado
@@ -463,8 +463,7 @@ try {
     $fp19 = bin2hex(random_bytes(32));
     $at19 = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at19['id_atendimento'], $fp19);
     $r19 = $documentoRn->avaliarResultadoVioApiBrCrlv($at19, resultadoCrlvBaseRegras([], ['Placa' => 'RNT0019', 'RNTRC' => '']));
-    afirmar('Cenario 19: RNTRC vazio ("") e rejeitado, fallback MANUAL', $r19['pode_avancar'] === false);
-    afirmar('Cenario 19: motivo especifico "RNTC do CRLV nao informado/invalido"', $r19['motivo'] === 'RNTC do CRLV nao informado/invalido');
+    afirmar('Cenario 19: RNTRC vazio ("") aprova (RNTRC opcional) e persiste NULL', $r19['pode_avancar'] === true && $atendimentoDao->buscarPorId((int) $at19['id_atendimento'])['crlv_rntc'] === null);
 
     // ------------------------------------------------------------
     // Cenario 20 -- RNTRC so com espacos ('   ') -- trim() em avaliarCrlv()
@@ -474,7 +473,7 @@ try {
     $fp20 = bin2hex(random_bytes(32));
     $at20 = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at20['id_atendimento'], $fp20);
     $r20 = $documentoRn->avaliarResultadoVioApiBrCrlv($at20, resultadoCrlvBaseRegras([], ['Placa' => 'RNT0020', 'RNTRC' => '   ']));
-    afirmar('Cenario 20: RNTRC so com espacos e rejeitado apos trim() (equivalente a vazio)', $r20['pode_avancar'] === false);
+    afirmar('Cenario 20: RNTRC so com espacos equivale a vazio apos trim(): aprova com NULL', $r20['pode_avancar'] === true && $atendimentoDao->buscarPorId((int) $at20['id_atendimento'])['crlv_rntc'] === null);
 
     // ------------------------------------------------------------
     // Cenario 21 -- RNTRC placeholder ('xxxxx') -- capturado por
@@ -598,8 +597,8 @@ try {
     // ------------------------------------------------------------
     $at29 = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'MAN0029');
     $r29 = $documentoRn->preencherManualCrlv($at29, 'MAN0029', 2025, 'SP', '', 'CAMINHAO');
-    afirmar('Cenario 29: preenchimento MANUAL com RNTC vazio e bloqueado', $r29['pode_avancar'] === false);
-    afirmar('Cenario 29: motivo especifico de RNTC', str_contains($r29['motivo'], 'RNTC'));
+    afirmar('Cenario 29: preenchimento MANUAL com RNTC vazio aprova (RNTRC opcional)', $r29['pode_avancar'] === true && $r29['origem'] === 'MANUAL');
+    afirmar('Cenario 29: crlv_rntc NULL persistido no manual sem RNTRC', $atendimentoDao->buscarPorId((int) $at29['id_atendimento'])['crlv_rntc'] === null);
 
     // ------------------------------------------------------------
     // Cenario 30 -- Preenchimento MANUAL com RNTC invalido (placeholder) ->
@@ -689,7 +688,7 @@ try {
     // cache tambem nunca autoriza avanco sem RNTC valido, pela MESMA regra
     // (SQL fail-closed), sem precisar de uma segunda passada pela logica de
     // avaliarCrlv() para provar isso de novo.
-    afirmar('Cenario 34: caminho VIO_API_BR exige RNTC valido (reconfirmado pelos Cenarios 17-25 acima, nenhuma excecao encontrada)', $r19['pode_avancar'] === false && $r26['pode_avancar'] === true);
+    afirmar('Cenario 34: RNTRC e opcional no caminho VIO_API_BR (Cenarios 17-20 aprovam) e RNTC valido tambem aprova', $r19['pode_avancar'] === true && $r26['pode_avancar'] === true);
     afirmar('Cenario 34 (QR-only): nao ha caminho VIO_CACHE; RNTC valido segue obrigatorio (Cenario 27 filtro SQL legado + Cenario 28 aprovacao direta)', $registroMalFormadoDireto === null && $r28a['origem'] === 'VIO_API_BR' && $r28a['pode_avancar'] === true);
     $at34Placa = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'PLX0034');
     $at34Placa = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at34Placa['id_atendimento'], bin2hex(random_bytes(32)));
@@ -697,6 +696,79 @@ try {
     afirmar('Cenario 34 (regressao rapida): placa continua fail-closed quando a PLACA EXTRAIDA diverge', $r34Placa['pode_avancar'] === false);
     afirmar('Cenario 34 (regressao rapida): exercicio continua fail-closed (Cenario 9a/9b, tipo incompativel invalida)', $r9a['pode_avancar'] === false && $r9b['pode_avancar'] === false);
     afirmar('Cenario 34 (regressao rapida): UF continua fail-closed (Cenario 7 ausente + Cenario 8 fora da lista)', $r7['pode_avancar'] === false && $r8['pode_avancar'] === false);
+
+    // ------------------------------------------------------------
+    // Cenarios 35-38 (decisao 2026-10-02): RNTRC digitado na confirmacao.
+    // ------------------------------------------------------------
+    $dadosConfirmacao = static fn (array $o = []): array => array_replace([
+        'motorista_nome' => 'MOTORISTA QA', 'motorista_cpf' => '529.982.247-25', 'cnh_validade' => '2030-01-01',
+        'crlv_ano' => '2025', 'crlv_uf' => 'SP', 'crlv_rntc' => '87654321', 'crlv_tipo_veiculo' => 'CAMINHAO',
+    ], $o);
+
+    $at35 = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'RNT0035');
+    $at35 = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at35['id_atendimento'], bin2hex(random_bytes(32)));
+    $r35 = $documentoRn->avaliarResultadoVioApiBrCrlv($at35, resultadoCrlvBaseRegras([], ['Placa' => 'RNT0035', 'RNTRC' => '']));
+    $atendimentoRn->salvarDadosMotorista((int) $at35['id_atendimento'], $dadosConfirmacao());
+    $at35D = $atendimentoDao->buscarPorId((int) $at35['id_atendimento']);
+    afirmar('Cenario 35: RNTRC digitado na confirmacao e persistido em crlv_rntc', $r35['pode_avancar'] === true && $at35D['crlv_rntc'] === '87654321');
+    afirmar('Cenario 35: preencher so o RNTRC (que a API nao trouxe) NAO rebaixa a origem VIO_API_BR/OK', $at35D['crlv_origem_validacao'] === 'VIO_API_BR' && $at35D['crlv_status_revisao'] === 'OK');
+    afirmar('Cenario 35: snapshot de RNTRC permanece NULL (verdade original da API)', $at35D['crlv_snapshot_rntc'] === null);
+
+    $at36 = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'RNT0036');
+    $at36 = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at36['id_atendimento'], bin2hex(random_bytes(32)));
+    $documentoRn->avaliarResultadoVioApiBrCrlv($at36, resultadoCrlvBaseRegras([], ['Placa' => 'RNT0036', 'RNTRC' => '12345678']));
+    $atendimentoRn->salvarDadosMotorista((int) $at36['id_atendimento'], $dadosConfirmacao(['crlv_rntc' => '99999999']));
+    $at36D = $atendimentoDao->buscarPorId((int) $at36['id_atendimento']);
+    afirmar('Cenario 36: alterar RNTRC que a API TROUXE rebaixa para MANUAL/PENDENTE_REVISAO', $at36D['crlv_origem_validacao'] === 'MANUAL' && $at36D['crlv_status_revisao'] === 'PENDENTE_REVISAO');
+
+    foreach (['crlv_ano' => '2024', 'crlv_uf' => 'RJ', 'crlv_tipo_veiculo' => 'CARRETA'] as $campoAlterado => $novoValor) {
+        $atX = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'RNT0037');
+        $atX = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $atX['id_atendimento'], bin2hex(random_bytes(32)));
+        $documentoRn->avaliarResultadoVioApiBrCrlv($atX, resultadoCrlvBaseRegras([], ['Placa' => 'RNT0037', 'RNTRC' => '']));
+        $atendimentoRn->salvarDadosMotorista((int) $atX['id_atendimento'], $dadosConfirmacao([$campoAlterado => $novoValor]));
+        $atXD = $atendimentoDao->buscarPorId((int) $atX['id_atendimento']);
+        afirmar("Cenario 37: alterar {$campoAlterado} ja validado (RNTRC digitado) continua rebaixando para MANUAL", $atXD['crlv_origem_validacao'] === 'MANUAL' && $atXD['crlv_status_revisao'] === 'PENDENTE_REVISAO');
+    }
+
+    $atExp = ['tipo' => 'expedicao', 'placa' => 'ABC1234', 'ordem_coleta' => '123', 'cliente_nome' => null];
+    $atRec = ['tipo' => 'recebimento', 'placa' => 'ABC1234', 'ordem_coleta' => null, 'cliente_nome' => 'CLIENTE X'];
+    afirmar('Cenario 38: confirmacao completa (Expedicao) sem campos ausentes', $atendimentoRn->camposObrigatoriosAusentes($atExp, $dadosConfirmacao()) === []);
+    afirmar('Cenario 38: confirmacao completa (Recebimento) sem campos ausentes', $atendimentoRn->camposObrigatoriosAusentes($atRec, $dadosConfirmacao()) === []);
+    afirmar('Cenario 38: RNTRC vazio/espacos e recusado', array_keys($atendimentoRn->camposObrigatoriosAusentes($atExp, $dadosConfirmacao(['crlv_rntc' => '   ']))) === ['crlv_rntc']);
+    afirmar('Cenario 38: CPF invalido e recusado', array_keys($atendimentoRn->camposObrigatoriosAusentes($atExp, $dadosConfirmacao(['motorista_cpf' => '111.111.111-11']))) === ['motorista_cpf']);
+    afirmar('Cenario 38: UF fora da lista e recusada', array_keys($atendimentoRn->camposObrigatoriosAusentes($atExp, $dadosConfirmacao(['crlv_uf' => 'XX']))) === ['crlv_uf']);
+    afirmar('Cenario 38: cliente ausente (Recebimento) e recusado', array_keys($atendimentoRn->camposObrigatoriosAusentes(array_replace($atRec, ['cliente_nome' => '']), $dadosConfirmacao())) === ['cliente']);
+    afirmar('Cenario 38: ordem de coleta ausente (Expedicao) e recusada', array_keys($atendimentoRn->camposObrigatoriosAusentes(array_replace($atExp, ['ordem_coleta' => null]), $dadosConfirmacao())) === ['ordem_coleta']);
+    afirmar('Cenario 38: payload vazio lista todos os campos editaveis', count($atendimentoRn->camposObrigatoriosAusentes($atExp, [])) === 7);
+    afirmar('Cenario 38: tipo de veiculo vazio e recusado na confirmacao', array_keys($atendimentoRn->camposObrigatoriosAusentes($atExp, $dadosConfirmacao(['crlv_tipo_veiculo' => '  ']))) === ['crlv_tipo_veiculo']);
+    afirmar('Cenario 38: tipo de veiculo com mais de 60 caracteres e recusado', array_keys($atendimentoRn->camposObrigatoriosAusentes($atExp, $dadosConfirmacao(['crlv_tipo_veiculo' => str_repeat('A', 61)]))) === ['crlv_tipo_veiculo']);
+
+    // ------------------------------------------------------------
+    // Cenarios 39-41 (decisao 2026-10-02): Tipo segue a regra do RNTRC.
+    // ------------------------------------------------------------
+    $at39 = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'TIP0039');
+    $at39 = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at39['id_atendimento'], bin2hex(random_bytes(32)));
+    $r39 = $documentoRn->avaliarResultadoVioApiBrCrlv($at39, resultadoCrlvBaseRegras([], ['Placa' => 'TIP0039', 'Tipo' => '']));
+    $atendimentoRn->salvarDadosMotorista((int) $at39['id_atendimento'], $dadosConfirmacao(['crlv_tipo_veiculo' => 'CAMINHAO TRATOR', 'crlv_rntc' => '12345678']));
+    $at39D = $atendimentoDao->buscarPorId((int) $at39['id_atendimento']);
+    afirmar('Cenario 39: Tipo digitado na confirmacao e persistido', $r39['pode_avancar'] === true && $at39D['crlv_tipo_veiculo'] === 'CAMINHAO TRATOR');
+    afirmar('Cenario 39: digitar Tipo que a API nao trouxe NAO rebaixa a origem (VIO_API_BR/OK)', $at39D['crlv_origem_validacao'] === 'VIO_API_BR' && $at39D['crlv_status_revisao'] === 'OK');
+    afirmar('Cenario 39: snapshot de Tipo permanece NULL', $at39D['crlv_snapshot_tipo_veiculo'] === null);
+
+    $at40 = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'TIP0040');
+    $at40 = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at40['id_atendimento'], bin2hex(random_bytes(32)));
+    $documentoRn->avaliarResultadoVioApiBrCrlv($at40, resultadoCrlvBaseRegras([], ['Placa' => 'TIP0040', 'Tipo' => 'CARRETA']));
+    $atendimentoRn->salvarDadosMotorista((int) $at40['id_atendimento'], $dadosConfirmacao(['crlv_tipo_veiculo' => 'BITREM', 'crlv_rntc' => '12345678']));
+    $at40D = $atendimentoDao->buscarPorId((int) $at40['id_atendimento']);
+    afirmar('Cenario 40: alterar Tipo que a API TROUXE rebaixa para MANUAL/PENDENTE_REVISAO', $at40D['crlv_origem_validacao'] === 'MANUAL' && $at40D['crlv_status_revisao'] === 'PENDENTE_REVISAO');
+
+    $at41 = novoAtendimentoCrlv($pdo, $atendimentoDao, $idTotem, 'TIP0041');
+    $at41 = prepararEnvioCrlv($pdo, $atendimentoDao, (int) $at41['id_atendimento'], bin2hex(random_bytes(32)));
+    $r41 = $documentoRn->avaliarResultadoVioApiBrCrlv($at41, resultadoCrlvBaseRegras([], ['Placa' => 'TIP0041', 'Tipo' => 'xxxxx']));
+    afirmar('Cenario 41: placeholder em Tipo continua reprovando o CRLV', $r41['pode_avancar'] === false && str_contains($r41['motivo'], 'placeholder'));
+
+    // crlvAprovado() (gate de avanco de etapa) nao exige Tipo.
+    afirmar('Cenario 42: crlvAprovado aceita CRLV aprovado sem Tipo (ano/UF validos)', $documentoRn->crlvAprovado(['crlv_origem_validacao' => 'VIO_API_BR', 'crlv_ano' => 2025, 'crlv_uf' => 'SP', 'crlv_tipo_veiculo' => null]) === true);
 
     // ============================================================
     // Limpeza (o finally abaixo dropa o banco inteiro; nenhuma limpeza

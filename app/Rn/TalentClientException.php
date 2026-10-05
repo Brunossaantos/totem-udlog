@@ -30,6 +30,8 @@ class TalentClientException extends \RuntimeException
         'erro_http', 'resposta_ilegivel',
     ];
 
+    private ?string $mensagemApi = null;
+
     public function __construct(private string $categoria)
     {
         if (!in_array($categoria, self::CATEGORIAS_VALIDAS, true)) {
@@ -43,6 +45,23 @@ class TalentClientException extends \RuntimeException
     public function categoria(): string
     {
         return $this->categoria;
+    }
+
+    /**
+     * Mensagem de negocio devolvida pela Talent em resposta HTTP de erro,
+     * JA sanitizada (Util\MensagemApi: sem controles, <= 300 chars).
+     * Fica fora de getMessage()/trace por desenho; NUNCA logar nem persistir.
+     * Null quando a falha nao veio da Talent (rede/timeout) ou sem corpo.
+     */
+    public function mensagemApi(): ?string
+    {
+        return $this->mensagemApi;
+    }
+
+    public function comMensagemApi(?string $mensagemApi): static
+    {
+        $this->mensagemApi = $mensagemApi;
+        return $this;
     }
 
     /**

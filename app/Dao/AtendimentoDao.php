@@ -312,15 +312,16 @@ class AtendimentoDao
         $stmt->execute([
             'crlv_ano' => $exercicio,
             'crlv_uf' => $uf,
-            'crlv_rntc' => $rntc,
-            'crlv_tipo_veiculo' => $tipoVeiculo,
+            // RNTRC vazio = NULL (opcional na aprovacao; decisao 2026-10-02)
+            'crlv_rntc' => $rntc !== '' ? $rntc : null,
+            'crlv_tipo_veiculo' => $tipoVeiculo !== '' ? $tipoVeiculo : null,
             'origem' => $origem,
             'status_revisao' => $statusRevisao,
             'snapshot_placa' => $ehOrigemVio ? $placa : null,
             'snapshot_exercicio' => $ehOrigemVio ? $exercicio : null,
             'snapshot_uf' => $ehOrigemVio ? $uf : null,
-            'snapshot_rntc' => $ehOrigemVio ? $rntc : null,
-            'snapshot_tipo_veiculo' => $ehOrigemVio ? $tipoVeiculo : null,
+            'snapshot_rntc' => ($ehOrigemVio && $rntc !== '') ? $rntc : null,
+            'snapshot_tipo_veiculo' => ($ehOrigemVio && $tipoVeiculo !== '') ? $tipoVeiculo : null,
             'id' => $id,
         ]);
     }
@@ -341,10 +342,11 @@ class AtendimentoDao
               AND crlv_status_processamento IN ('PROCESSANDO_LEITURA', 'PROCESSANDO_COMPARACAO')
         ");
         $stmt->execute([
-            'crlv_ano' => $exercicio, 'crlv_uf' => $uf, 'crlv_rntc' => $rntc,
-            'crlv_tipo_veiculo' => $tipoVeiculo, 'snapshot_placa' => $placa,
+            // RNTRC vazio = NULL (opcional; decisao 2026-10-02)
+            'crlv_ano' => $exercicio, 'crlv_uf' => $uf, 'crlv_rntc' => $rntc !== '' ? $rntc : null,
+            'crlv_tipo_veiculo' => $tipoVeiculo !== '' ? $tipoVeiculo : null, 'snapshot_placa' => $placa,
             'snapshot_exercicio' => $exercicio, 'snapshot_uf' => $uf,
-            'snapshot_rntc' => $rntc, 'snapshot_tipo_veiculo' => $tipoVeiculo,
+            'snapshot_rntc' => $rntc !== '' ? $rntc : null, 'snapshot_tipo_veiculo' => $tipoVeiculo !== '' ? $tipoVeiculo : null,
             'id' => $id, 'tentativa' => $tentativaId,
         ]);
 
@@ -743,6 +745,41 @@ class AtendimentoDao
             'cpf'    => $cpf,
             'id'     => $id,
         ]);
+    }
+
+    /**
+     * Regrava o ajudante SOMENTE se o atendimento ainda for editavel: status
+     * 'em_andamento' E talent_checkin_status em NAO_ENVIADO/ERRO_REPROCESSAVEL
+     * (nunca ENVIANDO/ENVIADO/ENVIO_INDETERMINADO nem concluido). Transacao
+     * curta com SELECT ... FOR UPDATE: serializa com o CAS de
+     * iniciarEnvioTalent() (que precisa do mesmo lock de linha), de modo que
+     * uma correcao nunca altera dados enquanto um envio esta em curso.
+     * Retorna false (sem alterar nada) se o estado nao permitir.
+     */
+    public function salvarAjudanteSeEditavel(int $id, ?string $nome, ?string $cpf): bool
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare('SELECT status, talent_checkin_status FROM tb_atendimento WHERE id_atendimento = :id FOR UPDATE');
+            $stmt->execute(['id' => $id]);
+            $linha = $stmt->fetch();
+            if (
+                !$linha
+                || $linha['status'] !== 'em_andamento'
+                || !in_array($linha['talent_checkin_status'], ['NAO_ENVIADO', 'ERRO_REPROCESSAVEL'], true)
+            ) {
+                $this->pdo->rollBack();
+                return false;
+            }
+            $this->salvarAjudante($id, $nome, $cpf);
+            $this->pdo->commit();
+            return true;
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**
