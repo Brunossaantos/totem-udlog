@@ -18,6 +18,7 @@ use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
+use App\Rn\AnexoOrdemColetaLeitor;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
 
@@ -32,7 +33,14 @@ $totemDao = new TotemDao($pdo);
 $empresaDao = new EmpresaDao($pdo);
 
 $talentClient = new TalentClient($_ENV['TALENT_API_URL'] ?? '', $_ENV['TALENT_API_KEY'] ?? '');
-$talentRn = new TalentRn($talentClient, $filaDao, $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRn = new TalentRn(
+    $talentClient,
+    $filaDao,
+    $atendimentoDao,
+    $_ENV['STORAGE_PATH'],
+    // anexo-ordem-coleta-n8n: conexao preguicosa ao banco externo
+    AnexoOrdemColetaLeitor::padrao()
+);
 
 foreach ($filaDao->buscarPendentes() as $item) {
     $idAtendimento = (int) $item['id_atendimento'];

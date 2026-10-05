@@ -1,5 +1,7 @@
 # Estado real do projeto - totem-udlog (VERSAO RESUMIDA)
 
+- [2026-10-05] `anexo-ordem-coleta-n8n` concluida ate a /03 (somente Expedicao; /04 = commit): o n8n envia o PDF da OC para `public/api/ordem-coleta-anexo.php` (JSON base64, Bearer `ORDEM_COLETA_ANEXO_API_KEY` com hash_equals, HTTPS, rate limit, 5 MiB, `%PDF-`); arquivo em `STORAGE_PATH/ordens_coleta/<cnpj>/<numero>_<AAAAMMDDHHMMSS>.pdf`, tabela `tb_ordem_coleta_arquivos` (UNIQUE cnpj+numero, so caminho/sha256, sem FK) no banco externo; sobrescrita por (cnpj,numero); `TalentRn` anexa `Ordem de Coleta` (base64 puro) e, em qualquer falha, segue sem anexo; cron `limpar-anexos-ordem-coleta.php` apaga 15 dias apos OC INATIVA (`inativada_em`, gravada por `marcarInativaPorNumero`) ou 15 dias apos recebimento se orfao; OC ATIVA nunca apaga. Decisao do usuario: so PDF chega ao totem (Word/imagem nao sao convertidos nem enviados; OC correspondente faz check-in sem anexo). Ajuste pos-/02: corrida de nome corrigida com publicacao exclusiva via `link()`; `CaminhoJaRegistradoException`; testes HTTP hermeticos; contador do rate limit 0640. /02 e /03 APROVADAS por QA, seguranca e backend independentes: logica 185/185, http 59/59, lacunas 59/59 (100 e 200 rodadas x 6 processos), mutacoes detectadas, regressao sem falhas; unica falha `teste_hardening_exclusao` E17 e PRE-EXISTENTE no HEAD (ver P55). Migrations externas 002/003 aplicadas SO no banco externo de dev. Proximo passo: deploy na Hostgator (SSH, so com autorizacao a cada passo; migrations 002/003 + `.env` + pasta + cron). Handoff: `docs/handoffs/2026-10-05-anexo-ordem-coleta-n8n.md`.
+
 - [2026-10-04] Padronizacao dos modais de numero da nota (sem commit): teclas do numerico ja eram iguais (177x124, gap 14, grade 3x4; agora peso 700 em todas e centralizacao flex; digitos 52px, Apagar/Confirmar 30px); botoes de acao (Confirmar/Corrigir/Voltar/Excluir nota/Cancelar atendimento) padronizados em 560x88, 28px/700, raio 16 (antes Confirmar/Corrigir 624x96/30px/raio 18, Voltar 624 ou 560, Cancelar peso 600). So CSS (`app.css`) + verificacoes novas em `vio_captura_layout.js` (1745).
 
 - [2026-10-04] Titulo e favicon (sem commit): `<title>Totem</title>` em `public/totem/index.php` (unica pagina HTML; `public/index.php` nao existe; JS nao altera `document.title`); favicon proprio (quadrado arredondado #0179AD com totem branco) em `public/totem/assets/` (`favicon.svg`, `favicon-32.png`, `favicon-192.png`, `apple-touch-icon.png`, `favicon.ico` 16/32/48), versionados por `filemtime`; sem `.htaccess` no repo; `/favicon.ico` na raiz do dominio nao tratado (document root em producao ambiguo). Verificacoes adicionadas em `tests/manual/vio_captura_layout.js`.
@@ -542,6 +544,16 @@ Riscadas/resolvidas ficam na subsecao 6.6.
 - P54 [ABERTA] Larguras: TM-T88VII imprime ~50,8 mm (causa nao confirmada,
   firmware 360 dots); etiqueta fixada em 48 mm uteis; medidas fisicas finais
   do papel (tamanho total, cortes, posicao) pendentes do usuario
+
+- P55 [ABERTA] `teste_hardening_exclusao` E17 falha no HEAD (pre-existente): esperava anexos CNH+CRLV que o fluxo QR-only nao gera mais (teste desatualizado)
+- P56 [ABERTA] anexo-oc B-1: 1062 classificado por `str_contains` em `errorInfo[2]`; B-2: orfaos de arquivo e `.tmp_*` sem varredura; B-3: `caminhoReservado` engole excecao; B-4: rate limit por REMOTE_ADDR e contador cresce sem teto
+- P57 [ABERTA] anexo-oc I-1: rajada >30 envios/segundo com a mesma parte de nome => 503; I-4: `Authorization` pode ser removido pelo Apache/FPM, X-Forwarded-Proto forjavel, sem tamanho minimo de chave
+- P58 [ABERTA] `tests/manual/teste_oc_anexo_lacunas.php` sai com rc 0 mesmo com falhas (conferir a saida)
+- P59 [ABERTA] `link()` validado so no Windows/NTFS; testar no Linux/Hostgator (ha fallback `fopen 'xb'`)
+- P60 [ABERTA] Confirmar em producao `tb_clientes.cnpj` VARCHAR(14) so digitos (join direto `c.cnpj = a.cnpj_cliente`)
+- P61 [ABERTA] Migrations externas 002/003 (`tb_ordem_coleta_arquivos`, `inativada_em`) ainda nao aplicadas em producao; exigem CREATE/ALTER no banco externo
+- P62 [ABERTA] Teste real na Talent com PDF ~5 MB so com autorizacao (timeout 30 s => ENVIO_INDETERMINADO)
+- P63 [ABERTA] Demanda do n8n em `docs/n8n-anexo-ordem-coleta.md` (workflow inativo, URL/credencial a configurar)
 
 ### 6.6 Resolvidas (nao listar como abertas)
 - Talent: idempotencia, HTTP 409, anexos, doctos[] real, credencial,

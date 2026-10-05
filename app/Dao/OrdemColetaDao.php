@@ -60,7 +60,7 @@ class OrdemColetaDao
 
         $stmt = $pdo->prepare('
             UPDATE tb_ordens_coleta
-            SET status = \'INATIVA\'
+            SET status = \'INATIVA\', inativada_em = NOW()
             WHERE numero_ordem_coleta = :numero AND status = \'ATIVA\'
         ');
         $stmt->execute(['numero' => $numero]);

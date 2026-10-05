@@ -17,6 +17,7 @@ use App\Dao\OrdemColetaPendenteBaixaDao;
 use App\Dao\AceiteLgpdDao;
 use App\Rn\AtendimentoRn;
 use App\Rn\OrdemColetaClient;
+use App\Rn\AnexoOrdemColetaLeitor;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
 use App\Rn\DocumentoRn;
@@ -42,7 +43,15 @@ $ordemColetaClient = new OrdemColetaClient(new OrdemColetaDao());
 $atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), $ordemColetaClient);
 
 $talentClient = new TalentClient($_ENV['TALENT_API_URL'] ?? '', $_ENV['TALENT_API_KEY'] ?? '');
-$talentRn = new TalentRn($talentClient, new FilaEnvioDao($pdo), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
+$talentRn = new TalentRn(
+    $talentClient,
+    new FilaEnvioDao($pdo),
+    new AtendimentoDao($pdo),
+    $_ENV['STORAGE_PATH'],
+    // anexo da Ordem de Coleta (anexo-ordem-coleta-n8n): conexao preguicosa,
+    // so abre o banco externo ao montar o payload de uma Expedicao.
+    AnexoOrdemColetaLeitor::padrao()
+);
 
 // DocumentoRn usado so para revalidar CNH/CRLV ja gravados no momento da
 // transicao de etapa (avancar-etapa-expedicao) — nao instancia VioDecodeClient

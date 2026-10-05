@@ -45,7 +45,10 @@ class TalentRn
         private TalentClient $talentClient,
         private FilaEnvioDao $filaEnvioDao,
         private AtendimentoDao $atendimentoDao,
-        private string $caminhoBase
+        private string $caminhoBase,
+        // anexo-ordem-coleta-n8n (2026-10-05): leitor do PDF da Ordem de Coleta
+        // (Expedicao). null (padrao) = comportamento anterior, sem anexo de OC.
+        private ?AnexoOrdemColetaLeitor $leitorAnexoOrdemColeta = null
     ) {}
 
     /**
@@ -296,7 +299,56 @@ class TalentRn
             $anexos[] = $this->anexarPdf([$arquivoNota], $descricao);
         }
 
+        $anexoOrdemColeta = $this->montarAnexoOrdemColeta($atendimento);
+        if ($anexoOrdemColeta !== null) {
+            $anexos[] = $anexoOrdemColeta;
+        }
+
         return $anexos;
+    }
+
+    /**
+     * Anexo do PDF da Ordem de Coleta (SO Expedicao; Recebimento nao muda),
+     * demanda anexo-ordem-coleta-n8n (2026-10-05). Busca por (cliente_cnpj,
+     * ordem_coleta) do atendimento. QUALQUER falha ao buscar/ler o anexo
+     * (banco externo fora do ar, arquivo ausente/corrompido, sha256
+     * divergente...) SEGUE SEM ANEXO: nunca lanca, nunca vira
+     * ERRO_REPROCESSAVEL e nunca entra na fila. Registra UMA linha de log
+     * agregada, so com id_atendimento e codigo fixo de motivo (sem numero da
+     * OC, cnpj, caminho ou mensagem de excecao).
+     *
+     * @return array{anexoBase64:string, descricao:string}|null
+     */
+    private function montarAnexoOrdemColeta(array $atendimento): ?array
+    {
+        if ($this->leitorAnexoOrdemColeta === null || ($atendimento['tipo'] ?? null) !== 'expedicao') {
+            return null;
+        }
+
+        $idAtendimento = (int) ($atendimento['id_atendimento'] ?? 0);
+
+        try {
+            $cnpj = preg_replace('/\D/', '', (string) ($atendimento['cliente_cnpj'] ?? ''));
+            $numero = trim((string) ($atendimento['ordem_coleta'] ?? ''));
+            $resultado = $this->leitorAnexoOrdemColeta->buscar((string) $cnpj, $numero);
+
+            $base64 = $resultado['base64'] ?? null;
+            if (is_string($base64) && $base64 !== '') {
+                return ['anexoBase64' => $base64, 'descricao' => 'Ordem de Coleta'];
+            }
+
+            $motivo = $resultado['motivo'] ?? null;
+            if ($motivo === null) {
+                return null; // OC sem anexo registrado: caso normal, sem log
+            }
+            $motivoLog = is_string($motivo) && preg_match('/\A[a-z0-9_]{1,40}\z/D', $motivo) === 1 ? $motivo : 'motivo_desconhecido';
+        } catch (\Throwable $e) {
+            $motivoLog = 'leitor_excecao';
+        }
+
+        error_log(sprintf('TalentRn: anexo_ordem_coleta_omitido id_atendimento=%d motivo=%s', $idAtendimento, $motivoLog));
+
+        return null;
     }
 
     /**
