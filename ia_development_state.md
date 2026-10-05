@@ -1,5 +1,16 @@
 # Estado real do projeto - totem-udlog (VERSAO RESUMIDA)
 
+- [2026-10-04] Ajustes pos-revisao (sem commit): `error_log` dos 2 controllers de impressao agora grava `get_class($e)` (nao a mensagem bruta); docblock de `ImpressaoTesteController::etiquetaPronta` corrigido (rota de diagnostico com token do totem, caminho fixo `docs/50x80.pdf` inexistente no deploy, avaliar exclusao no deploy final); README do servico: `node-windows` marcado como legado e secao 2.6 renomeada para "tarefa de logon". Verificado: php -l ok; etiqueta_ajudante 67/67, texto_etiqueta 105/105, etiqueta_ajudante_qa 32/32, impressao_idor 12/12 (banco QA); zero `qa_qr_exclusivo_%`.
+
+- [2026-10-04] ESTADO ATUAL (consolidado; sem commit/push ate esta entrada). ENTREGUE (fluxo QR-only de CNH/CRLV em Exp e Rec, testado em dev e banco QA): leitura de QR melhorada; reprovacao por `motivo_usuario` com re-escaneio (3a so manual); tela "Confirme os dados" em 3 cartoes com campos do sistema somente leitura (Placa/Ordem/Cliente) e gate de obrigatorios; RNTRC/Tipo opcionais na leitura e obrigatorios na confirmacao; botoes/teclado ampliados (LGPD e inicial intactas); impressao com DUAS etiquetas (motorista + ajudante, 80x80, 48 mm uteis, so ASCII, nome do ajudante fora da etiqueta do motorista); deteccao de falta de papel pela fila do spooler (409 `sem_papel`, alerta no front); `mensagem_api` da Talent no erro de finalizacao; correcao dos dados do ajudante apos recusa; tarefa de logon do servico de impressao (servico Windows descartado); paginas web de teste (`teste-impressao.php`, `preview-confirmacao.php` e JS) EXCLUIDAS por decisao do usuario; corpo JSON escalar (`5`, `"x"`, `true`, `null`) em `impressao.php`/`atendimento.php`/`nota.php` agora vira `[]` e responde 4xx (antes TypeError/500), teste `teste_corpo_json_escalar.php` 31/31 via php-cgi em banco QA; docs atualizados (README do servico, deploy-checklist, handoff, `.env.example`). PENDENTE: ver secao 6 (Hostgator no final; testes fisicos de falta de papel, duas etiquetas e QR com Netum; contrato de erro da Talent; criterio por texto do "Corrigir dados do ajudante"; reenvio de rejeicoes de negocio pela fila; CPF do ajudante so 11 digitos; residuos de dev; sem teto de re-escaneio no backend; P22).
+
+- [2026-10-02/04] Front consolidado (sem commit): (a) QR-only: progresso "Lendo documento...", modal de reprovacao por `motivo_usuario` com "Escanear novamente"/"Preencher manualmente"/"Cancelar" (`qrTentativas`); guia `.guia-qr` (4 cantos #0179AD, lado 36% da altura do video), worker com recorte/escalas 0,5-1,0/Otsu/orcamento 300 ms, ate 3 frames por toque, watchdog 4 s, calibracao `qr_leitura_calibracao.js` 47/48 (antes 39/48); `index.php` versiona o worker por mtime (ao mudar `qr-leitura.js` tocar tambem `qr-worker.js`). (b) Confirmacao em cartoes (Motorista, Veiculo, Atendimento; textarea auto-ajustavel, rodape sticky), modal "Faltam dados do atendimento" / "Nao e possivel continuar" para vazios e 422 `CONFIRMACAO_INCOMPLETA`. (c) Ampliacao 2026-10-04: principal 96px, secundario 88px, Cancelar 72px, campos 88-108px, teclado 5 linhas (tecla 100px), sem `:hover`; so `montarTeclado`/`scrollIntoView` no JS. (d) Impressao: `sem_papel` = alerta + "Tentar novamente" (so reimpressao); inatividade suspensa em `exp/rec_impressao` nos estados `sem_papel`, `erro`, `indeterminado`, `erro_finalizar` e na correcao do ajudante; etiqueta do ajudante impressa em seguida (`concluido` so apos as duas; retry reimprime so a pendente; 409 no ajudante = erro "Chame o atendimento"); `erro_finalizar` mostra `mensagem_api` em caixa com textContent; "Corrigir dados do ajudante" aparece se a `mensagem_api` normalizada contem "ajudante" (criterio por texto, fragil). Layout JS 1641/1641 (3 viewports) na ultima rodada.
+
+- [2026-10-02] Back consolidado (sem commit): (a) RNTRC e Tipo do CRLV opcionais na leitura (NULL; `rntrc_ausente`/`tipo_ausente` fora de `motivo_usuario`), obrigatorios na confirmacao e no `finalizar` (422 `CONFIRMACAO_INCOMPLETA` com `campos`/`rotulos`; Rec exige tambem `cliente`); digitar o que a API nao trouxe nao rebaixa a origem. (b) `finalizar` devolve `dados.mensagem_api` (Talent com HTTP de erro; `Util\MensagemApi` remove controles/invisiveis incl. U+00AD, U+061C, U+180E, U+2060-2064, normaliza espacos, 300 chars; nunca logada nem persistida; HTTP 202 `ERRO_REPROCESSAVEL`, rede/timeout/corpo vazio = sem `dados`). (c) Ajudante: `salvar-etapa` etapa `ajudante` reutilizada para correcao (so `em_andamento` + NAO_ENVIADO/ERRO_REPROCESSAVEL, sob lock; senao 409); CPF do ajudante = 11 digitos sem DV (decisao do usuario; CPF do motorista inalterado, com DV); `TalentRn` relê o atendimento apos o CAS. (d) Etiqueta: `Util\TextoEtiqueta::paraAscii`, `Util\EtiquetaLayout` (area util 48 mm a partir de 1 mm, `ETIQUETA_AREA_UTIL_MM` opcional 20..largura, fontes 22/15/15/40/9 com reducao automatica, 1 pagina, topo 2,5 mm), `gerar-etiqueta` com `destinatario` (`motorista` padrao | `ajudante`; ajudante exige `possui_ajudante=1` + nome, senao 409; motorista devolve `tem_etiqueta_ajudante`; CPF nunca impresso); diagnostico (`impressao-teste.php`) aceita override de tamanho e `destinatario`, acoes `configuracao-etiqueta`/`etiqueta-pronta` (docs/50x80.pdf). (e) `flagReimpressao` aceita query OU corpo. (f) `.gitignore` ignora `exemplos/` (possivel dado pessoal) e `epson/`. (g) Observabilidade VIO: uma linha `vio_reprovado` com motivo da allowlist, sem valores. (h) `status-processamento` com `motivo_usuario` aditivo (so na chamada que efetiva o terminal reprovado) e `iniciar-processamento` reabre apenas CONCLUIDO + NAO_VALIDADO; `avancarEtapaDocumentos` devolve `dados_confirmacao`; `resolverTelaDocumentos` e timeouts (poll 125 s) corrigiram o "Enviando..." eterno e a confirmacao vazia. Migration 018 aplicada no dev local.
+
+- [2026-10-02] Impressao e servico local consolidado: DECISAO DEFINITIVA da etiqueta = papel 80x80 (driver "totem", UserForm158), `.env` ETIQUETA 80/80 portrait, conteudo em 48 mm uteis (TM-T88VII imprime ~50,8 mm = 360 dots; causa NAO confirmada; ajustes de driver/Sumatra/ESC-POS e Paper Width do firmware descartados, procedimento em `epson/manual.pdf` p.69-75 so informativo; `scripts/teste-escpos-raw.ps1` e diagnostico descartavel). Servico Node: Sumatra com `-print-settings` (`printSettings`, padrao `noscale,portrait,paper=totem`, validado `[A-Za-z0-9,=._ -]` max 100); deteccao de falta de papel por permanencia do job na fila (`lib/verificarFila.js`, `semPapelTimeoutMs` 3000-60000 padrao 10 s, `deteccaoSemPapel` padrao true; remove so o job e responde 409 `sem_papel`; vale so para EPSON Receipt6/TMUSB001; `PrinterStatus`/`DetectedErrorState` NAO distinguem falta de papel); autostart por TAREFA DE LOGON (`scripts/instalar-tarefa-logon.ps1`, `desinstalar-tarefa-logon.ps1`, `iniciar-oculto.vbs`), servico do Windows/LocalSystem descartado porque o job travou no spooler; `scripts/teste-impressao.js` (`npm run teste:impressao`, `--imprimir`, `--pdf=`, `--largura=`/`--altura=`) e script de diagnostico do servico, fica. Retestes fisicos no dev (autorizados, 1 impressao cada): no ultimo, com spooler limpo e rolo novo, `POST /imprimir` -> HTTP 200 `impresso`, fila vazia em ~4 s e ~10 s e papel conferido pelo usuario. `npm test` 15/15.
+
+- [2026-10-02] QA consolidado: suites legadas portadas ao fluxo QR-only em banco `qa_qr_exclusivo_<hex>` descartavel + storage temporario (prepend `qa_qr_exclusivo_prepend.php` fail-closed, infra `qa_qr_exclusivo_legado.php`, VIO falso por factory): e2e mock 38/38, `salvar_etapa_cliente` 18/18, integracao QR 50/50, `idor_salvar_etapa` 22/22 (so com banco QA forcado), etiqueta_ajudante 67/67 (sem banco) e 32/32 (QA), texto_etiqueta 105/105, correcao ajudante 58/58, mensagem_api_finalizar 39/39, mensagem_api_e_flag_reimpressao 24/24, impressao_idor 12/12 (QA), npm test 15/15. Residuos em dev: totem `TESTE_E2E_16a493` (id 1845) em `udlog_totem` e 11 bancos `qa_*` antigos (P23); 0 bancos `qa_qr_exclusivo_*`.
 
 - [2026-10-01] Front QR-only (`app.js`/`app.css`), sem commit: progresso "Lendo documento... trazendo os dados." (+ spinner na espera) e modal de reprovacao por `motivo_usuario` (CNH/CRLV, Exp e Rec) com "Escanear novamente" (reabre a tela QR do documento, reenvia `iniciar-processamento` com novo frame, conta em `qrTentativas`; 3a reprovacao so oferece manual), "Preencher manualmente" e "Cancelar atendimento"; motivo null/fora da allowlist mantem o manual. Motivo e guardado em `state.<exp|rec>.motivos` ao chegar no resultado do poll (so vem uma vez). Layout JS 68/68, viewports 768x1366/1080x1920/1152x1846 sem overflow.
 - [2026-10-01] Contrato novo QR-only (motivo ao motorista + re-escaneio), sem commit: `status-processamento` devolve `motivo_usuario` aditivo (`placa_divergente`|`rntrc_ausente`|`cnh_vencida`|`documento_ilegivel`|`dados_invalidos`|`null`), so na chamada que efetiva o terminal CONCLUIDO reprovado (nao persistido; polls seguintes e `persistencia_nao_vigente` = null). `iniciar-processamento` aceita novo POST para o mesmo documento quando CONCLUIDO + origem NAO_VALIDADO + `*_validado_em` nulo (CAS em `AtendimentoDao::iniciarEnvioVioApiBr`, tentativa_id nova, 1 POST); aprovado segue idempotente; PROCESSANDO_*/ENVIANDO/INDETERMINADO nunca reabrem. Regras de aprovacao inalteradas. Integracao 48/48.
@@ -39,7 +50,7 @@
 > Se algo nao consta aqui, procure no backup; se nao estiver la
 > tambem, e "nao documentado".
 
-Ultima atualizacao: 2026-09-29
+Ultima atualizacao: 2026-10-04
 Fonte do resumo: `ia_development_state_bkp.md` (SHA-256 iniciado em
 a6397ebccae0d363), copia byte a byte do arquivo original.
 Este arquivo e atualizado ao final de cada ciclo (etapa 04). O backup
@@ -160,23 +171,47 @@ Documentos do motorista (VIO)
   INDETERMINADO), CAS de envio, ID externo persistido antes do polling,
   cache seguro `VIO_CACHE` (AES-256-GCM, HMAC, TTL 7 dias, migrations
   015/016, aplicadas no dev local `udlog_totem` em 2026-09-26)
-- CNH FISICA (frente+verso, PDF de 2 paginas) ou DIGITAL (so frente, PDF
-  de 1 pagina), escolha explicita antes da captura; `cnh_modo_captura`
-  (migration 017, aplicada em `udlog_totem` em 2026-09-28); NULL = FISICA
+- ENTRADA ATUAL = FLUXO QR-ONLY (2026-10-01): tela unica de QR por documento
+  (CNH e CRLV, Exp e Rec); o JPEG do quadro vai direto a VIO sob CAS (um POST,
+  `comparar=true`, sem retry), sem cache, sem storage e sem Talent; 3 falhas
+  de leitura levam ao preenchimento manual. Escolha CNH fisica/digital, upload
+  e PDF foram REMOVIDOS (acoes antigas = 404); `cnh_modo_captura` (migration
+  017) e as origens/tabelas historicas ficam preservadas. Comparacao VIO e
+  so diagnostica, nao bloqueia
 - Contrato real de campos CONFIRMADO por chamadas reais pagas: CNH
   `Nome`/`CPF`/`Validade`; CRLV `Placa`/`Renavam`/`Exercício`/`UF`/
   `RNTRC`/`Tipo`; `pages_processed`/`total_pages` vem NULL (nao exigidos)
 - Legado Serpro (VioDecodeClient, ProdespClient, manual_vio_decode.md)
   REMOVIDO (demanda remocao-legado-serpro-e-hardening-documentos);
   `VIO_VALIDADO` preservado no ENUM so para leitura historica
-- RNTRC (`rntc`) obrigatorio em todos os pontos (contrato operacional do
-  Talent); `veiculo.tipo` e `veiculo.uf` extraidos do CRLV (27 UFs);
+- RNTRC (`rntc`) e Tipo do veiculo: OPCIONAIS na leitura do CRLV e
+  OBRIGATORIOS na confirmacao/`finalizar` (decisao 2026-10-02, substitui
+  "obrigatorio em todos os pontos"; o Talent segue exigindo o `rntc`);
+  `veiculo.tipo` e `veiculo.uf` extraidos do CRLV (27 UFs);
   exercicio validado por tipo/magnitude/faixa (caberEmPhpInt)
 - Rebaixamento para MANUAL quando o atendente altera dado validado
   (AtendimentoRn::salvarDadosMotorista); allowlists com unset() do
   campo image; ehValorPlaceholder simetrico CNH/CRLV
 - Reconciliacao de processamento abandonado no kiosk (INDETERMINADO)
 - Preenchimento manual de CRLV com a mesma validacao de exercicio
+
+Fluxo QR-only, confirmacao e impressao (2026-10-02 a 2026-10-04, sem commit)
+- Front: leitura de QR melhorada (guia, recorte, escalas, ate 3 frames por
+  toque), reprovacao por `motivo_usuario` com re-escaneio, tela "Confirme os
+  dados" em cartoes (Placa/Ordem/Cliente somente leitura, obrigatorios
+  validados), botoes e teclado ampliados (LGPD e tela inicial intactas)
+- Impressao: duas etiquetas em papeis separados (motorista e ajudante), 80x80
+  mm com 48 mm uteis, so ASCII, `gerar-etiqueta` com `destinatario`; falta de
+  papel detectada pela fila do spooler (409 `sem_papel`) com alerta e
+  "Tentar novamente"; servico local com `printSettings` (papel "totem") e
+  autostart por TAREFA DE LOGON (servico do Windows descartado)
+- Talent: `mensagem_api` (texto de erro sanitizado) no erro de finalizacao;
+  correcao dos dados do ajudante apos recusa (`salvar-etapa` etapa `ajudante`)
+- Corpo JSON escalar nas rotas `impressao.php`/`atendimento.php`/`nota.php`
+  tratado como `[]` (4xx, nunca 500)
+- Paginas web de teste de impressao e de pre-visualizacao EXCLUIDAS
+  (2026-10-04); fica o endpoint de diagnostico `impressao-teste.php` (exige
+  token) e o script `servico-impressao-local/scripts/teste-impressao.js`
 
 Trello: foi removido do projeto em 2026-09-29 (nao usar).
 
@@ -227,10 +262,12 @@ Decisoes de produto/tecnicas registradas nos logs (transcricao curta)
   vencida; CRLV com exercicio numerico + placa igual a do atendimento;
   falha nao avanca sozinho (nova tentativa ou portaria). Exercicio nao
   significa licenciamento em tempo real
-- Aprovacao automatica vio.api.br: reliable=true e mismatched=0 mais
-  validacao de tipo/formato/faixa; comparacao.campos foi retirado da
-  decisao (risco residual aceito e registrado)
-- CNH: digital ou fisica escolhida pelo motorista antes da captura
+- Aprovacao automatica vio.api.br (REVISTA em 2026-10-01): leitura concluida,
+  QR esperado e campos validos (tipo/formato/faixa) aprovam; a comparacao
+  (reliable, mismatched, score) e so diagnostica e nunca bloqueia; falha
+  HTTP, ambiguidade, QR inesperado e campos ausentes/invalidos continuam
+  fail-closed (risco residual aceito: sem liveness, uma chamada por documento)
+- CNH: escolha fisica/digital SUPERADA pelo fluxo QR-only (2026-10-01)
 - Origem de auditoria VIO_API_BR para a validacao real; VIO_CACHE e
   MANUAL inalterados; VIO_VALIDADO = historico Serpro, so leitura
 - Ordem de coleta: banco externo com leitura e escrita autorizadas; apos
@@ -269,6 +306,10 @@ Decisoes de produto/tecnicas registradas nos logs (transcricao curta)
   * fonte de clientes: tb_cliente; sem tela de escolha entre candidatos
   * inconsistencia de cliente e estado interno do front
     (INCONSISTENTE_CLIENTE), sem migration nem mudanca em status_ocr
+  * ETIQUETA (2026-10-02, definitivo): largura util 48 mm (x 1..49 mm) em
+    papel 80x80; a TM-T88VII imprime so ~50,8 mm
+  * causa provavel: 360 dots (~58 mm de papel) no firmware - NAO confirmada;
+    procedimento do manual (`epson/manual.pdf` p.69-75) disponivel, NAO aplicado
   * fallback por razao social so com correspondencia unica e inequivoca
   * early-stop removido na etapa 3; cliente anterior nunca sobrescrito
     em silencio
@@ -385,9 +426,9 @@ Riscadas/resolvidas ficam na subsecao 6.6.
   seguem sem resposta oficial (inclui o formato exato de "saldo
   insuficiente"); contrato de campos criticos de CNH/CRLV ja CONFIRMADO
   por chamadas reais, o restante segue como fornecido pelo usuario (L221)
-- P18 [ABERTA] Migrations 015/016/017 aplicadas so no dev local
-  (`udlog_totem`); aplicacao em producao/Hostgator: nao documentada,
-  entra no deploy final (L221, L222)
+- P18 [ABERTA] Migrations 015/016/017/018 aplicadas so no dev local
+  (`udlog_totem`); aplicacao em producao/Hostgator entra no deploy final
+  (018 ANTES do PHP novo; ver docs/deploy-checklist.md) (L221, L222)
 - P19 [ABERTA] Nova credencial rotacionada da vio.api.br: nao existia/nao
   usada ate o registro (L221)
 - P20 [ABERTA] display_errors=Off em producao: item ja no
@@ -395,9 +436,11 @@ Riscadas/resolvidas ficam na subsecao 6.6.
 - P21 [ABERTA] Risco residual aceito: comparacao.campos fora da decisao
   de aprovacao automatica (sempre veio vazio em 3 chamadas reais) (L223,
   L5868)
-- P22 [ABERTA] Achado nao decidido: cenario "CRLV sem RNTC, veiculo
-  particular - aceito" nao corresponde a nenhuma regra real (RNTRC ausente
-  sempre rejeita); RNTRC sem validacao de formato (L5881, L5988)
+- P22 [ABERTA, MUDOU DE NATUREZA em 2026-10-02] RNTRC/Tipo agora sao
+  opcionais na leitura do CRLV e obrigatorios na confirmacao/`finalizar`
+  (422 `CONFIRMACAO_INCOMPLETA`); o cenario "veiculo particular sem RNTRC"
+  continua sem regra (hoje bloqueia na confirmacao); RNTRC sem validacao de
+  formato (L5881, L5988)
 - P23 [ABERTA] Nao bloqueantes da remocao do legado Serpro: fixture LGPD
   ausente (teste_lgpd_aceite_backend_seguranca.php depende de
   tests/manual/_fixtures_lgpd.php nunca versionado); bancos qa_ orfaos;
@@ -416,8 +459,9 @@ Riscadas/resolvidas ficam na subsecao 6.6.
 - P26 [ABERTA] Origem da chave de acesso da NF-e em rec_digitaliza sem o
   leitor HID (payload envia chave: null); sem substituto definido (L154,
   L902)
-- P27 [ABERTA] Sucesso do spooler do Windows nao confirma impressao fisica
-  (fire-and-forget): mitigar ou nao, decisao pendente (L147)
+- P27 [PARCIAL] Sucesso do spooler nao confirma impressao fisica; falta de
+  papel ja e detectada pela fila (ver 6.7); demais falhas fisicas (papel
+  atolado, tampa aberta) seguem sem deteccao (L147)
 - P28 [ABERTA] Ponto de acesso a tela de diagnostico de impressao (toque
   longo, #diagHotspot) e escolha de implementacao, nao decisao de UX
   formal (L146)
@@ -462,6 +506,39 @@ Riscadas/resolvidas ficam na subsecao 6.6.
 - P44 [ABERTA] Tela LGPD: trade-offs de acessibilidade aceitos (nao e
   falha); higiene de arquivos auxiliares de teste ausentes (L5541)
 
+### 6.7 Pendencias de 2026-10-04 (fluxo QR-only, impressao e Talent)
+- P45 [ABERTA] Deploy final Hostgator: migrations 015-018 (018 antes do PHP),
+  crons do cPanel (limpeza de rate limit OCR e de notas em quarentena),
+  preflight de `tb_cliente` (0 coincidencias com a UDLOG), HTTPS,
+  `storage/` fora do document root, `display_errors=Off`, `.env` de producao
+  (ETIQUETA_* 80/80, `TALENT_CHECKIN_ATIVO` ausente/false) e excluir
+  `impressao-teste.php` do deploy se a tela de diagnostico nao for usada
+- P46 [ABERTA] Mini PC de producao: papel "totem" 80x80 criado no driver,
+  tarefa de logon registrada com login automatico do Windows,
+  `origensPermitidas` de producao (P30)
+- P47 [ABERTA] Testes fisicos pendentes: falta de papel real (409
+  `sem_papel` pela fila, fluxo e alerta), duas etiquetas em sequencia
+  (motorista + ajudante) e leitura de QR com o Netum (os exemplos locais nao
+  decodificam em nenhum metodo; so cenarios sinteticos 47/48)
+- P48 [ABERTA] Contrato de erro da Talent nao documentado (400 real =
+  `{errors:{...},status}` ASP.NET); o que "cracha ja associado" implica nos
+  dados do ajudante tambem nao esta documentado
+- P49 [ABERTA] "Corrigir dados do ajudante" aparece por texto da
+  `mensagem_api` ("ajudante"): criterio fragil, sem codigo de erro da Talent
+- P50 [ABERTA] Rejeicoes de negocio da Talent nao sao reenviadas
+  automaticamente pela fila (so ERRO_REPROCESSAVEL tecnico)
+- P51 [ABERTA] CPF do ajudante so exige 11 digitos (sem DV, decisao do
+  usuario)
+- P52 [ABERTA] Sem teto de re-escaneio no backend (`iniciar-processamento`
+  aceita novo POST enquanto CONCLUIDO + NAO_VALIDADO; o front limita a 3);
+  sem rate limit especifico nessa acao
+- P53 [ABERTA] Residuos de dev: totem `TESTE_E2E_16a493` (id 1845) em
+  `udlog_totem` e 11 bancos `qa_*` antigos (P23); a limpeza depende de
+  autorizacao do usuario
+- P54 [ABERTA] Larguras: TM-T88VII imprime ~50,8 mm (causa nao confirmada,
+  firmware 360 dots); etiqueta fixada em 48 mm uteis; medidas fisicas finais
+  do papel (tamanho total, cortes, posicao) pendentes do usuario
+
 ### 6.6 Resolvidas (nao listar como abertas)
 - Talent: idempotencia, HTTP 409, anexos, doctos[] real, credencial,
   UX dos modais de nota e inatividade (L203, L214-220)
@@ -483,6 +560,13 @@ Riscadas/resolvidas ficam na subsecao 6.6.
   remocao do legado (ver duvidas no relatorio) (L180-181, L900, L975-978)
 - Higiene 2026-09-28 (skills, indexTotem.html, nf_teste, 2 PDFs reais)
   removida; PDFs nao recuperaveis
+- 2026-10-02/04: pagina e script de teste web (`teste-impressao.php`,
+  `preview-confirmacao.php`) excluidos por decisao; autostart do servico de
+  impressao decidido (tarefa de logon); causa do job retido no spooler
+  (LocalSystem) eliminada ao sair do servico do Windows; etiqueta final
+  (48 mm uteis, 80x80, ASCII) decidida; TypeError por corpo JSON escalar
+  corrigido; `exemplos/` e `epson/` no `.gitignore`; confirmacao vazia e
+  "Enviando..." eterno corrigidos; falta de papel detectada pela fila
 
 ## 7. Fora de escopo (nao sugerir sem pedido)
 
@@ -652,3 +736,8 @@ ia_development_state_bkp.md e testeOcr/. Ultimos commits da main
 - [2026-10-01] `/00-planejamento` de `ativacao-vio-api-br-e-padronizacao-captura-documentos` concluido, somente leitura: VIO local esta tecnicamente apta para uma chamada real controlada — as cinco variaveis `VIO_API_BR_*` necessarias estao presentes (valores nao lidos), URL HTTPS, cURL/OpenSSL/CA presentes, migrations 015/016/017 presentes; 018 ausente como pendencia independente de notas e nao bloqueia VIO. Nao ha flag de ativacao: cache miss instancia `VioApiBrClient`; POST unico com `comparar=true`, CAS/id externo/polling/cache ja existem. CNH/CRLV ainda usam a mesma classe-base das notas, mas ficam em 360 px, contra `min(92%, 900px)` das notas. Plano: reaproveitar o quadro amplo e o calculo de proporcao real para Expedicão/Recebimento sem mudar canvas, QR, JPEG, upload ou notas; testes integralmente mockados e validacao fisica posterior. Nenhuma chamada externa, documento real, `.env`, migration, banco/storage, impressao, producao, HostGator, commit ou push. Chamada paga bloqueada ate nova autorizacao explicita com documento, 1 POST maximo, GETs estimados e limpeza. Handoff: `docs/handoffs/2026-10-01-ativacao-vio-api-br-e-padronizacao-captura-documentos.md`.
 
 - [2026-10-01] `fluxo-qr-exclusivo-cnh-crlv` /01 corretiva: legado executavel de upload/modo/fotos/PDF removido; as acoes antigas retornam 404 sanitizado. Controller ganhou factory VIO exclusivamente de composicao para falso em QA; QR-only continua JPEG em memoria, CAS, um POST e sem cache/storage. Contrato isolado 23/23, lints e diff-check verdes. **PRECISA DE AJUSTE; /02 nao iniciado:** faltam portar as suites antigas fisica/digital/cache, atualizar o layout test e completar/executar a integracao QA controller+DAO+VIO/Talent falsos. O ambiente nao fornece `QA_QR_DB_*`; o bootstrap recusou `.env`, sem abrir conexao. Zero rede externa, banco/storage/documento real, migration, impressao, commit ou push. Handoff: `docs/handoffs/2026-10-01-fluxo-qr-exclusivo-cnh-crlv.md`.
+
+- [2026-10-02] Teste ficticio da etiqueta de PRODUCAO (ImpressaoAtendimentoController::montarPdf, nome "TESTE FICTICIO", nrRegAcesso 999999, sem banco/Talent): PDF MediaBox 226.77x226.77 pt = 80x80 mm; maiores linhas 31 mm (margem folgada); 1 impressao na EPSON TM-T88VII (Sumatra noscale,portrait,paper=totem) com status "impresso". Medidas fisicas do papel (tamanho total, cortes, posicao) pendentes do usuario.
+
+- [2026-10-02] Diagnostico (somente leitura) da impressao como servico Windows (LocalSystem, node-windows): servico Running/Auto na 4747, "HTTP 200 impresso" mas sem papel; fila da EPSON tem job 43 travado "Printing, Retained" (Size 0, owner SISTEMA) e job 44 atras dele; Sumatra roda como SYSTEM e o job trava no spooler/porta USB TMUSB001 (log PrintService desabilitado). Acao pendente do usuario: desinstalar o servico (npm run desinstalar-servico-windows), limpar a fila e voltar a npm start na conta dele.
+- [2026-10-02] Observacao empirica (EPSON TM-T88VII, sem papel, 1 impressao de teste): Sumatra sai 0 e o servico responde "impresso" em ~2 s; ~5 s apos o envio o job aparece "Printing, Retained" (0/0 pag.) e Win32_Printer muda para PrinterStatus=4, PrinterState=1024, DetectedErrorState=2 e permanece assim; Get-Printer segue "Normal", WorkOffline=False, nenhum evento System/Application. Job removido por Remove-PrintJob; fila vazia e impressora volta a PrinterStatus=3/DES=0. CONCLUSAO (teste com papel, 1 impressao): PrinterStatus=4/PrinterState=1024/DetectedErrorState=2 aparecem tambem na impressao NORMAL (job "Printing, Retained" 0/0 pag.), entao esses campos NAO distinguem falta de papel; unico discriminador observado: job sai da fila em <1 s (com papel, ~t+3,6 a 4,5 s no monitor) vs retido 0 pag. por 36+ s (sem papel).

@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { validarPrintSettings } = require('./lib/printSettings');
 
 const CAMINHO_CONFIG = process.env.CONFIG_PATH
   || path.join(__dirname, '..', 'config', 'config.json');
@@ -100,6 +101,26 @@ function validarTimeoutMs(valor) {
   return timeoutMs;
 }
 
+function validarDeteccaoSemPapel(valor) {
+  if (valor === undefined || valor === null) {
+    return true;
+  }
+  if (typeof valor !== 'boolean') {
+    throw new Error('Config invalida: "deteccaoSemPapel", quando informado, precisa ser true ou false.');
+  }
+  return valor;
+}
+
+function validarSemPapelTimeoutMs(valor) {
+  if (valor === undefined || valor === null) {
+    return 10000;
+  }
+  if (typeof valor !== 'number' || !Number.isInteger(valor) || valor < 3000 || valor > 60000) {
+    throw new Error('Config invalida: "semPapelTimeoutMs", quando informado, precisa ser um inteiro entre 3000 e 60000 (milissegundos).');
+  }
+  return valor;
+}
+
 function validarIdempotencia(valor) {
   if (!valor || typeof valor !== 'object') {
     throw new Error('Config invalida: "idempotencia" precisa ser um objeto { ttlMs, maxEntries }.');
@@ -125,6 +146,9 @@ function construirConfig() {
     origensPermitidas: Object.freeze(validarOrigensPermitidas(bruto.origensPermitidas)),
     impressorasPermitidas: Object.freeze(validarImpressorasPermitidas(bruto.impressorasPermitidas)),
     timeoutMs: validarTimeoutMs(bruto.timeoutMs),
+    printSettings: validarPrintSettings(bruto.printSettings),
+    deteccaoSemPapel: validarDeteccaoSemPapel(bruto.deteccaoSemPapel),
+    semPapelTimeoutMs: validarSemPapelTimeoutMs(bruto.semPapelTimeoutMs),
     idempotencia: Object.freeze(validarIdempotencia(bruto.idempotencia)),
     // Bind sempre exclusivo em loopback -- nunca configuravel para 0.0.0.0,
     // de proposito (requisito de seguranca fixo, nao uma opcao de config).

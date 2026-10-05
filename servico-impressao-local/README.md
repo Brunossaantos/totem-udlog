@@ -6,8 +6,10 @@ backend PHP) em base64 e manda para a impressora fisica indicada. Nao
 gera conteudo de etiqueta, nao decide layout/formato — isso e sempre do
 backend PHP.
 
-Este documento cobre instalacao e operacao. **Nada aqui foi executado
-neste repositorio** — e o roteiro para quando o mini PC fisico existir.
+Este documento cobre instalacao e operacao. Impressao real, papel "totem" 80x80,
+`printSettings`, tarefa de logon e deteccao de falta de papel foram exercitados no
+PC de desenvolvimento com a EPSON TM-T88VII; a validacao no mini PC de producao
+continua pendente (secao 6).
 
 ## 1. Por que Node.js + `pdf-to-printer` + `node-windows`
 
@@ -20,10 +22,9 @@ neste repositorio** — e o roteiro para quando o mini PC fisico existir.
   panos). Evita depender de bibliotecas com `node-gyp`/compilacao nativa,
   que costumam dar problema em maquina Windows sem toolchain de C++
   instalado.
-- **`node-windows`**: biblioteca pura JS (sem compilacao nativa) para
-  registrar um script Node como Servico do Windows nativo, com reinicio
-  automatico e inicializacao junto com o boot — sem precisar de sessao de
-  usuario logada.
+- **`node-windows`**: usada so na tentativa de Servico do Windows, que foi
+  DESCARTADA (ver secao 3); a inicializacao automatica adotada e a tarefa de
+  logon do Agendador de Tarefas (secao 3.1).
 - **`express`**: so para organizar rotas/middleware (CORS, PNA, auth,
   parsing de JSON) de forma legivel; nao decide nada de dominio.
 
@@ -63,7 +64,7 @@ neste repositorio** — e o roteiro para quando o mini PC fisico existir.
    ```
    npm install
    ```
-   Isso instala `express`, `pdf-to-printer` e `node-windows` (nenhuma
+   Isso instala `express`, `pdf-to-printer` e `node-windows` (legado; servico do Windows descartado) (nenhuma
    exige compilacao nativa).
 
 ### 2.4. Gerar o token do servico
@@ -208,7 +209,7 @@ timeout do lado do front-end (navegador do totem) e nao tem
 correspondente em `config.json` — nao confundir com `timeoutMs` deste
 servico.
 
-### 2.6. Testar manualmente antes de instalar como servico
+### 2.6. Testar manualmente antes de instalar a tarefa de logon
 
 ```
 npm start
@@ -224,46 +225,39 @@ inicializacao automatica.
 
 ## 3. Inicializacao automatica com o Windows
 
-Escolhida a abordagem via **`node-windows`** (Servico do Windows nativo),
-em vez de Agendador de Tarefas (Task Scheduler), porque:
+**Decisao adotada: tarefa de logon do Agendador de Tarefas sob a conta do
+usuario** (item 3.1). O servico do Windows (`node-windows`, LocalSystem) foi
+**DESCARTADO**: como LocalSystem o job de impressao travou no spooler (sem as
+preferencias da EPSON nem o papel "totem" 80x80 do usuario). Os scripts
+`npm run instalar-servico-windows` / `desinstalar-servico-windows` continuam no
+repositorio apenas por historico e **nao devem ser usados**.
 
-- Um Servico do Windows reinicia sozinho se o processo cair (o
-  Agendador de Tarefas tambem suporta isso, mas de forma menos direta).
-- Sobe antes/independente de qualquer login de usuario — o kiosk do
-  totem pode logar automaticamente sem depender de ordem de
-  inicializacao com o servico.
-- `node-windows` e puro JS, sem instalar nada fora do `npm install` ja
-  feito.
+### 3.1. Tarefa de logon sob a conta do usuario (ADOTADA)
 
-Passos (PowerShell como **Administrador**, dentro da pasta do servico):
-
-```
-npm run instalar-servico-windows
-```
-
-Isso registra o servico com o nome `UDLOG Servico Impressao Local` e ja
-inicia ele. Verificar em
-**Servicos do Windows** (`services.msc`) que ele aparece com status
-"Em execucao" e tipo de inicializacao "Automatico".
-
-Para remover (ex.: durante testes/depuracao):
+Uma **tarefa do Agendador de Tarefas** roda `node src\server.js` no logon, sob a
+conta do usuario (nao LocalSystem), sem janela e sem senha armazenada:
 
 ```
-npm run desinstalar-servico-windows
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\instalar-tarefa-logon.ps1   # -Force substitui a existente
+Start-ScheduledTask -TaskName "UDLOG Servico Impressao Local (logon)"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\desinstalar-tarefa-logon.ps1
 ```
 
-**Nao rodar nenhum desses dois comandos fora do mini PC de producao.**
+E execucao unica: a tarefa persiste entre reinicios e inicia a cada logon
+(reinicia 3x/1 min em falha). So funciona com o usuario logado; no mini PC
+de producao usar login automatico do Windows com o usuario do kiosk
+(decisao do deploy final). Pare o `npm start` manual antes (porta 4747).
 
 ## 4. Roteiro de diagnostico
 
 ### 4.1. O servico esta rodando?
 
-- Via Servicos do Windows: `services.msc` → procurar
-  `UDLOG Servico Impressao Local` → status deve ser "Em execucao".
-- Via linha de comando (PowerShell):
+- Via Agendador de Tarefas (PowerShell):
   ```
-  Get-Service "UDLOG Servico Impressao Local"
+  Get-ScheduledTask -TaskName "UDLOG Servico Impressao Local (logon)" | Get-ScheduledTaskInfo
   ```
+  (estado "Running" / `LastTaskResult` 267009 = em execucao).
+- Via porta: `Get-NetTCPConnection -LocalPort 4747 -State Listen`.
 - Via processo: `Get-Process node` deve listar ao menos um processo
   `node.exe` quando o servico esta ativo.
 
@@ -279,10 +273,8 @@ Resposta esperada (200):
 ```
 
 Se der erro de conexao recusada, o servico nao esta rodando ou a porta
-configurada e outra — checar `config/config.json` e o log do Servico do
-Windows (Visualizador de Eventos → Logs do Windows → Aplicativo, ou a
-pasta `daemon/` criada pelo `node-windows` ao lado do script, que guarda
-`.log`/`.err.log` do processo).
+configurada e outra — checar `config/config.json` e se a tarefa de logon
+esta em execucao (4.1); para ver o log, rodar `npm start` no console.
 
 ### 4.3. Listagem de impressoras
 
@@ -315,10 +307,36 @@ curl -X POST http://127.0.0.1:4747/imprimir \
 se aplica aqui (nunca colar o valor real preenchido num comando
 compartilhado).
 
+- Opcao `printSettings` (opcional, `config.json`): string passada ao SumatraPDF como
+  `-print-settings`. Ausente = padrao `noscale,portrait,paper=totem`; `""` = sem a opcao
+  (comportamento antigo, para reverter); aceita so `A-Za-z0-9,=._ -` ate 100 caracteres
+  (invalida = o servico nao inicia). Exige reiniciar o servico para valer.
+- Deteccao de falta de papel: apos o Sumatra sair com codigo 0, o servico consulta a fila da
+  impressora (PowerShell fixo, `Get-PrintJob`, a cada 500 ms). Job que some da fila = `impresso`;
+  job que continua na fila ate `semPapelTimeoutMs` (padrao 10000 ms, aceita 3000-60000) = o servico
+  remove so esse job (`Remove-PrintJob` por Id) e responde HTTP 409 `{"status":"sem_papel"}` (nao
+  entra na idempotencia). Se a consulta falhar ou o job nunca aparecer em ~3 s, responde `impresso`.
+  Vale so para a EPSON TM-T88VII (driver Receipt6, porta TMUSB001); desligar com
+  `"deteccaoSemPapel": false`. Limitacao: job lento (>10 s) pode ser tratado como sem papel;
+  ajustar `semPapelTimeoutMs`. Chaves opcionais, invalidas = o servico nao inicia.
+- O script `scripts/teste-escpos-raw.ps1` e descartavel/diagnostico (envio ESC/POS RAW de reguas),
+  nao e usado em producao nem faz parte do fluxo de impressao do servico.
 - Repetir a mesma chamada com o mesmo `identificador` deve retornar
   `{"status":"ja_impresso", ...}` sem imprimir de novo.
 - Enviar um `pdf_base64` que nao comeca com `%PDF` deve retornar `400`.
 - Enviar sem `Authorization` deve retornar `401`.
+
+### 4.4.0. Script de teste de impressao (recomendado)
+
+Le o token do `config/config.json` (nunca o exibe) e faz uma unica
+tentativa, sem retry:
+
+```
+cd servico-impressao-local
+npm run teste:impressao                 # verificacao: GET /saude e /impressoras, NAO imprime
+npm run teste:impressao -- --imprimir   # imprime 1 etiqueta de TESTE (padrao 80x50 mm, sem dado pessoal)
+npm run teste:impressao -- --imprimir --largura=80 --altura=50   # tamanho da pagina do PDF em mm (largura x altura)
+```
 
 ### 4.4.1. Teste de travamento/timeout — SOMENTE com processo mock
 
@@ -346,9 +364,10 @@ caso a origem ativa precise ser desativada.
 
 ### 4.6. Parar o servico manualmente (teste/depuracao)
 
-Quando o servico estiver rodando fora do Servico do Windows — ex. via
-`npm start`/`node src/server.js` direto no console, durante um teste ou
-diagnostico manual — e precisar ser encerrado:
+Quando o servico estiver rodando via tarefa de logon ou direto no console
+(`npm start`/`node src/server.js`), durante um teste ou diagnostico manual, e
+precisar ser encerrado (para a tarefa, preferir `Stop-ScheduledTask -TaskName
+"UDLOG Servico Impressao Local (logon)"`; o `taskkill` abaixo e sempre por PID):
 
 - **NUNCA usar `taskkill /IM node.exe`** (nem qualquer variante por nome
   de processo). Isso mataria **todo** processo `node.exe` em execucao na
@@ -365,13 +384,6 @@ diagnostico manual — e precisar ser encerrado:
      ```
      taskkill /PID <pid especifico> /T /F
      ```
-- Se o servico estiver rodando como Servico do Windows (instalado via
-  `npm run instalar-servico-windows`), usar os comandos proprios de
-  servico em vez de `taskkill`:
-  ```
-  Stop-Service "UDLOG Servico Impressao Local"
-  ```
-
 Essa mesma regra (PID especifico, nunca por nome) ja vale para o
 encerramento AUTOMATICO por `timeoutMs` (secao 2.5, "Ao estourar") — aqui
 ela e formalizada tambem para quando a parada e feita manualmente por uma
@@ -393,7 +405,10 @@ pessoa.
   em `config/config.json` — origem ja confirmada e documentada na secao
   2.5, mas so sera ativada no arquivo real durante o deploy final no mini
   PC (nao antes disso).
-- **Validacao no hardware fisico** (mini PC + `EPSON TM-T88VII Receipt`
-  via USB + Epson Advanced Printer Driver 6) — nada disso foi testado de
-  verdade ainda; este README e o roteiro para quando o equipamento
-  existir, nao uma confirmacao de que ja funciona.
+- **Validacao no hardware fisico do mini PC de producao** (`EPSON TM-T88VII
+  Receipt` via USB + Epson Advanced Printer Driver 6, papel "totem" 80x80,
+  tarefa de logon com login automatico): pendente, adiada para o deploy final.
+  Testes fisicos ainda nao feitos: falta de papel real pela fila, duas etiquetas
+  (motorista + ajudante) em sequencia.
+- **Largura util da etiqueta**: a TM-T88VII imprime so ~50,8 mm dos 80 mm; o
+  backend gera o conteudo em area util de 48 mm (`ETIQUETA_AREA_UTIL_MM`).

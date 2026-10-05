@@ -316,6 +316,11 @@ const state = {
     placa: '',
     ordens: [],
     dados: {},
+    // Ajudante informado/salvo neste atendimento (so memoria; pre-preenche o modo correcao).
+    ajudante: { nome: '', cpf: '' },
+    // true enquanto o motorista corrige o ajudante apos erro do finalizar (erro_finalizar);
+    // resetado por novoAtendimento() e ao sair do modo correcao.
+    ajudanteCorrecao: false,
     // Notas do Recebimento, na ordem de captura (a POSICAO na lista e o que o
     // motorista ve como "Nota N de M"). Cada entrada:
     // { uid, ordem, idNota, imagem, numero, confirmado, origem, estado,
@@ -450,20 +455,25 @@ function esconderToastErro() {
 let campoAtivo = null;
 
 function montarTeclado() {
+    // Grade reorganizada para teclas maiores (totem de 768 px de largura):
+    // numeros em linha propria (10 teclas), apagar largo na 4a linha e
+    // virgula/ponto ao lado do espaco; os mesmos caracteres, nenhum removido.
     const linhas = [
         ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'Ç'],
-        ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.'],
+        ['Z', 'X', 'C', 'V', 'B', 'N', 'M'],
     ];
     let html = '';
     linhas.forEach((linha, i) => {
         html += '<div class="linha-teclas">';
         linha.forEach(t => { html += `<button type="button" class="tecla" onclick="digitar('${t}')">${t}</button>`; });
-        if (i === 0) html += `<button type="button" class="tecla tecla-apagar" onclick="apagar()">⌫</button>`;
+        if (i === 3) html += `<button type="button" class="tecla tecla-apagar" aria-label="Apagar" onclick="apagar()">⌫</button>`;
         html += '</div>';
     });
     html += `<div class="linha-teclas">
+        <button type="button" class="tecla" onclick="digitar(',')">,</button>
+        <button type="button" class="tecla" onclick="digitar('.')">.</button>
         <button type="button" class="tecla tecla-espaco" onclick="digitar(' ')">espaço</button>
         <button type="button" class="tecla tecla-ok" onclick="fecharTeclado()">OK</button>
     </div>`;
@@ -472,8 +482,8 @@ function montarTeclado() {
 
 function abrirTeclado(el) { campoAtivo = el; document.getElementById('teclado').classList.add('aberto'); }
 function fecharTeclado() { document.getElementById('teclado').classList.remove('aberto'); campoAtivo = null; }
-function digitar(c) { if (campoAtivo) campoAtivo.value += c; }
-function apagar() { if (campoAtivo) campoAtivo.value = campoAtivo.value.slice(0, -1); }
+function digitar(c) { if (campoAtivo) { campoAtivo.value += c; ajustarAlturaTextarea(campoAtivo); } }
+function apagar() { if (campoAtivo) { campoAtivo.value = campoAtivo.value.slice(0, -1); ajustarAlturaTextarea(campoAtivo); } }
 
 // -------------------- inatividade --------------------
 
@@ -559,6 +569,15 @@ function notificarFimDeTrabalhoNotas() {
 // baixo (nenhum, numero da nota manual/sugestao, ou a confirmacao de
 // cancelamento empilhada sobre ele) continua exatamente como estava.
 function mostrarInatividade() {
+    // Tela de impressao aguardando o atendente (sem papel / erro com "Tentar
+    // novamente"): sem aviso, sem cancelamento e SEM teto de suspensao; so
+    // rearma o timer e volta ao normal quando o estado muda.
+    if (typeof imprInatividadeSuspensa === 'function' && imprInatividadeSuspensa()) {
+        suspensaoInicioMs = 0;
+        clearTimeout(idleTimerPrincipal);
+        idleTimerPrincipal = setTimeout(mostrarInatividade, IDLE_MS);
+        return;
+    }
     // OCR/upload/identificacao em curso contam como atividade do sistema: nao
     // mostra o aviso nem cancela o atendimento. O tempo completo (IDLE_MS)
     // reinicia quando o ultimo trabalho terminar (ver notificarFimDeTrabalhoNotas()).
@@ -701,9 +720,9 @@ function renderTela() {
         case 'exp_crlv_qr': tela.innerHTML = telaExpCrlvQr(); iniciarCameraExp(); exibirIndicadorProcessamentoCnh(); break;
         case 'exp_crlv_manual': tela.innerHTML = telaExpCrlvManual(); break;
         case 'exp_aguarde_documentos': tela.innerHTML = telaExpAguardeDocumentos(); processarAguardeDocumentosExp(); break;
-        case 'exp_confirma': tela.innerHTML = telaConfirma('retirada de carga'); break;
+        case 'exp_confirma': tela.innerHTML = telaConfirma('retirada de carga'); ajustarTextareasConfirma(); break;
         case 'exp_ajudante': tela.innerHTML = telaAjudante(); break;
-        case 'exp_impressao': tela.innerHTML = telaImpressao(); processarImpressao(); break;
+        case 'exp_impressao': tela.innerHTML = telaImpressao(); entrarTelaImpressao(); break;
         case 'rec_placa_qtd': tela.innerHTML = telaRecPlacaQtd(); break;
         case 'rec_bloqueado': tela.innerHTML = telaBloqueado(); break;
         case 'rec_digitaliza': tela.innerHTML = telaDigitaliza(); medirMontarPainel(tela); iniciarCameraScanner(); break;
@@ -714,9 +733,9 @@ function renderTela() {
         case 'rec_crlv_qr': tela.innerHTML = telaRecCrlvQr(); iniciarCameraRec(); exibirIndicadorProcessamentoCnhRec(); break;
         case 'rec_crlv_manual': tela.innerHTML = telaRecCrlvManual(); break;
         case 'rec_aguarde_documentos': tela.innerHTML = telaRecAguardeDocumentos(); processarAguardeDocumentosRec(); break;
-        case 'rec_confirma': tela.innerHTML = telaConfirma('entrega de carga'); break;
+        case 'rec_confirma': tela.innerHTML = telaConfirma('entrega de carga'); ajustarTextareasConfirma(); break;
         case 'rec_ajudante': tela.innerHTML = telaAjudante(); break;
-        case 'rec_impressao': tela.innerHTML = telaImpressao(); processarImpressao(); break;
+        case 'rec_impressao': tela.innerHTML = telaImpressao(); entrarTelaImpressao(); break;
     }
 }
 
@@ -728,6 +747,7 @@ function novoAtendimento() {
     // custar um GET real contra a vio.api.br) continue "solta" depois que o
     // atendimento deixou de existir/estar em andamento.
     pollGeracao++;
+    if (typeof imprResetarEtiquetas === 'function') imprResetarEtiquetas(); // etiqueta pendente/motorista impressa (impressao.js)
     // invalida upload/OCR/identificacao/salvar em andamento do atendimento anterior
     atendimentoGeracao++;
     suspensaoInicioMs = 0;
@@ -738,7 +758,7 @@ function novoAtendimento() {
         // 2026-09-24).
         tela: 'lgpd', lgpdAceito: false, lgpdTokenAceite: null,
         tipo: null, idAtendimento: null, placa: '',
-        ordens: [], dados: {}, notaUidSeq: 0, notasNumeros: [], previewNotaAtual: null,
+        ordens: [], dados: {}, ajudante: { nome: '', cpf: '' }, ajudanteCorrecao: false, notaUidSeq: 0, notasNumeros: [], previewNotaAtual: null,
         capturaNotaEmAndamento: false, finalizandoDigitalizacao: false, excluindoNota: false,
         ultimaLeituraQr: null,
         exp: estadoExpVazio(),
@@ -1229,6 +1249,7 @@ async function expCamAbrirStream(deviceId) {
         });
         expCamStream = stream;
         expCamDeviceId = deviceId;
+        qrOtimizarCamera(stream);
         const video = document.getElementById('expCamVideo');
         if (!video) { stream.getTracks().forEach(t => t.stop()); expCamStream = null; return; }
         video.srcObject = stream;
@@ -1309,10 +1330,10 @@ function expCamAtualizarBotao() {
 
 function telaExpQr(titulo, tipo) {
     return `<div class="titulo">${titulo}</div>
-        <div class="subtitulo">Aproxime o QR code do guia e mantenha-o bem iluminado.</div>
+        <div class="subtitulo">Encaixe o QR code dentro do quadrado, bem iluminado e sem reflexo.</div>
         <div class="caixa-scanner" id="expCamCaixa">
             <video id="expCamVideo" autoplay playsinline></video>
-            <div class="guia-scanner" aria-hidden="true"></div>
+            <div class="guia-qr" aria-hidden="true"></div>
         </div>
         <div class="status-scanner" id="expCamStatus">Conectando à câmera...</div>
         <div class="status-leitura" id="expBgStatus" style="display:none"></div>
@@ -1341,9 +1362,11 @@ async function expCapturarQr(tipo) {
     let canvas = null;
     try {
         expCamMostrarStatus('Lendo QR code...');
-        canvas = expCamCapturarFrame(video);
-        const qr = await lerQrDoCanvas(canvas);
-        if (!qr || !qr.ok) {
+        // Ate QR_FRAMES_POR_TOQUE frames sucessivos por toque; o contador de
+        // tentativas abaixo e consumido UMA vez por toque, nunca por frame.
+        canvas = await lerQrEmVariosFrames(() => expCamCapturarFrame(video), video, expCamStream);
+        if (!video.isConnected) return; // tela trocada/cancelada durante a leitura
+        if (!canvas) {
             expLimparFrameQr();
             const tentativa = ++state.exp.qrTentativas[tipo];
             if (tentativa >= 3) {
@@ -1583,19 +1606,33 @@ async function expConfirmarCrlvManual() {
 
 let qrWorker = null;
 let qrWorkerCallbackPendente = null;
+let qrWorkerSeq = 0;
+
+// Quadrado de foco do QR: mesma geometria de `.guia-qr` (app.css) e de
+// QrLeitura.GUIA_PADRAO (qr-leitura.js) — centralizado, lado = 36% da ALTURA
+// do quadro de video. O worker le primeiro o recorte da guia (com folga) e
+// so depois o quadro inteiro.
+const QR_GUIA = { cx: 0.5, cy: 0.5, lado: 0.36 };
+const QR_ORCAMENTO_FRAME_MS = 300;   // tempo maximo da estrategia por frame (entre passos)
+const QR_TIMEOUT_WORKER_MS = 4000;   // watchdog: worker travado nunca prende a tela
+const QR_FRAMES_POR_TOQUE = 3;       // frames sucessivos por toque em "Ler QR code"
+const QR_INTERVALO_FRAMES_MS = 150;
 
 function obterQrWorker() {
     if (!qrWorker) {
         qrWorker = new Worker(urlAssetComVersao('assets/qr-worker.js', 'qrWorker'));
         qrWorker.onmessage = (e) => {
-            const cb = qrWorkerCallbackPendente;
+            const pendente = qrWorkerCallbackPendente;
+            // resposta tardia de uma leitura ja encerrada pelo watchdog e ignorada
+            if (!pendente || (e.data && e.data.id !== pendente.id)) return;
             qrWorkerCallbackPendente = null;
-            if (cb) cb(e.data);
+            clearTimeout(pendente.timer);
+            pendente.resolve({ ok: !!(e.data && e.data.ok) });
         };
         qrWorker.onerror = () => {
-            const cb = qrWorkerCallbackPendente;
+            const pendente = qrWorkerCallbackPendente;
             qrWorkerCallbackPendente = null;
-            if (cb) cb({ ok: false });
+            if (pendente) { clearTimeout(pendente.timer); pendente.resolve({ ok: false }); }
         };
     }
     return qrWorker;
@@ -1604,21 +1641,86 @@ function obterQrWorker() {
 // le o QR a partir do MESMO canvas ja capturado (evita redecodificar a
 // imagem gerada no upload) — capturas sao sequenciais (uma por vez, o botao
 // fica desabilitado durante a chamada), entao um unico callback pendente
-// por vez e suficiente
+// por vez e suficiente. O worker responde SOMENTE {ok}: o valor do QR nunca
+// chega a esta thread.
 function lerQrDoCanvas(canvas) {
     return new Promise((resolve) => {
         try {
             const ctx = canvas.getContext('2d');
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const worker = obterQrWorker();
-            qrWorkerCallbackPendente = resolve;
-            // envia o proprio ImageData (structured clone), transferindo o
-            // buffer subjacente (imageData.data.buffer) para evitar copia
-            worker.postMessage(imageData, [imageData.data.buffer]);
+            const id = ++qrWorkerSeq;
+            const timer = setTimeout(() => {
+                if (qrWorkerCallbackPendente && qrWorkerCallbackPendente.id === id) {
+                    qrWorkerCallbackPendente = null;
+                    resolve({ ok: false });
+                }
+            }, QR_TIMEOUT_WORKER_MS);
+            qrWorkerCallbackPendente = { id, resolve, timer };
+            // transfere o buffer do ImageData (sem copia) junto da geometria da guia
+            worker.postMessage({
+                id,
+                data: imageData.data,
+                width: imageData.width,
+                height: imageData.height,
+                guia: QR_GUIA,
+                orcamentoMs: QR_ORCAMENTO_FRAME_MS,
+            }, [imageData.data.buffer]);
         } catch (e) {
             resolve({ ok: false });
         }
     });
+}
+
+// Ajustes OPCIONAIS de camera para QR mais nitido: foco, exposicao e balanco
+// de branco continuos quando o driver expoe a capability (a Netum pode nao
+// expor). Cada ajuste e independente e qualquer falha/ausencia e ignorada —
+// nunca bloqueia nem quebra a captura.
+async function qrOtimizarCamera(stream) {
+    try {
+        const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
+        if (!track || typeof track.getCapabilities !== 'function' || typeof track.applyConstraints !== 'function') return;
+        const cap = track.getCapabilities() || {};
+        for (const chave of ['focusMode', 'exposureMode', 'whiteBalanceMode']) {
+            if (!Array.isArray(cap[chave]) || !cap[chave].includes('continuous')) continue;
+            try { await track.applyConstraints({ advanced: [{ [chave]: 'continuous' }] }); } catch (e) { /* sem suporte */ }
+        }
+    } catch (e) { /* camera sem getCapabilities: segue com a configuracao atual */ }
+}
+
+// Sem foco continuo mas com 'single-shot': dispara uma focagem antes de capturar.
+async function qrFocarAntesDaCaptura(stream) {
+    try {
+        const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
+        if (!track || typeof track.getCapabilities !== 'function' || typeof track.applyConstraints !== 'function') return;
+        const cap = track.getCapabilities() || {};
+        if (Array.isArray(cap.focusMode) && !cap.focusMode.includes('continuous') && cap.focusMode.includes('single-shot')) {
+            await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] });
+            await new Promise(r => setTimeout(r, 250));
+        }
+    } catch (e) { /* sem suporte: captura normalmente */ }
+}
+
+// Tenta ate QR_FRAMES_POR_TOQUE frames sucessivos (intervalo curto) e para no
+// primeiro com QR. Devolve o canvas desse frame (o JPEG enviado ao backend e o
+// frame completo) ou null. Frames sem QR sao descartados na hora. Encerra
+// cedo se a tela foi trocada (video desconectado do DOM).
+async function lerQrEmVariosFrames(capturarFrame, video, stream) {
+    await qrFocarAntesDaCaptura(stream);
+    for (let i = 0; i < QR_FRAMES_POR_TOQUE; i++) {
+        let canvas = null;
+        try {
+            canvas = capturarFrame();
+            const qr = await lerQrDoCanvas(canvas);
+            if (qr && qr.ok) return canvas;
+        } catch (e) { /* frame ruim: tenta o proximo */ }
+        canvas = null;
+        if (i < QR_FRAMES_POR_TOQUE - 1) {
+            await new Promise(r => setTimeout(r, QR_INTERVALO_FRAMES_MS));
+            if (!video || !video.isConnected) return null;
+        }
+    }
+    return null;
 }
 
 // ===================================================================
@@ -1823,7 +1925,6 @@ function resolverTelaDocumentos(proximaTela) {
 // fora da allowlist ou null mantem o fluxo manual anterior.
 const MENSAGENS_REPROVACAO_DOCUMENTO = {
     placa_divergente: 'A placa do documento é diferente da placa informada no atendimento.',
-    rntrc_ausente: 'O documento não possui RNTRC. Escaneie outro documento ou preencha manualmente.',
     cnh_vencida: 'A CNH está vencida.',
     documento_ilegivel: 'Não foi possível ler os dados do documento.',
     dados_invalidos: 'Os dados lidos do documento estão incompletos ou inválidos.',
@@ -1958,8 +2059,162 @@ async function tentarAvancarEtapaDocumentos(telaManualCnh, telaManualCrlv) {
 
 // -------------------- confirmacao dos dados (expedicao e recebimento) --------------------
 
-function linhaConfirma(rotulo, id, valor) {
-    return `<div class="linha-confirma">${rotulo}: <input class="kb-input" id="${id}" value="${escapeHtml(valor)}"></div>`;
+const ICONES_CONFIRMA = {
+    pessoa: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
+    caminhao: '<path d="M2 6h11v10H2z"/><path d="M13 9h4l4 4v3h-8z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+    prancheta: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9z"/><path d="M9 12h6M9 16h6"/>',
+    cadeado: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+};
+function iconeConfirma(nome, classe) {
+    return `<svg class="${classe}" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONES_CONFIRMA[nome]}</svg>`;
+}
+// campo editavel (kb-input): rotulo pequeno acima, valor grande; multilinha=true usa
+// textarea auto-ajustavel (nomes longos quebram linha, nunca cortam)
+function linhaConfirma(rotulo, id, valor, obrigatorio, multilinha, largo) {
+    const marca = obrigatorio ? ' <span class="obrig-marca" aria-hidden="true">*</span>' : '';
+    const req = obrigatorio ? ' aria-required="true" placeholder="obrigatório"' : '';
+    const comum = `class="kb-input conf-valor" id="${id}" autocomplete="off" spellcheck="false"${req}`;
+    const ctl = multilinha
+        ? `<textarea ${comum} rows="1">${escapeHtml(valor)}</textarea>`
+        : `<input ${comum} value="${escapeHtml(valor)}">`;
+    return `<div class="conf-campo${largo ? ' conf-campo-largo' : ''}"><label class="conf-rotulo" for="${id}">${rotulo}${marca}</label>${ctl}</div>`;
+}
+// dado do atendimento (Placa, Ordem de coleta, Cliente): somente leitura, sem teclado
+// virtual (sem kb-input), sem marca de obrigatorio; nao entra no payload de salvar-etapa
+function linhaConfirmaLeitura(rotulo, id, valor, multilinha, largo) {
+    const comum = `class="conf-valor conf-leitura" id="${id}" readonly tabindex="-1" aria-readonly="true"`;
+    const ctl = multilinha
+        ? `<textarea ${comum} rows="1">${escapeHtml(valor)}</textarea>`
+        : `<input ${comum} value="${escapeHtml(valor)}">`;
+    return `<div class="conf-campo conf-campo-leitura${largo ? ' conf-campo-largo' : ''}"><label class="conf-rotulo" for="${id}">${rotulo} ${iconeConfirma('cadeado', 'conf-cadeado')}</label>${ctl}</div>`;
+}
+function linhaConfirmaUf(id, valorAtual) {
+    const opcoes = UF_LISTA.map((uf) => `<option value="${uf}" ${uf === valorAtual ? 'selected' : ''}>${uf}</option>`).join('');
+    return `<div class="conf-campo"><label class="conf-rotulo" for="${id}">UF do CRLV <span class="obrig-marca" aria-hidden="true">*</span></label>
+        <select class="kb-input conf-valor conf-select" id="${id}" aria-required="true">
+            <option value="">Selecione</option>
+            ${opcoes}
+        </select></div>`;
+}
+function cartaoConfirma(titulo, icone, corpo) {
+    return `<section class="conf-cartao" aria-label="${titulo}">
+        <header class="conf-cartao-topo">${iconeConfirma(icone, 'conf-icone')}<h2 class="conf-cartao-titulo">${titulo}</h2></header>
+        <div class="conf-grade">${corpo}</div>
+    </section>`;
+}
+// altura dos textareas da confirmacao acompanha o conteudo (sem corte, sem rolagem interna)
+function ajustarAlturaTextarea(el) {
+    if (!el || el.tagName !== 'TEXTAREA') return;
+    el.style.height = 'auto';
+    el.style.height = (el.scrollHeight + (el.offsetHeight - el.clientHeight)) + 'px';
+}
+function ajustarTextareasConfirma() {
+    document.querySelectorAll('textarea.conf-valor').forEach(ajustarAlturaTextarea);
+}
+// campos editaveis da confirmacao (documentos): o motorista pode corrigir
+function camposObrigatoriosConfirma() {
+    return [
+        { id: 'confMotorista', rotulo: 'Motorista' },
+        { id: 'confCpf', rotulo: 'CPF' },
+        { id: 'confCnhValidade', rotulo: 'CNH validade' },
+        { id: 'confCrlvAno', rotulo: 'CRLV ano' },
+        { id: 'confCrlvUf', rotulo: 'UF do CRLV' },
+        { id: 'confCrlvRntc', rotulo: 'RNTRC' },
+        { id: 'confCrlvTipoVeiculo', rotulo: 'Tipo de veículo' },
+    ];
+}
+// dados do atendimento exibidos somente leitura: Placa em ambos; Expedicao mostra
+// "Ordem de coleta"; Recebimento mostra "Cliente"
+function camposSomenteLeituraConfirma() {
+    return [
+        { id: 'confPlaca', rotulo: 'Placa' },
+        state.tipo === 'expedicao'
+            ? { id: 'confOc', rotulo: 'Ordem de coleta' }
+            : { id: 'confCliente', rotulo: 'Cliente' },
+    ];
+}
+const ROTULOS_CONFIRMA_ATENDIMENTO = { placa: 'Placa', ordem_coleta: 'Ordem de coleta', cliente: 'Cliente' };
+function vaziosSomenteLeituraConfirma() {
+    const vazios = [];
+    camposSomenteLeituraConfirma().forEach((c) => {
+        const el = document.getElementById(c.id);
+        if (!el || String(el.value || '').trim() === '') vazios.push(c.rotulo);
+    });
+    return vazios;
+}
+function limparMarcasCamposObrigatorios() {
+    document.querySelectorAll('.campo-invalido').forEach((el) => el.classList.remove('campo-invalido'));
+    document.querySelectorAll('.erro-campo').forEach((el) => el.remove());
+}
+// marca (borda + texto "Obrigatório", nao so cor) e devolve os rotulos dos vazios
+function validarCamposObrigatoriosConfirma() {
+    limparMarcasCamposObrigatorios();
+    const vazios = [];
+    camposObrigatoriosConfirma().forEach((c) => {
+        const el = document.getElementById(c.id);
+        if (!el || String(el.value || '').trim() !== '') return;
+        vazios.push(c.rotulo);
+        el.classList.add('campo-invalido');
+        el.setAttribute('aria-invalid', 'true');
+        const aviso = document.createElement('span');
+        aviso.className = 'erro-campo';
+        aviso.textContent = 'Obrigatório';
+        el.insertAdjacentElement('afterend', aviso);
+    });
+    return vazios;
+}
+let modalConfirmaHtml = '';
+// editaveis: rotulos que o motorista preenche; atendimento: rotulos de dados do
+// atendimento ausentes (so o atendente resolve)
+function abrirModalConfirmaIncompleta(editaveis, atendimento) {
+    const partes = [];
+    if (editaveis.length) partes.push(`Preencha os campos obrigatórios: ${escapeHtml(editaveis.join(', '))}.`);
+    if (!atendimento.length) { abrirModalNaoPodeContinuar(partes.join(' ')); return; }
+    partes.push(`Faltam dados do atendimento: ${escapeHtml(atendimento.join(', '))}. Procure o atendente na portaria.`);
+    const voltar = editaveis.length
+        ? '<button type="button" class="btn-primario" onclick="voltarEPreencherConfirma()">Voltar e preencher</button>'
+        : '<button type="button" class="btn-primario" onclick="fecharModal()">Voltar</button>';
+    modalConfirmaHtml = `
+        <div class="modal-reprovacao-doc modal-nao-continuar">
+            <div class="titulo">Não é possível continuar</div>
+            <div class="subtitulo">${partes.join(' ')}</div>
+            <div class="modal-reprovacao-botoes">
+                ${voltar}
+                <button type="button" class="btn-alerta" onclick="cancelarPelaConfirma()">Cancelar atendimento</button>
+            </div>
+        </div>`;
+    reabrirModalConfirmaIncompleta();
+}
+function reabrirModalConfirmaIncompleta() {
+    abrirModal(modalConfirmaHtml);
+    document.getElementById('modalCaixa').classList.add('modal-caixa-reprovacao');
+}
+function cancelarPelaConfirma() {
+    abrirModal(`
+        <div class="titulo">Cancelar atendimento?</div>
+        <div class="subtitulo">Os dados digitados serão perdidos.</div>
+        <button class="btn-alerta" onclick="fecharModal(); cancelarESair();">Sim, cancelar</button>
+        <button class="btn-fantasma" onclick="reabrirModalConfirmaIncompleta()">Continuar atendimento</button>
+    `);
+}
+function abrirModalNaoPodeContinuar(textoHtml) {
+    abrirModal(`
+        <div class="modal-reprovacao-doc modal-nao-continuar">
+            <div class="titulo">Não é possível continuar</div>
+            <div class="subtitulo">${textoHtml}</div>
+            <div class="modal-reprovacao-botoes">
+                <button type="button" class="btn-primario" onclick="voltarEPreencherConfirma()">Voltar e preencher</button>
+            </div>
+        </div>`);
+    document.getElementById('modalCaixa').classList.add('modal-caixa-reprovacao');
+}
+function voltarEPreencherConfirma() {
+    fecharModal();
+    const primeiro = document.querySelector('.campo-invalido');
+    if (primeiro) {
+        if (typeof primeiro.scrollIntoView === 'function') primeiro.scrollIntoView({ block: 'center' });
+        primeiro.focus();
+    }
 }
 // origem da validacao de CNH/CRLV, exibida na tela de confirmacao da
 // Expedicao (item 4 da demanda expedicao-vio-cnh-crlv) — texto literal,
@@ -1983,30 +2238,45 @@ function expOrigemLabel(origem) {
 }
 function telaConfirma(tipoTexto) {
     const d = state.dados || {};
-    const linhaFinal = state.tipo === 'expedicao'
-        ? linhaConfirma('Ordem de coleta', 'confOc', d.numero)
-        : linhaConfirma('Cliente', 'confCliente', d.cliente_nome);
+    const expedicao = state.tipo === 'expedicao';
+    const atendimento = expedicao
+        ? linhaConfirmaLeitura('Ordem de coleta', 'confOc', d.numero)
+        : linhaConfirmaLeitura('Cliente', 'confCliente', d.cliente_nome, true, true);
     // bloco de origem de validacao (CNH/CRLV) so aparece na Expedicao — nao
     // altera em nada a tela de confirmacao do Recebimento (rec_confirma)
-    const origensExpedicao = state.tipo === 'expedicao' ? `
-        <div class="status-scanner">Origem da validação — CNH: ${escapeHtml(expOrigemLabel(state.exp.cnhOrigem))} · CRLV: ${escapeHtml(expOrigemLabel(state.exp.crlvOrigem))}</div>
+    const origensExpedicao = expedicao ? `
+        <div class="status-scanner conf-origem">Origem da validação — CNH: ${escapeHtml(expOrigemLabel(state.exp.cnhOrigem))} · CRLV: ${escapeHtml(expOrigemLabel(state.exp.crlvOrigem))}</div>
     ` : '';
-    return `<div class="subtitulo">Confirme — ${tipoTexto}</div>
-        <div class="grade-campos">
-            ${linhaConfirma('Motorista', 'confMotorista', d.motorista_nome)}
-            ${linhaConfirma('CPF', 'confCpf', d.motorista_cpf)}
-            ${linhaConfirma('CNH validade', 'confCnhValidade', d.cnh_validade)}
-            ${linhaConfirma('CRLV ano', 'confCrlvAno', d.crlv_ano)}
-            ${campoSelectUf('UF do CRLV', 'confCrlvUf', d.crlv_uf || '')}
-            ${linhaConfirma('RNTC', 'confCrlvRntc', d.crlv_rntc)}
-            ${linhaConfirma('Tipo de veículo', 'confCrlvTipoVeiculo', d.crlv_tipo_veiculo)}
-            ${linhaConfirma('Placa', 'confPlaca', state.placa)}
-            ${linhaFinal}
+    const tipoCap = tipoTexto.charAt(0).toUpperCase() + tipoTexto.slice(1);
+    return `<div class="conf-pagina">
+        <div class="conf-cabecalho">
+            <h1 class="conf-titulo">Confirme os dados</h1>
+            <div class="conf-tipo">${tipoCap}</div>
         </div>
+        ${cartaoConfirma('Motorista', 'pessoa',
+            linhaConfirma('Nome do motorista', 'confMotorista', d.motorista_nome, true, true, true)
+            + linhaConfirma('CPF', 'confCpf', d.motorista_cpf, true)
+            + linhaConfirma('Validade da CNH', 'confCnhValidade', d.cnh_validade, true))}
+        ${cartaoConfirma('Veículo', 'caminhao',
+            linhaConfirmaLeitura('Placa', 'confPlaca', state.placa)
+            + linhaConfirmaUf('confCrlvUf', d.crlv_uf || '')
+            + linhaConfirma('Ano do CRLV', 'confCrlvAno', d.crlv_ano, true)
+            + linhaConfirma('RNTRC', 'confCrlvRntc', d.crlv_rntc, true)
+            + linhaConfirma('Tipo de veículo', 'confCrlvTipoVeiculo', d.crlv_tipo_veiculo, true, true, true))}
+        ${cartaoConfirma('Atendimento', 'prancheta', atendimento)}
         ${origensExpedicao}
-        <button class="btn-primario" style="max-width:320px;margin:0 auto" onclick="confirmarDados()">Confirmar dados</button>`;
+        <div class="conf-rodape">
+            <button class="btn-primario conf-confirmar" onclick="confirmarDados()">Confirmar dados</button>
+        </div>
+    </div>`;
 }
 async function confirmarDados() {
+    const vazios = validarCamposObrigatoriosConfirma();
+    const faltaAtendimento = vaziosSomenteLeituraConfirma();
+    if (vazios.length || faltaAtendimento.length) {
+        abrirModalConfirmaIncompleta(vazios, faltaAtendimento);
+        return;
+    }
     const dados = {
         motorista_nome: document.getElementById('confMotorista').value,
         motorista_cpf: document.getElementById('confCpf').value,
@@ -2019,27 +2289,59 @@ async function confirmarDados() {
     try {
         await api('atendimento.php', 'salvar-etapa', { id_atendimento: state.idAtendimento, etapa: 'confirmacao', dados });
         ir(state.tipo === 'expedicao' ? 'exp_ajudante' : 'rec_ajudante');
-    } catch (e) { mostrarErroTela(e.message); }
+    } catch (e) {
+        const dadosErro = e && e.dados;
+        if (e.status === 422 && e.codigo === 'CONFIRMACAO_INCOMPLETA' && dadosErro && Array.isArray(dadosErro.campos) && dadosErro.campos.length) {
+            const rotulosSrv = Array.isArray(dadosErro.rotulos) ? dadosErro.rotulos : [];
+            const editaveis = [];
+            const atendimento = [];
+            dadosErro.campos.forEach((campo, i) => {
+                const rot = typeof rotulosSrv[i] === 'string' && rotulosSrv[i].trim() !== '' ? rotulosSrv[i].trim() : String(campo);
+                if (Object.prototype.hasOwnProperty.call(ROTULOS_CONFIRMA_ATENDIMENTO, campo)) atendimento.push(ROTULOS_CONFIRMA_ATENDIMENTO[campo]);
+                else editaveis.push(rot);
+            });
+            abrirModalConfirmaIncompleta(editaveis, atendimento);
+            return;
+        }
+        if (e.status >= 400 && e.status < 500 && /^Nao e possivel continuar/i.test(String(e.message || ''))) {
+            abrirModalNaoPodeContinuar(escapeHtml(e.message));
+            return;
+        }
+        mostrarErroTela(e.message);
+    }
 }
 
 // -------------------- ajudante (expedicao e recebimento) --------------------
 
+// Modo correcao (state.ajudanteCorrecao): aberto a partir de erro_finalizar para
+// recadastrar o ajudante; mensagens do servidor aparecem inline (#ajudanteErro),
+// ha "Voltar" (sem salvar) e, ao salvar, vai direto a impressao (novo finalizar).
 function telaAjudante() {
+    const corr = !!state.ajudanteCorrecao;
+    const aj = state.ajudante || {};
+    const blocoCorrecao = corr
+        ? `<div class="impr-motivo-api" id="ajudanteErro" role="alert" style="display:none"></div>
+        <div class="grupo-botoes" style="margin-top:16px">
+            <button class="btn-fantasma impr-btn-alvo" id="ajudanteBtnVoltar" onclick="voltarDaCorrecaoAjudante()">Voltar</button>
+            <button class="btn-alerta impr-btn-alvo" id="ajudanteBtnNovo" style="display:none" onclick="novoAtendimento()">Novo atendimento</button>
+        </div>`
+        : '';
     return `<div id="ajudantePergunta">
             <div class="titulo">Possui ajudante?</div>
             <div class="grupo-botoes-linha">
-                <button class="btn-primario" onclick="mostrarCamposAjudante()">Sim</button>
-                <button class="btn-fantasma" onclick="finalizarSemAjudante()">Não</button>
+                <button class="btn-primario${corr ? ' impr-btn-alvo' : ''}" onclick="mostrarCamposAjudante()">Sim</button>
+                <button class="btn-fantasma${corr ? ' impr-btn-alvo' : ''}" onclick="finalizarSemAjudante()">Não</button>
             </div>
         </div>
         <div id="ajudanteCampos" style="display:none">
             <div class="subtitulo">Dados do ajudante</div>
             <div class="grade-campos">
-                ${campo('Nome completo', 'ajudanteNome', '')}
-                ${campo('CPF', 'ajudanteCpf', '')}
+                ${campo('Nome completo', 'ajudanteNome', corr ? (aj.nome || '') : '')}
+                ${campo('CPF', 'ajudanteCpf', corr ? (aj.cpf || '') : '')}
             </div>
-            <button class="btn-primario" style="max-width:320px;margin:16px auto 0" onclick="confirmarAjudante()">Confirmar</button>
-        </div>`;
+            <button class="btn-primario${corr ? ' impr-btn-alvo' : ''}" id="ajudanteBtnConfirmar" style="max-width:320px;margin:16px auto 0" onclick="confirmarAjudante()">Confirmar</button>
+        </div>
+        ${blocoCorrecao}`;
 }
 function mostrarCamposAjudante() {
     document.getElementById('ajudantePergunta').style.display = 'none';
@@ -2051,11 +2353,39 @@ function confirmarAjudante() {
     const cpf = document.getElementById('ajudanteCpf').value.trim();
     salvarAjudanteEAvancar(nome, cpf);
 }
+let ajudanteSalvando = false; // trava contra toque duplo
+function mostrarErroAjudante(msg) {
+    const el = document.getElementById('ajudanteErro');
+    if (!el) { mostrarErroTela(msg); return; }
+    el.textContent = msg;
+    el.style.display = 'block';
+}
 async function salvarAjudanteEAvancar(nome, cpf) {
+    if (ajudanteSalvando) return;
+    ajudanteSalvando = true;
+    const correcao = !!state.ajudanteCorrecao;
     try {
         await api('atendimento.php', 'salvar-etapa', { id_atendimento: state.idAtendimento, etapa: 'ajudante', dados: { nome, cpf } });
+        state.ajudante = { nome: nome || '', cpf: cpf || '' };
+        state.ajudanteCorrecao = false;
+        // Em correcao a tela de impressao refaz o finalizar (idempotente no backend).
         ir(state.tipo === 'expedicao' ? 'exp_impressao' : 'rec_impressao');
-    } catch (e) { mostrarErroTela(e.message); }
+    } catch (e) {
+        if (!correcao) { mostrarErroTela(e.message); return; }
+        mostrarErroAjudante(e.message);
+        if (e.status === 409) {
+            // check-in em processamento/enviado ou atendimento concluido: nao ha mais o que corrigir
+            document.getElementById('ajudantePergunta').style.display = 'none';
+            document.getElementById('ajudanteCampos').style.display = 'none';
+            document.getElementById('ajudanteBtnNovo').style.display = '';
+        }
+    } finally { ajudanteSalvando = false; }
+}
+// Volta a erro_finalizar sem salvar e sem chamar a API (nao refaz o finalizar).
+function voltarDaCorrecaoAjudante() {
+    state.ajudanteCorrecao = false;
+    imprState.retornoSemProcessar = true;
+    ir(state.tipo === 'expedicao' ? 'exp_impressao' : 'rec_impressao');
 }
 
 // A maquina de estados de impressao real (telaImpressao/processarImpressao
@@ -4443,6 +4773,7 @@ async function recCamAbrirStream(deviceId) {
         });
         recCamStream = stream;
         recCamDeviceId = deviceId;
+        qrOtimizarCamera(stream);
         const video = document.getElementById('recCamVideo');
         if (!video) { stream.getTracks().forEach(t => t.stop()); recCamStream = null; return; }
         video.srcObject = stream;
@@ -4523,10 +4854,10 @@ function recCamAtualizarBotao() {
 
 function telaRecQr(titulo, tipo) {
     return `<div class="titulo">${titulo}</div>
-        <div class="subtitulo">Aproxime o QR code do guia e mantenha-o bem iluminado.</div>
+        <div class="subtitulo">Encaixe o QR code dentro do quadrado, bem iluminado e sem reflexo.</div>
         <div class="caixa-scanner" id="recCamCaixa">
             <video id="recCamVideo" autoplay playsinline></video>
-            <div class="guia-scanner" aria-hidden="true"></div>
+            <div class="guia-qr" aria-hidden="true"></div>
         </div>
         <div class="status-scanner" id="recCamStatus">Conectando à câmera...</div>
         <div class="status-leitura" id="recBgStatus" style="display:none"></div>
@@ -4555,9 +4886,11 @@ async function recCapturarQr(tipo) {
     let canvas = null;
     try {
         recCamMostrarStatus('Lendo QR code...');
-        canvas = recCamCapturarFrame(video);
-        const qr = await lerQrDoCanvas(canvas);
-        if (!qr || !qr.ok) {
+        // Ate QR_FRAMES_POR_TOQUE frames sucessivos por toque; o contador de
+        // tentativas abaixo e consumido UMA vez por toque, nunca por frame.
+        canvas = await lerQrEmVariosFrames(() => recCamCapturarFrame(video), video, recCamStream);
+        if (!video.isConnected) return; // tela trocada/cancelada durante a leitura
+        if (!canvas) {
             recLimparFrameQr();
             const tentativa = ++state.rec.qrTentativas[tipo];
             if (tentativa >= 3) {
@@ -4799,6 +5132,13 @@ function iniciarApp() {
     montarTeclado();
     document.getElementById('tela').addEventListener('focusin', e => {
         if (e.target.classList.contains('kb-input')) abrirTeclado(e.target);
+        // com o teclado (grande) aberto a area encolhe; mantem o campo focado visivel
+        if ((e.target.classList.contains('kb-input') || e.target.classList.contains('conf-valor')) && typeof e.target.scrollIntoView === 'function') {
+            setTimeout(() => e.target.scrollIntoView({ block: 'center' }), 80);
+        }
+    });
+    document.getElementById('tela').addEventListener('input', e => {
+        if (e.target.classList && e.target.classList.contains('conf-valor')) ajustarAlturaTextarea(e.target);
     });
     // 'lgpd' e a primeira tela real da SPA — nenhum outro codigo monta/
     // mostra 'home' antes deste ponto, entao nao ha flash de 'home'

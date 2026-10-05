@@ -39,7 +39,10 @@ const config = require('../config');
 const { autenticar } = require('../middleware/auth');
 const { decodificarEValidarPdfBase64 } = require('../lib/validarPdf');
 const { IdempotenciaStore } = require('../lib/idempotencia');
-const { imprimirComTimeout } = require('../lib/imprimirComTimeout');
+// Modulos referenciados pelo objeto (nao desestruturados) para poderem ser
+// substituidos em teste sem imprimir.
+const imprimirModulo = require('../lib/imprimirComTimeout');
+const filaModulo = require('../lib/verificarFila');
 
 const router = express.Router();
 
@@ -140,7 +143,29 @@ router.post('/imprimir', autenticar, express.json({ limit: '32mb' }), async (req
 
   try {
     await fs.writeFile(caminhoTemp, resultadoPdf.buffer);
-    await imprimirComTimeout(caminhoTemp, impressora, config.timeoutMs);
+    await imprimirModulo.imprimirComTimeout(caminhoTemp, impressora, config.timeoutMs, { printSettings: config.printSettings });
+
+    // Deteccao de falta de papel (so driver/porta atuais): job que permanece
+    // na fila alem do limite = sem papel. Qualquer falha da verificacao
+    // mantem o comportamento anterior ("impresso"). O mutex segue preso
+    // durante a verificacao (limitada por semPapelTimeoutMs).
+    if (config.deteccaoSemPapel) {
+      const verificacao = await filaModulo.verificarFila({
+        impressora,
+        nomeDocumento: nomeArquivoTemp,
+        limiteMs: config.semPapelTimeoutMs,
+        log: (msg) => console.warn(msg),
+      });
+      if (verificacao.resultado === 'sem_papel') {
+        // Nao memoriza na idempotencia: a nova tentativa vem com outro identificador.
+        res.status(409).json({
+          status: 'sem_papel',
+          identificador,
+          job_removido: verificacao.jobRemovido === true,
+        });
+        return;
+      }
+    }
 
     idempotencia.marcarProcessado(identificador);
 

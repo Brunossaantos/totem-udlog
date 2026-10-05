@@ -34,6 +34,8 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 
+const { PRINT_SETTINGS_PADRAO, montarArgumentosSumatra } = require('./printSettings');
+
 const SUMATRA_PDF_EXECUTAVEL = 'SumatraPDF-3.4.6-32.exe';
 
 function resolverCaminhoSumatra() {
@@ -81,17 +83,21 @@ function encerrarProcessoPorPid(pid) {
  * @param {string} caminhoPdf caminho absoluto do PDF temporario ja gravado em disco
  * @param {string} impressora nome exato da impressora (ja revalidado contra a allowlist pelo chamador)
  * @param {number} timeoutMs
+ * @param {{printSettings?: string, execFileImpl?: Function}} [opcoes] printSettings ja validado (config);
+ *   '' = sem -print-settings. execFileImpl existe so para teste.
  * @returns {Promise<void>}
  */
-function imprimirComTimeout(caminhoPdf, impressora, timeoutMs) {
+function imprimirComTimeout(caminhoPdf, impressora, timeoutMs, opcoes = {}) {
   const caminhoSumatra = resolverCaminhoSumatra();
-  const argumentos = ['-print-to', impressora, '-silent', caminhoPdf];
+  const printSettings = opcoes.printSettings === undefined ? PRINT_SETTINGS_PADRAO : opcoes.printSettings;
+  const execFileImpl = opcoes.execFileImpl || execFile;
+  const argumentos = montarArgumentosSumatra(caminhoPdf, impressora, printSettings);
 
   return new Promise((resolve, reject) => {
     let finalizado = false;
     let temporizador = null;
 
-    const processo = execFile(caminhoSumatra, argumentos, (erro) => {
+    const processo = execFileImpl(caminhoSumatra, argumentos, (erro) => {
       if (finalizado) {
         // Callback chegou depois do timeout ja ter reagido -- ignorar
         // (o job ja foi tratado como indeterminado).

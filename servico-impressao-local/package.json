@@ -9,6 +9,8 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "test": "node --test tests/print-settings.test.js tests/verificar-fila.test.js",
+    "teste:impressao": "node scripts/teste-impressao.js",
     "instalar-servico-windows": "node scripts/instalar-servico-windows.js",
     "desinstalar-servico-windows": "node scripts/desinstalar-servico-windows.js"
   },
