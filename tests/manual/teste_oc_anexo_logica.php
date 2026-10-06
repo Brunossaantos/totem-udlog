@@ -24,7 +24,6 @@ require_once __DIR__ . '/_fixtures_talent.php';
 
 use App\Dao\AtendimentoDao;
 use App\Dao\CaminhoJaRegistradoException;
-use App\Dao\FilaEnvioDao;
 use App\Dao\OrdemColetaArquivoDao;
 use App\Dao\OrdemColetaDao;
 use App\Rn\AnexoOrdemColetaLeitor;
@@ -669,7 +668,7 @@ try {
     $leitor = new LeitorEspiao($dao, $stReal, 5242880);
     $clientCap = new TalentClientCaptura();
     $atDao = new AtendimentoDao($pdo);
-    $talent = new TalentRn($clientCap, new FilaEnvioDao($pdo), $atDao, $storage, $leitor);
+    $talent = new TalentRn($clientCap, $atDao, $storage, $leitor);
     $idTotem = talentCriarTotemComEmpresa($pdo, 'QA-OC-' . bin2hex(random_bytes(3)), null);
     $empresa = ['cnpj' => '14706199000182'];
     $cnpjCli = '11222333000181';
@@ -736,12 +735,11 @@ try {
         $linhasLog = array_values(array_filter(explode("\n", trim($novoLog))));
         afirmar("talent: falha ($motivo) => ENVIADO sem anexo (nunca ERRO_REPROCESSAVEL)", $res['status'] === 'ENVIADO' && $clientCap->ultimo['anexos'] === [] && $res['erro_categoria'] === null);
         afirmar("talent: falha ($motivo) => UMA linha de log com so id_atendimento e motivo fixo", count($linhasLog) === 1 && preg_match('/TalentRn: anexo_ordem_coleta_omitido id_atendimento=' . (int) $at['id_atendimento'] . ' motivo=' . $motivo . '$/', $linhasLog[0]) === 1 && !str_contains($novoLog, $oc) && !str_contains($novoLog, $cnpjCli));
-        $fila = (int) $pdo->query('SELECT COUNT(*) FROM tb_fila_envio WHERE id_atendimento=' . (int) $at['id_atendimento'])->fetchColumn();
-        afirmar("talent: falha ($motivo) nao entra na fila de reenvio", $fila === 0);
+        afirmar("talent: falha ($motivo) nao deixa o atendimento em ERRO_REPROCESSAVEL", $atDao->buscarPorId((int) $at['id_atendimento'])['talent_checkin_status'] === 'ENVIADO');
     }
     // banco externo fora do ar
     $leitorOff = new AnexoOrdemColetaLeitor(new DaoIndisponivel(), $stReal, 5242880);
-    $talentOff = new TalentRn($clientCap, new FilaEnvioDao($pdo), $atDao, $storage, $leitorOff);
+    $talentOff = new TalentRn($clientCap, $atDao, $storage, $leitorOff);
     $logAntes = (string) file_get_contents($logArquivo);
     $at = $novoAtendimento('expedicao', 'QAOFF11', 'OC-BANCO-OFF');
     $res = $talentOff->processarCheckin($at, $empresa, []);
@@ -754,7 +752,7 @@ try {
             throw new PDOException('SQLSTATE[HY000] SEGREDO-' . $numero);
         }
     };
-    $talentBoom = new TalentRn($clientCap, new FilaEnvioDao($pdo), $atDao, $storage, $leitorBoom);
+    $talentBoom = new TalentRn($clientCap, $atDao, $storage, $leitorBoom);
     $logAntes = (string) file_get_contents($logArquivo);
     $at = $novoAtendimento('expedicao', 'QABOOM1', 'OC-BOOM');
     $res = $talentBoom->processarCheckin($at, $empresa, []);
@@ -773,7 +771,7 @@ try {
     $descricoes = array_column($clientCap->ultimo['anexos'], 'descricao');
     afirmar('talent: Recebimento NAO consulta o leitor e nao leva anexo de OC (mesmo com ordem_coleta preenchida)', $res['status'] === 'ENVIADO' && $leitor->chamadas === $chamadasAntes && !in_array('Ordem de Coleta', $descricoes, true) && $clientCap->ultimo['doctos'][0]['tipo'] === 'NOTA_FISCAL');
     // sem leitor injetado (padrao): comportamento anterior
-    $talentSem = new TalentRn($clientCap, new FilaEnvioDao($pdo), $atDao, $storage);
+    $talentSem = new TalentRn($clientCap, $atDao, $storage);
     $at = $novoAtendimento('expedicao', 'QASEM11', 'OC-TALENT-1');
     $talentSem->processarCheckin($at, $empresa, []);
     afirmar('talent: sem leitor (5o parametro omitido) => nenhum anexo de OC (comportamento anterior)', $clientCap->ultimo['anexos'] === []);

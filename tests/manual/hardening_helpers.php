@@ -288,7 +288,6 @@ use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\ClienteDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\OrdemColetaDao;
 use App\Dao\RateLimitOcrDao;
 use App\Rn\AtendimentoRn;
@@ -447,7 +446,6 @@ if (str_starts_with($spec['rota'], 'nota.')) {
 $atendimentoRn = new AtendimentoRn($atendimentoDao, new OrdemColetaClient(new OrdemColetaDao()));
 $talentRn = new TalentRn(
     new TalentClient($spec['talent_url'] ?? '', 'cenario_sucesso_200'),
-    new FilaEnvioDao($pdo),
     new AtendimentoDao($pdo),
     $_ENV['STORAGE_PATH']
 );

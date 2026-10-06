@@ -98,7 +98,7 @@ $saidasFinalizar = dispararParalelo($scriptFinalizar, [
 ]);
 
 afirmar('Parte 1: os 2 cliques quase simultaneos recebem 503 TALENT_CHECKIN_DESATIVADO (nenhum efeito colateral novo antes do CAS)', str_contains($saidasFinalizar['a'], 'TALENT_CHECKIN_DESATIVADO') && str_contains($saidasFinalizar['b'], 'TALENT_CHECKIN_DESATIVADO'));
-afirmar('Parte 1: nenhum dos dois chega a "sera processada em instantes" (202) nem a sucesso', !str_contains($saidasFinalizar['a'], 'sera processada em instantes') && !str_contains($saidasFinalizar['b'], 'sera processada em instantes') && !str_contains($saidasFinalizar['a'], '"sucesso":true') && !str_contains($saidasFinalizar['b'], '"sucesso":true'));
+afirmar('Parte 1: nenhum dos dois chega ao 202 de falha do check-in ("Chame o atendimento") nem a sucesso', !str_contains($saidasFinalizar['a'], 'Chame o atendimento') && !str_contains($saidasFinalizar['b'], 'Chame o atendimento') && !str_contains($saidasFinalizar['a'], '"sucesso":true') && !str_contains($saidasFinalizar['b'], '"sucesso":true'));
 
 $statusPos1 = $atendimentoDao->buscarPorId($fix1['id_atendimento'])['talent_checkin_status'];
 afirmar('Parte 1: talent_checkin_status permanece EXATAMENTE NAO_ENVIADO apos os 2 cliques concorrentes (o gate novo nao muta estado)', $statusPos1 === 'NAO_ENVIADO');
@@ -153,7 +153,6 @@ foreach ($pastas as $p) {
     talentLimparPasta($p);
 }
 foreach ($idsAtendimento as $id) {
-    $pdo->prepare('DELETE FROM tb_fila_envio WHERE id_atendimento = :id')->execute(['id' => $id]);
     $pdo->prepare('DELETE FROM tb_atendimento_nota WHERE id_atendimento = :id')->execute(['id' => $id]);
     $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $id]);
 }

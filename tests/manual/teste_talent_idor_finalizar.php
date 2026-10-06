@@ -19,7 +19,7 @@
  *  - as mensagens dos 4 primeiros casos (posse/tipo/status/etapa/docs) sao
  *    IDENTICAS entre si (nunca revela qual checagem falhou);
  *  - dono legitimo, no estado correto, com empresa configurada, chega ate a
- *    tentativa de envio (HTTP 202 "sera processada em instantes" — a
+ *    tentativa de envio (HTTP 202 "Chame o atendimento" — a
  *    chamada ao Talent falha localmente por TalentClient('','') apontar
  *    para URL vazia, nunca por rede real).
  *
@@ -161,7 +161,7 @@ $fix6 = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotemVitima, 'exp
 $pastas[] = $fix6['pasta_completa'];
 $idsAtendimento[] = $fix6['id_atendimento'];
 $saida6 = rodarFinalizar($idTotemVitima, $fix6['id_atendimento']);
-afirmar('Dono legitimo (estado correto, doctos OK): bloqueado por TALENT_CHECKIN_DESATIVADO, nunca chega a "sera processada em instantes"', str_contains($saida6, 'TALENT_CHECKIN_DESATIVADO') && !str_contains($saida6, 'sera processada em instantes'));
+afirmar('Dono legitimo (estado correto, doctos OK): bloqueado por TALENT_CHECKIN_DESATIVADO, nunca chega a "Chame o atendimento"', str_contains($saida6, 'TALENT_CHECKIN_DESATIVADO') && !str_contains($saida6, 'Chame o atendimento'));
 $estadoFinal6 = $atendimentoDao->buscarPorId($fix6['id_atendimento'])['talent_checkin_status'];
 afirmar('Dono legitimo: talent_checkin_status permanece NAO_ENVIADO (nenhuma tentativa de envio, nenhum CAS de idempotencia acionado)', $estadoFinal6 === 'NAO_ENVIADO');
 
@@ -172,7 +172,6 @@ foreach ($pastas as $p) {
     talentLimparPasta($p);
 }
 foreach ($idsAtendimento as $id) {
-    $pdo->prepare('DELETE FROM tb_fila_envio WHERE id_atendimento = :id')->execute(['id' => $id]);
     $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $id]);
 }
 $pdo->prepare('DELETE FROM tb_totem WHERE id_totem IN (:a, :b, :c)')->execute(['a' => $idTotemVitima, 'b' => $idTotemInvasor, 'c' => $idTotemSemEmpresa]);

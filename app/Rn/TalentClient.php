@@ -81,15 +81,16 @@ class TalentClient
             // docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md,
             // secao "Idempotencia — 5 estados"): a classificacao de erro de
             // curl precisa distinguir entre "a requisicao NUNCA saiu do
-            // totem" (seguro reenviar automaticamente — erro_conexao,
+            // totem" (seguro tentar de novo — erro_conexao,
             // ERRO_REPROCESSAVEL) e "nao se sabe se o Talent recebeu/
-            // processou a requisicao" (NUNCA pode ser reenviado automatico —
-            // deve virar ENVIO_INDETERMINADO).
+            // processou a requisicao" (exige intervencao manual — deve
+            // virar ENVIO_INDETERMINADO). Nao ha reenvio automatico: a nova
+            // tentativa so ocorre manualmente, pelo `finalizar`.
             //
             // CURLE_COULDNT_RESOLVE_HOST / CURLE_COULDNT_CONNECT ocorrem
             // ANTES de qualquer byte ser transmitido ao servidor — nenhum
             // dado chegou ao Talent, entao e seguro tratar como
-            // erro_conexao/reprocessavel.
+            // erro_conexao (ERRO_REPROCESSAVEL).
             //
             // Qualquer erro que possa ocorrer DEPOIS que a requisicao (ou
             // parte dela) ja foi enviada ao servidor — timeout aguardando
@@ -101,7 +102,7 @@ class TalentClient
             // desses ocorram antes do envio completo: o custo de reenviar
             // indevidamente um checkin ja processado (duplicidade) e maior
             // que o custo de exigir intervencao manual num caso que na
-            // verdade era seguro reenviar.
+            // verdade era seguro tentar de novo.
             $ehTimeoutCurl = $erroCurl === CURLE_OPERATION_TIMEDOUT;
             $ehOutroIndeterminadoCurl = in_array($erroCurl, [
                 CURLE_RECV_ERROR,

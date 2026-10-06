@@ -24,7 +24,6 @@ use Util\Conexao;
 use Util\AnexoPdfHelper;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\EmpresaDao;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
@@ -151,7 +150,7 @@ talentCriarJpegValido($pastaAtendimento . '/nota_01.jpg');
 talentCriarJpegValido($pastaAtendimento . '/nota_03.jpg');
 // nota_02.jpg propositalmente ausente do disco
 
-$talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRn = new TalentRn(new TalentClient('', ''), $atendimentoDao, $_ENV['STORAGE_PATH']);
 $reflexaoAnexos = new ReflectionMethod(TalentRn::class, 'montarAnexos');
 $reflexaoAnexos->setAccessible(true);
 

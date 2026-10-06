@@ -3,7 +3,6 @@
 namespace App\Rn;
 
 use App\Dao\AtendimentoDao;
-use App\Dao\FilaEnvioDao;
 use Util\AnexoPdfHelper;
 
 /**
@@ -43,7 +42,6 @@ class TalentRn
 
     public function __construct(
         private TalentClient $talentClient,
-        private FilaEnvioDao $filaEnvioDao,
         private AtendimentoDao $atendimentoDao,
         private string $caminhoBase,
         // anexo-ordem-coleta-n8n (2026-10-05): leitor do PDF da Ordem de Coleta
@@ -53,15 +51,15 @@ class TalentRn
 
     /**
      * Executa (ou consulta idempotentemente) o check-in de um atendimento —
-     * usado tanto por App\Controller\AtendimentoController::finalizar()
-     * (checks de posse/tipo/status/etapa/documentos JA feitos pelo chamador,
-     * ver assinatura) quanto por cron/reenviar-fila.php (retry de
-     * ERRO_REPROCESSAVEL).
+     * usado por App\Controller\AtendimentoController::finalizar() (checks de
+     * posse/tipo/status/etapa/documentos JA feitos pelo chamador, ver
+     * assinatura). Nao ha reenvio automatico: ERRO_REPROCESSAVEL so e
+     * retentado por uma nova chamada de finalizar() do totem.
      *
      * @param array $empresa linha de tb_empresa JA resolvida a partir do
      *                       totem autenticado (nunca do frontend) —
      *                       resolucao de cnpjArmazem e responsabilidade do
-     *                       chamador (controller/cron), ver
+     *                       chamador (controller), ver
      *                       App\Dao\EmpresaDao.
      * @return array{status:string, senha:?string, protocolo:?string, erro_categoria:?string}
      *         status em: ENVIADO | JA_ENVIADO | EM_ANDAMENTO |
@@ -136,17 +134,6 @@ class TalentRn
         $this->atendimentoDao->gravarResultadoEnvioTalent($idAtendimento, $tentativaId, 'ENVIADO', $resultado['senha'], $resultado['protocolo']);
 
         return ['status' => 'ENVIADO', 'senha' => $resultado['senha'], 'protocolo' => $resultado['protocolo'], 'erro_categoria' => null];
-    }
-
-    /**
-     * Registra uma falha ERRO_REPROCESSAVEL na fila de reenvio do cron.
-     * $categoriaErro e sempre uma categoria interna fechada e sanitizada
-     * (TalentClientException::categoria() ou um codigo interno fixo como
-     * 'erro_montagem_payload') — NUNCA o corpo bruto de uma excecao.
-     */
-    public function registrarFalhaParaReenvio(int $idAtendimento, string $categoriaErro): void
-    {
-        $this->filaEnvioDao->registrarFalha($idAtendimento, $categoriaErro);
     }
 
     /**
@@ -313,7 +300,7 @@ class TalentRn
      * ordem_coleta) do atendimento. QUALQUER falha ao buscar/ler o anexo
      * (banco externo fora do ar, arquivo ausente/corrompido, sha256
      * divergente...) SEGUE SEM ANEXO: nunca lanca, nunca vira
-     * ERRO_REPROCESSAVEL e nunca entra na fila. Registra UMA linha de log
+     * ERRO_REPROCESSAVEL. Registra UMA linha de log
      * agregada, so com id_atendimento e codigo fixo de motivo (sem numero da
      * OC, cnpj, caminho ou mensagem de excecao).
      *

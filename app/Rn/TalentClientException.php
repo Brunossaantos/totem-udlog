@@ -9,8 +9,9 @@ namespace App\Rn;
  * docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md, "Achados
  * de seguranca").
  *
- * Categorias fechadas usadas por App\Dao\FilaEnvioDao::ultimo_erro e pela
- * maquina de estados de 5 estados de App\Dao\AtendimentoDao (ver
+ * Categorias fechadas usadas no log sanitizado do finalizar, na escolha do
+ * texto fixo do HTTP 202 e pela maquina de estados de 5 estados de
+ * App\Dao\AtendimentoDao (ver
  * ehIndeterminado()): erro_validacao (400), erro_autenticacao (401),
  * nao_encontrado (404), conflito (409), erro_servidor (500), timeout,
  * erro_indeterminado (erro de curl que pode ter ocorrido apos a requisicao
@@ -24,7 +25,7 @@ namespace App\Rn;
  */
 class TalentClientException extends \RuntimeException
 {
-    private const CATEGORIAS_VALIDAS = [
+    public const CATEGORIAS_VALIDAS = [
         'erro_validacao', 'erro_autenticacao', 'nao_encontrado', 'conflito',
         'erro_servidor', 'timeout', 'erro_indeterminado', 'erro_conexao',
         'erro_http', 'resposta_ilegivel',
@@ -84,10 +85,12 @@ class TalentClientException extends \RuntimeException
      * nao se sabe se o Talent recebeu/processou a requisicao — 'timeout' e
      * 'erro_indeterminado' (demais erros de curl que podem ter ocorrido
      * apos a requisicao ja ter sido total ou parcialmente transmitida).
-     * Essas categorias NUNCA disparam retry automatico via cron (mapeadas
-     * para ENVIO_INDETERMINADO, nao ERRO_REPROCESSAVEL) — apenas
+     * Essas categorias sao mapeadas para ENVIO_INDETERMINADO (nao
+     * ERRO_REPROCESSAVEL) e exigem intervencao manual — apenas
      * 'erro_conexao' (falha ANTES de qualquer byte sair do totem) e
-     * considerada segura para reenvio automatico.
+     * considerada segura para nova tentativa. Nao ha reenvio automatico
+     * (a fila de reenvio foi removida): a nova tentativa so ocorre
+     * manualmente, por nova chamada do `finalizar`.
      */
     public function ehIndeterminado(): bool
     {

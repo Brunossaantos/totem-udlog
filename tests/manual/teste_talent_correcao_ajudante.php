@@ -81,11 +81,6 @@ try {
     $setStatus = function (int $id, string $st) use ($pdo): void {
         $pdo->prepare('UPDATE tb_atendimento SET talent_checkin_status = :s WHERE id_atendimento = :id')->execute(['s' => $st, 'id' => $id]);
     };
-    $filaCount = function (int $id) use ($pdo): int {
-        $s = $pdo->prepare('SELECT COUNT(*) FROM tb_fila_envio WHERE id_atendimento = :id');
-        $s->execute(['id' => $id]);
-        return (int) $s->fetchColumn();
-    };
 
     foreach (['recebimento', 'expedicao'] as $tipo) {
         // 1) cadastro inicial + recusa da Talent com a mensagem do ajudante
@@ -96,7 +91,6 @@ try {
         afirmar("[{$tipo}] finalizar recusado: 202 + mensagem_api do ajudante", $r['http'] === 202 && ($r['corpo']['dados']['mensagem_api'] ?? null) === MSG_TALENT);
         $l = $linha($id);
         afirmar("[{$tipo}] estado: em_andamento, ERRO_REPROCESSAVEL, etapa_atual inalterada", $l['status'] === 'em_andamento' && $l['talent_checkin_status'] === 'ERRO_REPROCESSAVEL' && str_ends_with($l['etapa_atual'], '_confirmacao'));
-        $filaAntes = $filaCount($id);
 
         // 2) entradas invalidas recusadas (422), nada gravado (CPF: so exige 11 digitos)
         foreach ([['NOVO AJUDANTE', '1234567890'], ['NOVO AJUDANTE', '123456789012'], ['NOVO AJUDANTE', '123.456.789-0'], ['NOVO AJUDANTE', '123'], ['NOVO AJUDANTE', ''], ['NOVO AJUDANTE', 'abcdefghijk'], ['NOVO AJUDANTE', '1234567890a'], ['', CPF_NOVO], [['x'], CPF_NOVO], ['NOVO', ['1']], ['NOVO', 12345678909], [str_repeat('A', 151), CPF_NOVO]] as $i => [$n, $c]) {
@@ -119,7 +113,7 @@ try {
         $r = $ajudante($id, '  NOVO   AJUDANTE ', CPF_NOVO);
         $l = $linha($id);
         afirmar("[{$tipo}] correcao aceita em ERRO_REPROCESSAVEL (200), nome normalizado e CPF novo", $r['http'] === 200 && $l['ajudante_nome'] === 'NOVO AJUDANTE' && $l['ajudante_cpf'] === CPF_NOVO && (int) $l['possui_ajudante'] === 1);
-        afirmar("[{$tipo}] correcao nao muda status do check-in nem etapa e nao enfileira reenvio", $l['talent_checkin_status'] === 'ERRO_REPROCESSAVEL' && $l['status'] === 'em_andamento' && $filaCount($id) === $filaAntes);
+        afirmar("[{$tipo}] correcao nao muda status do check-in nem etapa (sem fila de reenvio)", $l['talent_checkin_status'] === 'ERRO_REPROCESSAVEL' && $l['status'] === 'em_andamento');
 
         // 4) IDOR: outro totem nao consegue
         $r = $ajudante($id, 'FORJADO', '52998224725', $idTotemInvasor);

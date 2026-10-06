@@ -28,7 +28,6 @@ use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\OrdemColetaDao;
 use App\Dao\AceiteLgpdDao;
 use App\Rn\AtendimentoRn;
@@ -50,7 +49,7 @@ $lgpdRn = new LgpdRn(new AceiteLgpdDao($pdo));
 $tokenAceite = $lgpdRn->emitir($idTotem)['token_aceite'];
 
 $atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient(new OrdemColetaDao()));
-$talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
+$talentRn = new TalentRn(new TalentClient('', ''), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
 $controller = new AtendimentoController(
     $atendimentoRn,
     $talentRn,

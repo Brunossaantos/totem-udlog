@@ -690,7 +690,7 @@ async function exercitarErroFinalizar(page) {
         const HTML = '<script>window.__xss=1<\/script><img src=x onerror="window.__xss=2"><b>negrito</b>';
         const longa = 'A'.repeat(300);
         let proximo = null;
-        window.api = async () => { const e = Object.assign(new Error('Nao foi possivel enviar agora — sua senha sera processada em instantes'), { status: 202 }); if (proximo !== undefined && proximo !== null) e.dados = proximo; throw e; };
+        window.api = async () => { const e = Object.assign(new Error('Nao foi possivel concluir o check-in. Chame o atendimento.'), { status: 202 }); if (proximo !== undefined && proximo !== null) e.dados = proximo; throw e; };
         localStorage.setItem('totem_impressora_nome', 'EPSON TESTE');
         document.getElementById('tela').innerHTML = telaImpressao();
         state.idAtendimento = 7; state.tela = 'exp_impressao'; state.dados = {};

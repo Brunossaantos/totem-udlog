@@ -105,6 +105,9 @@ if (!function_exists('qaDbCriar')) {
         // corretiva F7, 2026-10-01) -- client_uid em tb_atendimento_nota,
         // aditiva e idempotente.
         qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/018_nota_client_uid.sql');
+        // Migration 019 (demanda remocao-fila-reenvio-talent, 2026-10-05) --
+        // DROP TABLE IF EXISTS tb_fila_envio (no-op: schema.sql ja nao cria).
+        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/019_drop_tb_fila_envio.sql');
 
         return [$admin, $nomeBanco];
     }

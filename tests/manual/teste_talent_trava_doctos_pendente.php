@@ -16,7 +16,7 @@
  *     (doctos/posse/tipo/status/etapa/documentos) e SO ENTAO responde com
  *     o bloqueio TALENT_CHECKIN_DESATIVADO em HTTP 503 (codigo HTTP real,
  *     capturado via register_shutdown_function porque Resposta::erro()
- *     chama exit()) — nunca chega a "sera processada em instantes" (202).
+ *     chama exit()) — nunca chega ao 202 de falha do check-in ("Chame o atendimento").
  *  2. talent_checkin_status permanece EXATAMENTE 'NAO_ENVIADO' apos a
  *     chamada (nunca muda — nenhum CAS de idempotencia acionado).
  *  3. Nenhuma chamada de rede real ao Talent ocorre — provado de duas
@@ -104,7 +104,7 @@ foreach ([['expedicao', $fixExp], ['recebimento', $fixRec]] as [$rotulo, $fix]) 
     afirmar("[$rotulo] resposta contem o codigo TALENT_CHECKIN_DESATIVADO", str_contains($r['texto'], 'TALENT_CHECKIN_DESATIVADO'));
     afirmar("[$rotulo] HTTP real capturado via register_shutdown_function e exatamente 503", str_contains($r['texto'], 'HTTP_CODE:503'));
     afirmar("[$rotulo] resposta NAO contem sucesso:true", !str_contains($r['texto'], '"sucesso":true'));
-    afirmar("[$rotulo] resposta NAO contem 'sera processada em instantes' (nunca chega ao CAS/202)", !str_contains($r['texto'], 'sera processada em instantes'));
+    afirmar("[$rotulo] resposta NAO contem 'Chame o atendimento' (nunca chega ao CAS/202)", !str_contains($r['texto'], 'Chame o atendimento'));
     afirmar("[$rotulo] resposta NAO contem marcador de chamada real ao TalentRn::processarCheckin", !str_contains($r['texto'], 'ESPIAO_PROCESSARCHECKIN_CHAMADO'));
 
     $depois = $atendimentoDao->buscarPorId($idAtendimento);
@@ -119,7 +119,6 @@ foreach ($pastas as $p) {
     talentLimparPasta($p);
 }
 foreach ($idsAtendimento as $id) {
-    $pdo->prepare('DELETE FROM tb_fila_envio WHERE id_atendimento = :id')->execute(['id' => $id]);
     $pdo->prepare('DELETE FROM tb_atendimento_nota WHERE id_atendimento = :id')->execute(['id' => $id]);
     $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $id]);
 }

@@ -9,11 +9,12 @@
  * confirma que:
  * - App\Rn\TalentClientException so aceita categorias da allowlist fechada
  *   (nunca string livre vinda de corpo de resposta);
- * - tb_fila_envio.ultimo_erro grava SOMENTE a categoria interna
- *   sanitizada — nunca contem CPF/CNH usados no teste, nem a string
- *   TALENT_API_KEY/base64;
- * - o VALOR configurado em TALENT_API_KEY (.env) nunca aparece em nenhuma
- *   coluna gravada por este fluxo.
+ * - (fila de reenvio removida pela migration 019) a categoria devolvida por
+ *   processarCheckin e exatamente a categoria interna da allowlist, e o
+ *   helper de log do controller so aceita categorias da allowlist (valor
+ *   livre vira 'erro_desconhecido', nunca vaza CPF/corpo);
+ * - o VALOR configurado em TALENT_API_KEY (.env) e o CPF/nome do teste nunca
+ *   aparecem nas colunas talent_* gravadas por este fluxo.
  *
  * Uso: php tests/manual/teste_talent_log_sanitizado.php
  */
@@ -24,7 +25,6 @@ require_once __DIR__ . '/_fixtures_talent.php';
 use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\EmpresaDao;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
@@ -72,11 +72,10 @@ try {
 afirmar('TalentClientException rejeita categoria fora da allowlist fechada (nunca aceita corpo bruto como categoria)', $lancouCategoriaInvalida);
 
 // ============================================================
-// 2. Fluxo real: forcar erro em processarCheckin, registrar na fila,
-// conferir que tb_fila_envio.ultimo_erro so tem a categoria sanitizada
+// 2. Fluxo real: forcar erro em processarCheckin e conferir que a categoria
+// devolvida e a sanitizada exata e que nada sensivel foi gravado em talent_*
 // ============================================================
 $atendimentoDao = new AtendimentoDao($pdo);
-$filaDao = new FilaEnvioDao($pdo);
 $empresaDao = new EmpresaDao($pdo);
 $empresa = $empresaDao->buscarPorId(1);
 
@@ -100,6 +99,9 @@ class TalentClientDeTesteNuncaChamado extends TalentClient
     }
 }
 
+$metodoLog = new \ReflectionMethod(\App\Controller\AtendimentoController::class, 'categoriaFalhaCheckinParaLog');
+$metodoLog->setAccessible(true);
+
 $cpfSensivel = '11144477735';
 $nomeSensivel = 'MOTORISTA TESTE SANITIZACAO';
 
@@ -114,33 +116,40 @@ foreach ($categoriasParaTestar as $categoria) {
     $atendimentoDao->atualizarValidacaoCnh($fix['id_atendimento'], $nomeSensivel, $cpfSensivel, '2030-01-01', 'MANUAL', 'PENDENTE_REVISAO');
 
     $cliente = new TalentClientQueLancaErro($categoria);
-    $talentRn = new TalentRn($cliente, $filaDao, $atendimentoDao, $_ENV['STORAGE_PATH']);
+    $talentRn = new TalentRn($cliente, $atendimentoDao, $_ENV['STORAGE_PATH']);
     $atendimento = $atendimentoDao->buscarPorId($fix['id_atendimento']);
     $resultado = $talentRn->processarCheckin($atendimento, $empresa, []);
 
     afirmar("Categoria '{$categoria}': processarCheckin devolve exatamente essa categoria (nunca corpo bruto)", $resultado['erro_categoria'] === $categoria);
 
-    $talentRn->registrarFalhaParaReenvio($fix['id_atendimento'], $resultado['erro_categoria']);
+    afirmar("Categoria '{$categoria}': status ERRO_REPROCESSAVEL (nunca ENVIO_INDETERMINADO)", $resultado['status'] === 'ERRO_REPROCESSAVEL');
 
-    $stmt = $pdo->prepare('SELECT ultimo_erro FROM tb_fila_envio WHERE id_atendimento = :id ORDER BY id_fila DESC LIMIT 1');
+    afirmar("Categoria '{$categoria}': helper de log do controller devolve exatamente a categoria", $metodoLog->invoke(null, $resultado['erro_categoria']) === $categoria);
+
+    $stmt = $pdo->prepare('SELECT CONCAT_WS("|", talent_checkin_status, talent_senha, talent_protocolo) FROM tb_atendimento WHERE id_atendimento = :id');
     $stmt->execute(['id' => $fix['id_atendimento']]);
-    $ultimoErro = $stmt->fetchColumn();
-
-    afirmar("Categoria '{$categoria}': tb_fila_envio.ultimo_erro = categoria sanitizada exata (\"{$ultimoErro}\")", $ultimoErro === $categoria);
-    afirmar("Categoria '{$categoria}': ultimo_erro NAO contem o CPF sensivel do teste", !str_contains((string) $ultimoErro, $cpfSensivel));
-    afirmar("Categoria '{$categoria}': ultimo_erro NAO contem o nome sensivel do teste", !str_contains((string) $ultimoErro, $nomeSensivel));
-    afirmar("Categoria '{$categoria}': ultimo_erro NAO parece base64 longo (nenhum bloco >= 40 chars base64-like)", !preg_match('/[A-Za-z0-9+\/]{40,}={0,2}/', (string) $ultimoErro));
+    $gravado = (string) $stmt->fetchColumn();
+    afirmar("Categoria '{$categoria}': colunas talent_* NAO contem o CPF sensivel do teste", !str_contains($gravado, $cpfSensivel));
+    afirmar("Categoria '{$categoria}': colunas talent_* NAO contem o nome sensivel do teste", !str_contains($gravado, $nomeSensivel));
+    afirmar("Categoria '{$categoria}': colunas talent_* NAO parecem base64 longo", !preg_match('/[A-Za-z0-9+\/]{40,}={0,2}/', $gravado));
 }
+
+// Valor livre/malicioso nunca vira categoria de log (allowlist fechada)
+foreach (['CPF 111.444.777-35 invalido', "erro_servidor\nforjado", '', 'x'] as $lixo) {
+    afirmar('Helper de log: valor fora da allowlist vira erro_desconhecido', $metodoLog->invoke(null, $lixo) === 'erro_desconhecido');
+}
+afirmar('Helper de log: null vira erro_desconhecido', $metodoLog->invoke(null, null) === 'erro_desconhecido');
+afirmar('Helper de log: erro_montagem_payload e aceito (literal interno fixo)', $metodoLog->invoke(null, 'erro_montagem_payload') === 'erro_montagem_payload');
 
 // ============================================================
 // 3. TALENT_API_KEY real (.env) nunca aparece em nenhuma linha gravada
 // ============================================================
 $apiKeyReal = $_ENV['TALENT_API_KEY'] ?? '';
 if ($apiKeyReal !== '') {
-    $stmt = $pdo->prepare('SELECT ultimo_erro FROM tb_fila_envio WHERE id_atendimento IN (' . implode(',', array_fill(0, count($idsAtendimento), '?')) . ')');
+    $stmt = $pdo->prepare('SELECT CONCAT_WS("|", talent_checkin_status, talent_senha, talent_protocolo) FROM tb_atendimento WHERE id_atendimento IN (' . implode(',', array_fill(0, count($idsAtendimento), '?')) . ')');
     $stmt->execute($idsAtendimento);
     $todosErros = implode('|', $stmt->fetchAll(PDO::FETCH_COLUMN));
-    afirmar('TALENT_API_KEY (.env) NUNCA aparece em nenhum ultimo_erro gravado', !str_contains($todosErros, $apiKeyReal));
+    afirmar('TALENT_API_KEY (.env) NUNCA aparece nas colunas talent_* gravadas', !str_contains($todosErros, $apiKeyReal));
 } else {
     echo "     (TALENT_API_KEY vazio no .env deste ambiente — checagem de vazamento do valor real pulada, nada a comparar)\n";
 }
@@ -156,7 +165,7 @@ $atendimentoDao->atualizarValidacaoCrlv($idAtSemDocs, 'NOD0001', 2025, 'SP', '12
 $atendimentoDao->definirPasta($idAtSemDocs, 'pasta_sem_arquivos_' . bin2hex(random_bytes(4))); // pasta nunca criada -> anexo_cnh_ausente
 
 $clienteNuncaChamado = new TalentClientDeTesteNuncaChamado();
-$talentRnPayload = new TalentRn($clienteNuncaChamado, $filaDao, $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRnPayload = new TalentRn($clienteNuncaChamado, $atendimentoDao, $_ENV['STORAGE_PATH']);
 $atSemDocs = $atendimentoDao->buscarPorId($idAtSemDocs);
 $resultadoPayload = $talentRnPayload->processarCheckin($atSemDocs, $empresa, []);
 afirmar('Falha na montagem do payload (anexo ausente) -> ERRO_REPROCESSAVEL, categoria erro_montagem_payload', $resultadoPayload['status'] === 'ERRO_REPROCESSAVEL' && $resultadoPayload['erro_categoria'] === 'erro_montagem_payload');
@@ -169,7 +178,6 @@ foreach ($pastas as $p) {
     talentLimparPasta($p);
 }
 foreach ($idsAtendimento as $id) {
-    $pdo->prepare('DELETE FROM tb_fila_envio WHERE id_atendimento = :id')->execute(['id' => $id]);
     $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $id]);
 }
 $pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotem]);

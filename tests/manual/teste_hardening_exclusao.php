@@ -25,7 +25,6 @@ require_once __DIR__ . '/hardening_helpers.php';
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\ClienteDao;
-use App\Dao\FilaEnvioDao;
 use App\Rn\NotaFiscalRn;
 use App\Rn\TalentClient;
 use App\Rn\TalentRn;
@@ -526,7 +525,7 @@ try {
         imagedestroy($img);
     }
     copy($atd['dir'] . '/nota_01.jpg', $atd['dir'] . '/nota_02.jpg.999999.del');
-    $talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), new AtendimentoDao($pdo), $amb['storage']);
+    $talentRn = new TalentRn(new TalentClient('', ''), new AtendimentoDao($pdo), $amb['storage']);
     $atendimentoLinha = hdAtendimento($pdo, $atd['id']);
     $notasLinha = (new AtendimentoNotaDao($pdo))->listarPorAtendimento($atd['id']);
     hdAfirmar('E17: ordens restantes 1, 3 e 5 (nao contiguas)', array_map('intval', array_column($notasLinha, 'ordem')) === [1, 3, 5]);

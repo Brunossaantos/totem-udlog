@@ -1049,25 +1049,67 @@ class AtendimentoController
                 Resposta::erro('Nao foi possivel confirmar seu check-in — procure um atendente', 500);
                 return;
             case 'ERRO_REPROCESSAVEL':
-                $this->talentRn->registrarFalhaParaReenvio($idAtendimento, $resultado['erro_categoria'] ?? 'erro_desconhecido');
-                // 202: aceito, mas ainda sendo processado — o totem mostra "aguarde" e o cron finaliza depois
-                // dados.mensagem_api (aditivo): mensagem de negocio da Talent
-                // ja sanitizada (<= 300 chars, texto puro); so existe quando a
-                // falha veio de resposta HTTP da Talent. Nunca logada.
+                // Sem reenvio automatico: o estado ERRO_REPROCESSAVEL permite so
+                // uma nova chamada de finalizar() pelo totem. Registra UMA linha
+                // de log sanitizada (id_atendimento + categoria de allowlist
+                // fechada; nunca excecao, corpo, CPF ou token).
+                $categoria = self::categoriaFalhaCheckinParaLog($resultado['erro_categoria'] ?? null);
+                error_log('[AtendimentoController] checkin_talent_erro_reprocessavel id_atendimento=' . $idAtendimento . ' categoria=' . $categoria);
+                // 202 (contrato mantido): o check-in NAO foi concluido. O texto
+                // nao promete reprocessamento automatico e orienta chamar o
+                // atendimento. dados.mensagem_api (aditivo): retorno real da
+                // Talent, ja sanitizado (<= 300 chars, texto puro); so existe
+                // quando a falha veio de resposta HTTP da Talent. Nunca logada.
+                $textoFalha = self::textoFalhaCheckin($categoria);
                 $mensagemApi = $resultado['mensagem_api'] ?? null;
                 if (is_string($mensagemApi) && $mensagemApi !== '') {
-                    Resposta::erroComDadosSemCodigo('Nao foi possivel enviar agora — sua senha sera processada em instantes', ['mensagem_api' => $mensagemApi], 202);
+                    Resposta::erroComDadosSemCodigo($textoFalha, ['mensagem_api' => $mensagemApi], 202);
                     return;
                 }
-                Resposta::erro('Nao foi possivel enviar agora — sua senha sera processada em instantes', 202);
+                Resposta::erro($textoFalha, 202);
                 return;
             case 'ENVIO_INDETERMINADO':
-                // Nao enfileirado para retry automatico (por design) — exige
-                // conferencia manual no painel do Talent.
+                // Sem retry automatico (por design) — exige conferencia
+                // manual no painel do Talent.
                 Resposta::erro('Nao foi possivel confirmar seu check-in — procure um atendente', 500);
                 return;
             default:
                 Resposta::erro('Nao foi possivel processar o check-in agora', 500);
+        }
+    }
+
+    /**
+     * Categoria sanitizada de uma falha ERRO_REPROCESSAVEL do check-in para
+     * log/escolha de texto: so as categorias fechadas de
+     * TalentClientException ou o literal interno 'erro_montagem_payload';
+     * qualquer outro valor vira 'erro_desconhecido'.
+     */
+    private static function categoriaFalhaCheckinParaLog(mixed $categoria): string
+    {
+        if (is_string($categoria)
+            && ($categoria === 'erro_montagem_payload' || in_array($categoria, \App\Rn\TalentClientException::CATEGORIAS_VALIDAS, true))) {
+            return $categoria;
+        }
+        return 'erro_desconhecido';
+    }
+
+    /**
+     * Texto fixo e honesto do 202 do finalizar por categoria (allowlist),
+     * sem promessa de reprocessamento automatico; sempre orienta chamar o
+     * atendimento. O retorno real da Talent, quando existe, vai em
+     * dados.mensagem_api.
+     */
+    private static function textoFalhaCheckin(string $categoria): string
+    {
+        switch ($categoria) {
+            case 'timeout':
+            case 'erro_indeterminado':
+            case 'erro_conexao':
+                return 'O sistema Talent esta fora do ar ou nao respondeu, e o check-in nao foi concluido. Chame o atendimento.';
+            case 'erro_servidor':
+                return 'O sistema Talent informou um erro interno e o check-in nao foi concluido. Chame o atendimento.';
+            default:
+                return 'Nao foi possivel concluir o check-in. Chame o atendimento.';
         }
     }
 

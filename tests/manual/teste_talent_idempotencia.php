@@ -15,7 +15,7 @@
  *   de uma tentativa mais nova (gravarResultadoEnvioTalent retorna false);
  * - item 8: ENVIO_INDETERMINADO NUNCA e elegivel a retry automatico
  *   (iniciarEnvioTalent so aceita NAO_ENVIADO/ERRO_REPROCESSAVEL), e
- *   FilaEnvioDao::buscarPendentes nunca traz um item ENVIO_INDETERMINADO;
+ *   processarCheckin devolve INDETERMINADO_PENDENTE_MANUAL sem chamar o Talent;
  * - bonus: App\Rn\TalentRn::processarCheckin fim a fim com TalentClient
  *   mockado (sucesso -> ENVIADO grava senha/protocolo + status=concluido/
  *   etapa=impressao; timeout -> ENVIO_INDETERMINADO; erro_servidor ->
@@ -32,7 +32,6 @@ use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\EmpresaDao;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
@@ -140,21 +139,17 @@ $tentativaPosIndeterminado = bin2hex(random_bytes(8));
 $reabriuIndeterminado = $atendimentoDao->iniciarEnvioTalent($fixConc['id_atendimento'], $tentativaPosIndeterminado);
 afirmar('ENVIO_INDETERMINADO NUNCA e reaberto por iniciarEnvioTalent (retry automatico bloqueado por design)', $reabriuIndeterminado === false);
 
-// buscarPendentes nunca traz ENVIO_INDETERMINADO mesmo se houver linha em tb_fila_envio
-$stmtFila = $pdo->prepare("
-    INSERT INTO tb_fila_envio (id_atendimento, tentativas, ultimo_erro, status, proxima_tentativa_em)
-    VALUES (:id, 1, 'timeout', 'pendente', DATE_SUB(NOW(), INTERVAL 1 MINUTE))
-");
-$stmtFila->execute(['id' => $fixConc['id_atendimento']]);
-$filaDao = new FilaEnvioDao($pdo);
-$pendentes = $filaDao->buscarPendentes();
-$apareceIndeterminadoNaFila = false;
-foreach ($pendentes as $item) {
-    if ((int) $item['id_atendimento'] === $fixConc['id_atendimento']) {
-        $apareceIndeterminadoNaFila = true;
-    }
-}
-afirmar('FilaEnvioDao::buscarPendentes NUNCA retorna atendimento com talent_checkin_status = ENVIO_INDETERMINADO', !$apareceIndeterminadoNaFila);
+// Sem fila de reenvio (migration 019): ENVIO_INDETERMINADO tambem nao e
+// reprocessado por processarCheckin -- devolve INDETERMINADO_PENDENTE_MANUAL
+// SEM chamar o Talent.
+$clienteNuncaChamado = new TalentClientDeTeste(function () {
+    throw new \RuntimeException('Talent NAO deveria ser chamado para ENVIO_INDETERMINADO');
+});
+$talentRnNuncaChamado = new TalentRn($clienteNuncaChamado, $atendimentoDao, $_ENV['STORAGE_PATH']);
+$atConc = $atendimentoDao->buscarPorId($fixConc['id_atendimento']);
+$rIndPendente = $talentRnNuncaChamado->processarCheckin($atConc, $empresa, []);
+afirmar('processarCheckin com ENVIO_INDETERMINADO devolve INDETERMINADO_PENDENTE_MANUAL', $rIndPendente['status'] === 'INDETERMINADO_PENDENTE_MANUAL');
+afirmar('processarCheckin com ENVIO_INDETERMINADO NAO chama o Talent', $clienteNuncaChamado->chamadas === 0);
 
 // ============================================================
 // Item 7 (parte 1): timeout do TalentClient vira ENVIO_INDETERMINADO via
@@ -166,7 +161,7 @@ afirmarLimpo($idsAtendimento, $pastas, $pdo, $fixTimeout);
 $clienteTimeout = new TalentClientDeTeste(function () {
     throw new TalentClientException('timeout');
 });
-$talentRnTimeout = new TalentRn($clienteTimeout, new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRnTimeout = new TalentRn($clienteTimeout, $atendimentoDao, $_ENV['STORAGE_PATH']);
 $atTimeout = $atendimentoDao->buscarPorId($fixTimeout['id_atendimento']);
 $resultadoTimeout = $talentRnTimeout->processarCheckin($atTimeout, $empresa, []);
 afirmar('Timeout do TalentClient -> processarCheckin retorna status ENVIO_INDETERMINADO', $resultadoTimeout['status'] === 'ENVIO_INDETERMINADO');
@@ -187,7 +182,7 @@ afirmarLimpo($idsAtendimento, $pastas, $pdo, $fixIndeterminado);
 $clienteIndeterminado = new TalentClientDeTeste(function () {
     throw new TalentClientException('erro_indeterminado');
 });
-$talentRnIndeterminado = new TalentRn($clienteIndeterminado, new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRnIndeterminado = new TalentRn($clienteIndeterminado, $atendimentoDao, $_ENV['STORAGE_PATH']);
 $atIndeterminado = $atendimentoDao->buscarPorId($fixIndeterminado['id_atendimento']);
 $resultadoIndeterminado = $talentRnIndeterminado->processarCheckin($atIndeterminado, $empresa, []);
 afirmar("Categoria 'erro_indeterminado' -> processarCheckin retorna status ENVIO_INDETERMINADO (nunca ERRO_REPROCESSAVEL)", $resultadoIndeterminado['status'] === 'ENVIO_INDETERMINADO');
@@ -246,7 +241,7 @@ talentInserirNotaComNumero($notaDao, $fixSucesso['id_atendimento'], 1, '123');
 $clienteSucesso = new TalentClientDeTeste(function () {
     return ['senha' => 'ABC123', 'protocolo' => 'PROTO-XYZ'];
 });
-$talentRnSucesso = new TalentRn($clienteSucesso, new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRnSucesso = new TalentRn($clienteSucesso, $atendimentoDao, $_ENV['STORAGE_PATH']);
 $atSucesso = $atendimentoDao->buscarPorId($fixSucesso['id_atendimento']);
 $notasSucesso = $notaDao->listarPorAtendimento($fixSucesso['id_atendimento']);
 $r1 = $talentRnSucesso->processarCheckin($atSucesso, $empresa, $notasSucesso);
@@ -263,12 +258,12 @@ afirmarLimpo($idsAtendimento, $pastas, $pdo, $fixErro);
 $clienteErro = new TalentClientDeTeste(function () {
     throw new TalentClientException('erro_servidor');
 });
-$talentRnErro = new TalentRn($clienteErro, new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRnErro = new TalentRn($clienteErro, $atendimentoDao, $_ENV['STORAGE_PATH']);
 $atErro = $atendimentoDao->buscarPorId($fixErro['id_atendimento']);
 $rErro = $talentRnErro->processarCheckin($atErro, $empresa, []);
 afirmar('processarCheckin (HTTP 500 simulado): status ERRO_REPROCESSAVEL (nunca ENVIO_INDETERMINADO)', $rErro['status'] === 'ERRO_REPROCESSAVEL');
 $reabriuErro = $atendimentoDao->iniciarEnvioTalent($fixErro['id_atendimento'], bin2hex(random_bytes(8)));
-afirmar('ERRO_REPROCESSAVEL PODE ser reaberto (elegivel a retry automatico, ao contrario de ENVIO_INDETERMINADO)', $reabriuErro === true);
+afirmar('ERRO_REPROCESSAVEL PODE ser reaberto (elegivel a nova tentativa de finalizar(), ao contrario de ENVIO_INDETERMINADO)', $reabriuErro === true);
 
 // ============================================================
 // Limpeza
@@ -277,7 +272,6 @@ foreach ($pastas as $p) {
     talentLimparPasta($p);
 }
 foreach ($idsAtendimento as $id) {
-    $pdo->prepare('DELETE FROM tb_fila_envio WHERE id_atendimento = :id')->execute(['id' => $id]);
     $pdo->prepare('DELETE FROM tb_atendimento_nota WHERE id_atendimento = :id')->execute(['id' => $id]);
     $pdo->prepare('DELETE FROM tb_atendimento WHERE id_atendimento = :id')->execute(['id' => $id]);
 }

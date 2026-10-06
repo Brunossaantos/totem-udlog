@@ -36,7 +36,6 @@ use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\EmpresaDao;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
@@ -67,7 +66,7 @@ function chamarMontarPayload(TalentRn $talentRn, array $atendimento, array $nota
 $atendimentoDao = new AtendimentoDao($pdo);
 $notaDao = new AtendimentoNotaDao($pdo);
 $empresaDao = new EmpresaDao($pdo);
-$talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRn = new TalentRn(new TalentClient('', ''), $atendimentoDao, $_ENV['STORAGE_PATH']);
 
 $empresaMauaI = $empresaDao->buscarPorId(1);
 afirmar('Fixture: empresa Maua I (id 1) existe (migration 008 aplicada)', $empresaMauaI !== null && $empresaMauaI['cnpj'] === '14706199000182');

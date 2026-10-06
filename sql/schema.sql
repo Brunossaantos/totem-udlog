@@ -243,6 +243,7 @@ CREATE TABLE tb_vio_cache_crlv (
     INDEX idx_valido_ate (valido_ate)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- (tb_fila_envio, a fila de reenvio ao Talent, foi removida pela migration 019)
 -- Rate limit PROPRIO do polling de documento.php?acao=status-processamento,
 -- chave por (id_atendimento, tipo_documento, janela) — diferente de
 -- tb_rate_limit_ocr (chave por id_totem) porque o polling e por
@@ -255,19 +256,4 @@ CREATE TABLE tb_rate_limit_vio_status (
     atualizado_em   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id_atendimento, tipo_documento, janela),
     FOREIGN KEY (id_atendimento) REFERENCES tb_atendimento(id_atendimento)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- Fila de reenvio quando a API do Talent falha (cron processa)
-CREATE TABLE tb_fila_envio (
-    id_fila               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    id_atendimento        BIGINT UNSIGNED NOT NULL,
-    tentativas            SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-    ultimo_erro           TEXT NULL,
-    status                ENUM('pendente','sucesso','falhou_definitivo') NOT NULL DEFAULT 'pendente',
-    proxima_tentativa_em  DATETIME NULL,
-    criado_em             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    atualizado_em         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    FOREIGN KEY (id_atendimento) REFERENCES tb_atendimento(id_atendimento),
-    INDEX idx_status_proxima (status, proxima_tentativa_em)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

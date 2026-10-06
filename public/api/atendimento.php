@@ -8,7 +8,6 @@ use Util\Resposta;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\ClienteDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\VioCacheDao;
 use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
@@ -45,7 +44,6 @@ $atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), $ordemColetaClient)
 $talentClient = new TalentClient($_ENV['TALENT_API_URL'] ?? '', $_ENV['TALENT_API_KEY'] ?? '');
 $talentRn = new TalentRn(
     $talentClient,
-    new FilaEnvioDao($pdo),
     new AtendimentoDao($pdo),
     $_ENV['STORAGE_PATH'],
     // anexo da Ordem de Coleta (anexo-ordem-coleta-n8n): conexao preguicosa,

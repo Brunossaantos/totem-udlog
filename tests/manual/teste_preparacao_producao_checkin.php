@@ -32,7 +32,6 @@ use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\EmpresaDao;
-use App\Dao\FilaEnvioDao;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
 
@@ -66,7 +65,7 @@ $notaDao = new AtendimentoNotaDao($pdo);
 $empresaDao = new EmpresaDao($pdo);
 // TalentClient instanciado so para satisfazer o construtor de TalentRn --
 // NUNCA usado (checkin() jamais e chamado neste script).
-$talentRn = new TalentRn(new TalentClient($_ENV['TALENT_API_URL'] ?? '', $_ENV['TALENT_API_KEY'] ?? ''), new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRn = new TalentRn(new TalentClient($_ENV['TALENT_API_URL'] ?? '', $_ENV['TALENT_API_KEY'] ?? ''), $atendimentoDao, $_ENV['STORAGE_PATH']);
 
 echo "=== 1. Confirmacao do totem real (id_totem={$IDTOTEM_REAL}) ===\n";
 $totem = $pdo->prepare('SELECT id_totem, codigo, nome, id_empresa, ativo FROM tb_totem WHERE id_totem = :id');

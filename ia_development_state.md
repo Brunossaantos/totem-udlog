@@ -1,5 +1,7 @@
 # Estado real do projeto - totem-udlog (VERSAO RESUMIDA)
 
+- [2026-10-05] `remocao-fila-reenvio-talent` (/00 a /03 APROVADAS por revisores independentes): fila de reenvio ao Talent REMOVIDA (`App\Dao\FilaEnvioDao`, `cron/reenviar-fila.php`, `registrarFalhaParaReenvio`, parametro `FilaEnvioDao` do construtor de `TalentRn`; nova assinatura: TalentClient, AtendimentoDao, string $caminhoBase, ?AnexoOrdemColetaLeitor = null). Migration 019 `DROP TABLE IF EXISTS tb_fila_envio` aplicada SO no dev `udlog_totem` (7 linhas `pendente` de teste, dump fora do repo); PRODUCAO PENDENTE, ordem obrigatoria: codigo novo ANTES do DROP (codigo antigo faria INSERT e daria 500); `sql/schema.sql` sem a tabela (nota "removida pela migration 019"). `ERRO_REPROCESSAVEL` preservado; nova tentativa SO manual (nova chamada de `finalizar`/correcao do ajudante); nao ha reenvio automatico de nenhuma falha. `finalizar` grava UMA linha de log sanitizada por chamada (`checkin_talent_erro_reprocessavel id_atendimento=<int> categoria=<allowlist>`) e o 202 mostra `dados.mensagem_api` real do Talent, com texto fixo por categoria sem promessa de reprocessamento; o front NAO mudou (frase propria "Nao foi possivel concluir o check-in agora. Chame o atendente."); `timeout`/`erro_indeterminado` continuam ENVIO_INDETERMINADO/HTTP 500. Comentarios obsoletos de `TalentClient`/`TalentClientException` reescritos (sem mudanca de logica). Testes: `teste_sem_fila_envio` 53/53 (novo), e2e 38, ajudante 58, mensagem_api 39, QR 50, oc_anexo 185/59/59, layout 1745/0; preexistentes no HEAD 3bc0497: ver P55. Handoff: `docs/handoffs/2026-10-05-remocao-fila-reenvio-talent.md`.
+
 - [2026-10-05] `anexo-ordem-coleta-n8n` concluida ate a /03 (somente Expedicao; /04 = commit): o n8n envia o PDF da OC para `public/api/ordem-coleta-anexo.php` (JSON base64, Bearer `ORDEM_COLETA_ANEXO_API_KEY` com hash_equals, HTTPS, rate limit, 5 MiB, `%PDF-`); arquivo em `STORAGE_PATH/ordens_coleta/<cnpj>/<numero>_<AAAAMMDDHHMMSS>.pdf`, tabela `tb_ordem_coleta_arquivos` (UNIQUE cnpj+numero, so caminho/sha256, sem FK) no banco externo; sobrescrita por (cnpj,numero); `TalentRn` anexa `Ordem de Coleta` (base64 puro) e, em qualquer falha, segue sem anexo; cron `limpar-anexos-ordem-coleta.php` apaga 15 dias apos OC INATIVA (`inativada_em`, gravada por `marcarInativaPorNumero`) ou 15 dias apos recebimento se orfao; OC ATIVA nunca apaga. Decisao do usuario: so PDF chega ao totem (Word/imagem nao sao convertidos nem enviados; OC correspondente faz check-in sem anexo). Ajuste pos-/02: corrida de nome corrigida com publicacao exclusiva via `link()`; `CaminhoJaRegistradoException`; testes HTTP hermeticos; contador do rate limit 0640. /02 e /03 APROVADAS por QA, seguranca e backend independentes: logica 185/185, http 59/59, lacunas 59/59 (100 e 200 rodadas x 6 processos), mutacoes detectadas, regressao sem falhas; unica falha `teste_hardening_exclusao` E17 e PRE-EXISTENTE no HEAD (ver P55). Migrations externas 002/003 aplicadas SO no banco externo de dev. Proximo passo: deploy na Hostgator (SSH, so com autorizacao a cada passo; migrations 002/003 + `.env` + pasta + cron). Handoff: `docs/handoffs/2026-10-05-anexo-ordem-coleta-n8n.md`.
 
 - [2026-10-04] Padronizacao dos modais de numero da nota (sem commit): teclas do numerico ja eram iguais (177x124, gap 14, grade 3x4; agora peso 700 em todas e centralizacao flex; digitos 52px, Apagar/Confirmar 30px); botoes de acao (Confirmar/Corrigir/Voltar/Excluir nota/Cancelar atendimento) padronizados em 560x88, 28px/700, raio 16 (antes Confirmar/Corrigir 624x96/30px/raio 18, Voltar 624 ou 560, Cancelar peso 600). So CSS (`app.css`) + verificacoes novas em `vio_captura_layout.js` (1745).
@@ -56,7 +58,7 @@
 > Se algo nao consta aqui, procure no backup; se nao estiver la
 > tambem, e "nao documentado".
 
-Ultima atualizacao: 2026-10-04
+Ultima atualizacao: 2026-10-05
 Fonte do resumo: `ia_development_state_bkp.md` (SHA-256 iniciado em
 a6397ebccae0d363), copia byte a byte do arquivo original.
 Este arquivo e atualizado ao final de cada ciclo (etapa 04). O backup
@@ -434,7 +436,9 @@ Riscadas/resolvidas ficam na subsecao 6.6.
   por chamadas reais, o restante segue como fornecido pelo usuario (L221)
 - P18 [ABERTA] Migrations 015/016/017/018 aplicadas so no dev local
   (`udlog_totem`); aplicacao em producao/Hostgator entra no deploy final
-  (018 ANTES do PHP novo; ver docs/deploy-checklist.md) (L221, L222)
+  (018 ANTES do PHP novo; ver docs/deploy-checklist.md) (L221, L222).
+  Acrescentar a migration 019 (DROP `tb_fila_envio`), aplicada so no dev:
+  em producao DEPOIS do PHP novo
 - P19 [ABERTA] Nova credencial rotacionada da vio.api.br: nao existia/nao
   usada ate o registro (L221)
 - P20 [ABERTA] display_errors=Off em producao: item ja no
@@ -513,7 +517,8 @@ Riscadas/resolvidas ficam na subsecao 6.6.
   falha); higiene de arquivos auxiliares de teste ausentes (L5541)
 
 ### 6.7 Pendencias de 2026-10-04 (fluxo QR-only, impressao e Talent)
-- P45 [ABERTA] Deploy final Hostgator: migrations 015-018 (018 antes do PHP),
+- P45 [ABERTA] Deploy final Hostgator: migrations 015-018 (018 antes do PHP;
+  019 DROP `tb_fila_envio` DEPOIS do PHP novo),
   crons do cPanel (limpeza de rate limit OCR e de notas em quarentena),
   preflight de `tb_cliente` (0 coincidencias com a UDLOG), HTTPS,
   `storage/` fora do document root, `display_errors=Off`, `.env` de producao
@@ -531,8 +536,6 @@ Riscadas/resolvidas ficam na subsecao 6.6.
   dados do ajudante tambem nao esta documentado
 - P49 [ABERTA] "Corrigir dados do ajudante" aparece por texto da
   `mensagem_api` ("ajudante"): criterio fragil, sem codigo de erro da Talent
-- P50 [ABERTA] Rejeicoes de negocio da Talent nao sao reenviadas
-  automaticamente pela fila (so ERRO_REPROCESSAVEL tecnico)
 - P51 [ABERTA] CPF do ajudante so exige 11 digitos (sem DV, decisao do
   usuario)
 - P52 [ABERTA] Sem teto de re-escaneio no backend (`iniciar-processamento`
@@ -545,17 +548,25 @@ Riscadas/resolvidas ficam na subsecao 6.6.
   firmware 360 dots); etiqueta fixada em 48 mm uteis; medidas fisicas finais
   do papel (tamanho total, cortes, posicao) pendentes do usuario
 
-- P55 [ABERTA] `teste_hardening_exclusao` E17 falha no HEAD (pre-existente): esperava anexos CNH+CRLV que o fluxo QR-only nao gera mais (teste desatualizado)
+- P55 [ABERTA] Falhas PREEXISTENTES no HEAD 3bc0497 (testes desatualizados, identicas antes/depois da remocao da fila): `teste_hardening_exclusao` E17, `teste_talent_payload` 41/45 e `teste_talent_anexos_pdf` 15/19 (esperam anexos de CNH/CRLV que o fluxo QR-only nao gera mais). As 3 suites `teste_concorrencia_finalizar_checkin`, `teste_talent_idor_finalizar` e `teste_talent_trava_doctos_pendente` so passam com `TALENT_CHECKIN_ATIVO` nao-true no `.env` (esperam 503 `TALENT_CHECKIN_DESATIVADO`); o `.env` do dev local esta com a flag true (com false: 8/8, 10/10, 18/18)
+- P64 [ABERTA] Residuos de `teste_preparacao_producao_checkin` no dev `udlog_totem` (atendimentos 12924 e 12936, totem id 1, TLT9001, em_andamento, +1 nota cada; o teste nao limpa por desenho); remocao depende de autorizacao
+- P65 [ABERTA] Requisito "Nr. Pager" do Talent: campo ainda inexistente na API; o Talent informou que adiciona em 2026-10-06 (contrato nao confirmado; nada implementado)
+- P66 [ABERTA] Crons de producao NAO agendados no cPanel (ea-php83): `limpar-rate-limit-ocr` `0 * * * *`, `abandonar-atendimentos` `15 3 * * *` (risco: 85 atendimentos em_andamento em producao), `limpar-notas-quarentena` `30 3 * * *`, `limpar-anexos-ordem-coleta` `55 3 * * *`; reenviar-fila NUNCA (removido); agendar so com autorizacao
+- P67 [ABERTA] Deploy da migration 019 em producao (`udlogo59_udlog_totem`, MySQL 5.7.44) pendente: confirmar que nao ha cron do reenviar-fila, backup + dump da tabela (arquivo morto fora do webroot), `git pull`, `php -l`, 019; rollback = restaurar a tabela ANTES de reverter o commit; exige privilegio DROP
+- P68 [ABERTA] `TALENT_CHECKIN_ATIVO=true` em producao: decisao do usuario (hoje ausente/false no checklist)
 - P56 [ABERTA] anexo-oc B-1: 1062 classificado por `str_contains` em `errorInfo[2]`; B-2: orfaos de arquivo e `.tmp_*` sem varredura; B-3: `caminhoReservado` engole excecao; B-4: rate limit por REMOTE_ADDR e contador cresce sem teto
 - P57 [ABERTA] anexo-oc I-1: rajada >30 envios/segundo com a mesma parte de nome => 503; I-4: `Authorization` pode ser removido pelo Apache/FPM, X-Forwarded-Proto forjavel, sem tamanho minimo de chave
 - P58 [ABERTA] `tests/manual/teste_oc_anexo_lacunas.php` sai com rc 0 mesmo com falhas (conferir a saida)
 - P59 [ABERTA] `link()` validado so no Windows/NTFS; testar no Linux/Hostgator (ha fallback `fopen 'xb'`)
 - P60 [ABERTA] Confirmar em producao `tb_clientes.cnpj` VARCHAR(14) so digitos (join direto `c.cnpj = a.cnpj_cliente`)
-- P61 [ABERTA] Migrations externas 002/003 (`tb_ordem_coleta_arquivos`, `inativada_em`) ainda nao aplicadas em producao; exigem CREATE/ALTER no banco externo
+- P61 [RESOLVIDA 2026-10-05] Migrations externas 001-003 (`ORDEM_COLETA`, `tb_ordem_coleta_arquivos`, `inativada_em`) JA aplicadas em producao em 2026-10-05; anexo de teste enviado pelo n8n com HTTP 201
 - P62 [ABERTA] Teste real na Talent com PDF ~5 MB so com autorizacao (timeout 30 s => ENVIO_INDETERMINADO)
 - P63 [ABERTA] Demanda do n8n em `docs/n8n-anexo-ordem-coleta.md` (workflow inativo, URL/credencial a configurar)
 
 ### 6.6 Resolvidas (nao listar como abertas)
+- P50 (2026-10-05): estava errada (recusas de negocio TAMBEM enfileiravam,
+  pois o controller nao distingue recusa de erro tecnico); decidido "sem
+  reenvio automatico" e fila removida (`remocao-fila-reenvio-talent`)
 - Talent: idempotencia, HTTP 409, anexos, doctos[] real, credencial,
   UX dos modais de nota e inatividade (L203, L214-220)
 - Impressao: separacao producao/teste, UX da selecao, .env com aspas,

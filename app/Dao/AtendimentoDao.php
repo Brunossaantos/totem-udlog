@@ -817,8 +817,8 @@ class AtendimentoDao
      * antigo AtendimentoDao::finalizar() (substituido por este metodo), para
      * nao quebrar a tela de impressao. $senha/$protocolo so sao gravados
      * quando o status final e 'ENVIADO' (NUNCA persistir corpo bruto de
-     * resposta do Talent — categorizacao de erro fica em
-     * App\Dao\FilaEnvioDao::ultimo_erro, sempre sanitizada).
+     * resposta do Talent — a categoria do erro vai so numa linha de log
+     * sanitizada do controller, nunca para o banco).
      */
     public function gravarResultadoEnvioTalent(int $id, string $tentativaId, string $statusFinal, ?string $senha, ?string $protocolo): bool
     {

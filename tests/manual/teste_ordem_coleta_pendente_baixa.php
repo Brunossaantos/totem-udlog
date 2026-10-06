@@ -38,7 +38,6 @@ use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
 use App\Dao\OrdemColetaPendenteBaixaDao;
@@ -119,7 +118,7 @@ $idsAtendimento = [];
 function montarController(AtendimentoDao $atendimentoDao, PDO $pdo, OrdemColetaClient $ordemColetaClient): AtendimentoController
 {
     $atendimentoRn = new AtendimentoRn($atendimentoDao, new OrdemColetaClient(new OrdemColetaDao()));
-    $talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
+    $talentRn = new TalentRn(new TalentClient('', ''), $atendimentoDao, $_ENV['STORAGE_PATH']);
     $documentoRn = new DocumentoRn(new \App\Dao\VioCacheDao($pdo), $atendimentoDao);
 
     return new AtendimentoController(

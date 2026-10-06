@@ -14,7 +14,6 @@ use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\OrdemColetaDao;
 use App\Rn\AtendimentoRn;
 use App\Rn\OrdemColetaClient;
@@ -41,7 +40,7 @@ $idTotem = (int) ($argv[1] ?? 0);
 $idAtendimento = (int) ($argv[2] ?? 0);
 
 $atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient(new OrdemColetaDao()));
-$talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
+$talentRn = new TalentRn(new TalentClient('', ''), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
 $controller = new AtendimentoController($atendimentoRn, $talentRn, new AtendimentoNotaDao($pdo));
 
 register_shutdown_function(function () {

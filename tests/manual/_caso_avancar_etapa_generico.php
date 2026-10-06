@@ -21,7 +21,6 @@ use App\Rn\TalentRn;
 use App\Rn\TalentClient;
 use App\Rn\DocumentoRn;
 use App\Dao\AtendimentoNotaDao;
-use App\Dao\FilaEnvioDao;
 use App\Controller\AtendimentoController;
 
 $dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
@@ -33,7 +32,7 @@ $idTotem = (int) ($argv[1] ?? 0);
 $idAtendimento = (int) ($argv[2] ?? 0);
 
 $atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient(new OrdemColetaDao()));
-$talentRn = new TalentRn(new TalentClient('', ''), new FilaEnvioDao($pdo), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
+$talentRn = new TalentRn(new TalentClient('', ''), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
 $documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo));
 
 $controller = new AtendimentoController($atendimentoRn, $talentRn, new AtendimentoNotaDao($pdo), $documentoRn);

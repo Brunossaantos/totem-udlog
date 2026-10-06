@@ -635,7 +635,6 @@ try {
     // faz rede) -- mesmo padrao ja usado em tests/manual/teste_talent_payload.php.
     $talentRnParaTeste = new \App\Rn\TalentRn(
         new \App\Rn\TalentClient('', ''),
-        new \App\Dao\FilaEnvioDao($pdo),
         $atendimentoDao,
         sys_get_temp_dir()
     );

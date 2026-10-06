@@ -21,7 +21,6 @@ use Dotenv\Dotenv;
 use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\EmpresaDao;
 use App\Dao\TotemDao;
 use App\Rn\TalentRn;
@@ -63,7 +62,7 @@ $totem = $totemDao->buscarPorId((int) $atendimento['id_totem']);
 $empresa = $empresaDao->buscarPorId((int) $totem['id_empresa']);
 $notas = $notaDao->listarPorAtendimento($idAtendimento);
 
-$talentRn = new TalentRn(new TalentClientMockConcorrencia(), new FilaEnvioDao($pdo), $atendimentoDao, $_ENV['STORAGE_PATH']);
+$talentRn = new TalentRn(new TalentClientMockConcorrencia(), $atendimentoDao, $_ENV['STORAGE_PATH']);
 $resultado = $talentRn->processarCheckin($atendimento, $empresa, $notas);
 
 echo json_encode($resultado) . "\n";

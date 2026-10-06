@@ -11,7 +11,6 @@ require_once __DIR__ . '/qa_qr_exclusivo_bootstrap.php';
 
 use App\Controller\DocumentoController;
 use App\Dao\AtendimentoDao;
-use App\Dao\FilaEnvioDao;
 use App\Dao\RateLimitVioStatusDao;
 use App\Dao\VioCacheDao;
 use App\Rn\DocumentoRn;
@@ -285,7 +284,7 @@ try {
     $talentId = qaNovo($dao, $totem, 'exp_confirmacao');
     $pdo->prepare("UPDATE tb_atendimento SET ordem_coleta='QA-OC',cliente_cnpj='11222333000181',motorista_nome='QA MOTORISTA',motorista_cpf='52998224725',crlv_uf='SP',crlv_rntc='QA',crlv_tipo_veiculo='CAMINHAO' WHERE id_atendimento=:id")->execute(['id'=>$talentId]);
     $talentClient = new QaQrTalentFalso();
-    (new TalentRn($talentClient, new FilaEnvioDao($pdo), $dao, 'qa-nao-existe'))->processarCheckin($dao->buscarPorId($talentId), ['cnpj'=>'11222333000181'], []);
+    (new TalentRn($talentClient, $dao, 'qa-nao-existe'))->processarCheckin($dao->buscarPorId($talentId), ['cnpj'=>'11222333000181'], []);
     $payload = $talentClient->payloads[0] ?? [];
     qaAfirmar('Talent falso preserva doctos[] e remove anexos CNH/CRLV', isset($payload['doctos'], $payload['anexos']) && count($payload['anexos']) === 0);
     qaAfirmar('zero cache, PDF, temporario e storage QR-only', (int) $pdo->query('SELECT COUNT(*) FROM tb_vio_api_cache_cnh')->fetchColumn() === 0 && (int) $pdo->query('SELECT COUNT(*) FROM tb_vio_api_cache_crlv')->fetchColumn() === 0 && !is_dir(dirname(__DIR__, 2) . '/storage/qa_qr_exclusivo'));
