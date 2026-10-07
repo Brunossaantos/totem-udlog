@@ -257,3 +257,67 @@ CREATE TABLE tb_rate_limit_vio_status (
     PRIMARY KEY (id_atendimento, tipo_documento, janela),
     FOREIGN KEY (id_atendimento) REFERENCES tb_atendimento(id_atendimento)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Gestao Totem (area administrativa /gestao), demanda gestao-totem, fase F1
+-- (2026-10-06). Estas tabelas tambem sao criadas, de forma idempotente, pelas
+-- migrations 020 (usuario, sessao e tentativas de login) e 021 (auditoria
+-- append-only). Ver os cabecalhos dessas migrations para o raciocinio e a
+-- reversao.
+CREATE TABLE tb_gestao_usuario (
+    id_usuario         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    login              VARCHAR(60) NOT NULL,
+    nome               VARCHAR(100) NOT NULL,
+    perfil             ENUM('admin','usuario') NOT NULL DEFAULT 'usuario',
+    senha_hash         VARCHAR(255) NOT NULL,
+    ativo              TINYINT(1) NOT NULL DEFAULT 1,
+    deve_trocar_senha  TINYINT(1) NOT NULL DEFAULT 1,
+    tentativas_falhas  TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    bloqueado_ate      DATETIME NULL,
+    ultimo_login_em    DATETIME NULL,
+    senha_alterada_em  DATETIME NULL,
+    senha_versao       INT UNSIGNED NOT NULL DEFAULT 1,
+    criado_em          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    criado_por         INT UNSIGNED NULL,
+    UNIQUE KEY uk_gestao_usuario_login (login),
+    KEY idx_gestao_usuario_perfil_ativo (perfil, ativo),
+    CONSTRAINT fk_gestao_usuario_criado_por FOREIGN KEY (criado_por) REFERENCES tb_gestao_usuario(id_usuario)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE tb_gestao_sessao (
+    id_sessao         CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+    id_usuario        INT UNSIGNED NOT NULL,
+    csrf_token        CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    criado_em         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ultimo_acesso_em  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expira_em         DATETIME NOT NULL,
+    ua_hash           CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    KEY idx_gestao_sessao_usuario (id_usuario),
+    KEY idx_gestao_sessao_expira (expira_em),
+    CONSTRAINT fk_gestao_sessao_usuario FOREIGN KEY (id_usuario) REFERENCES tb_gestao_usuario(id_usuario) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE tb_gestao_login_tentativa (
+    ip_hash        CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    janela         INT UNSIGNED NOT NULL,
+    contador       SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+    atualizado_em  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (ip_hash, janela),
+    KEY idx_gestao_login_tentativa_atualizado (atualizado_em)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE tb_gestao_auditoria (
+    id_auditoria  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    id_usuario    INT UNSIGNED NULL,
+    acao          VARCHAR(40) NOT NULL,
+    alvo_tipo     VARCHAR(30) NULL,
+    alvo_id       BIGINT UNSIGNED NULL,
+    resultado     ENUM('PENDENTE','OK','SEM_EFEITO','ERRO') NOT NULL DEFAULT 'PENDENTE',
+    detalhe       VARCHAR(255) NULL,
+    ip            VARBINARY(16) NULL,
+    criado_em     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_gestao_auditoria_data (criado_em),
+    KEY idx_gestao_auditoria_usuario (id_usuario, criado_em),
+    KEY idx_gestao_auditoria_acao (acao, criado_em),
+    KEY idx_gestao_auditoria_alvo (alvo_tipo, alvo_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

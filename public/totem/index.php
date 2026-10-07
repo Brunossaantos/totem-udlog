@@ -2,9 +2,73 @@
 
 require_once __DIR__ . '/../../vendor/autoload.php';
 
+use Dotenv\Dotenv;
 use Util\Bootstrap;
+use Util\IpCliente;
+use Util\LimiteFalhasIp;
 use App\Dao\TotemDao;
 use App\Content\TermoLgpd;
+
+// Endurecimento da pagina do totem (demanda gestao-totem, F0, 2026-10-06).
+// Cabecalhos em TODA resposta desta pagina (200, 404, 429, 503). Sem CSP de
+// proposito: a pagina carrega app.js/tesseract por <script src> do proprio
+// dominio e usa so blocos <script type="application/json"> (dados, nao
+// executam), mas o front do totem nao foi auditado para CSP e esta rodada nao
+// pode arriscar o quiosque.
+header('Referrer-Policy: no-referrer');
+header('Cache-Control: no-store');
+header('X-Robots-Tag: noindex, nofollow');
+header('X-Content-Type-Options: nosniff');
+
+/**
+ * Resposta UNICA de "nao encontrado": mesmo status, mesmo corpo e mesmos
+ * cabecalhos para codigo malformado, inexistente e inativo (nunca cita o
+ * formato esperado nem o codigo do quiosque). Cada chamada conta UMA falha
+ * para o IP.
+ */
+$responder404 = static function (?LimiteFalhasIp $limite, string $ip): void {
+    if ($limite !== null) {
+        $limite->registrarFalha($ip);
+    }
+    http_response_code(404);
+    header('Content-Type: text/html; charset=UTF-8');
+    die('Pagina nao encontrada.');
+};
+
+// .env so para ler STORAGE_PATH (pasta do contador); falha aqui NAO e fatal: o
+// Bootstrap abaixo continua sendo quem responde 503 por .env ausente/malformado.
+try {
+    Dotenv::createImmutable(__DIR__ . '/../../')->safeLoad();
+} catch (\Throwable $e) {
+}
+$storageBase = rtrim((string) ($_ENV['STORAGE_PATH'] ?? ''), '/\\');
+$dirLimite = ($storageBase !== '' ? $storageBase : sys_get_temp_dir()) . DIRECTORY_SEPARATOR . 'totem_pagina_ratelimit';
+// Sal do nome do arquivo do contador: GESTAO_HASH_SALT se houver (a classe cai
+// numa constante fixa se faltar ou for curta; nunca quebra o quiosque).
+$salLimite = $_ENV['GESTAO_HASH_SALT'] ?? null;
+$limiteFalhas = new LimiteFalhasIp(
+    $dirLimite,
+    LimiteFalhasIp::LIMITE_FALHAS,
+    LimiteFalhasIp::JANELA_SEGUNDOS,
+    null,
+    is_string($salLimite) ? $salLimite : null
+);
+$ipCliente = IpCliente::obter($_SERVER);
+
+$segundos = $limiteFalhas->segundosBloqueado($ipCliente);
+if ($segundos !== null) {
+    http_response_code(429);
+    header('Retry-After: ' . $segundos);
+    header('Content-Type: text/html; charset=UTF-8');
+    die('Muitas tentativas. Tente novamente mais tarde.');
+}
+
+// Formato fixo ANTES de qualquer consulta ao banco (a collation atual ignora
+// maiusculas/minusculas, entao RECEPCAO-01 e recepcao-01 chegam ao mesmo totem).
+$codigoTotem = $_GET['totem'] ?? '';
+if (!is_string($codigoTotem) || preg_match('/\A[A-Za-z0-9-]{1,64}\z/D', $codigoTotem) !== 1) {
+    $responder404($limiteFalhas, $ipCliente);
+}
 
 // Bootstrap isolado: Util\Bootstrap::conectar() cobre .env ausente/malformado,
 // variavel obrigatoria de banco ausente/invalida e falha de conexao (ver
@@ -12,6 +76,7 @@ use App\Content\TermoLgpd;
 // fatal error cru (stack trace + caminho do servidor) ao navegador do totem.
 // Esta rota serve HTML, nao JSON -- resposta segue o mesmo estilo ja usado
 // abaixo para "totem nao configurado" (http_response_code + die).
+// Falha de infraestrutura (503) NAO conta como falha do IP.
 try {
     $pdo = Bootstrap::conectar(__DIR__ . '/../../');
 } catch (\Throwable $e) {
@@ -19,12 +84,16 @@ try {
     die('Servico temporariamente indisponivel. Tente novamente em instantes.');
 }
 
-$codigoTotem = $_GET['totem'] ?? '';
-$totem = (new TotemDao($pdo))->buscarPorCodigo($codigoTotem);
+try {
+    $totem = (new TotemDao($pdo))->buscarPorCodigo($codigoTotem);
+} catch (\Throwable $e) {
+    error_log('totem/index: falha_consulta_totem ' . get_class($e));
+    http_response_code(503);
+    die('Servico temporariamente indisponivel. Tente novamente em instantes.');
+}
 
 if (!$totem) {
-    http_response_code(404);
-    die('Totem nao configurado. Verifique o parametro ?totem= na URL (ex: ?totem=RECEPCAO-01).');
+    $responder404($limiteFalhas, $ipCliente);
 }
 
 // Fonte UNICA do texto/versao/hash do termo LGPD (App\Content\TermoLgpd) —

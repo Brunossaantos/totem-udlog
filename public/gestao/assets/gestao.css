@@ -1,0 +1,396 @@
+/*
+ * Gestão Totem - estilos (sem framework, sem fonte/CDN externa).
+ * Paleta UDLOG (a ÚNICA permitida):
+ *   #0179AD ação/links/foco   #3A3A3A texto   #878789 texto secundário (só >= 14px,
+ *   nunca em rótulo/cabeçalho/estado essencial)   #9BA0A5 ícones/info terciária
+ *   #B0B0B1 bordas/separadores   #FFFFFF fundo
+ * Estados (ativo/inativo, erro, sucesso, atenção, destrutivo) NUNCA dependem só de
+ * cor: usam texto, ícone, peso da fonte, espessura/estilo de borda e inversão
+ * fundo/texto com as cores acima. Nenhum estado depende de :hover.
+ *
+ * RISCO ACEITO (sem JS): a confirmação de "Desativar"/"Redefinir senha" (diálogo), o
+ * "Copiar" e o "Mostrar senha" dependem de JS. Sem JS as ações continuam funcionando
+ * (são formulários com CSRF, o servidor valida), só sem confirmação/atalhos; a senha
+ * temporária segue selecionável com um clique (user-select: all).
+ */
+:root {
+    --azul: #0179AD;
+    --texto: #3A3A3A;
+    --sec: #878789;
+    --terc: #9BA0A5;
+    --borda: #B0B0B1;
+    --branco: #FFFFFF;
+    --sidebar: 248px;
+    --fonte: -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { color: var(--texto); background: var(--branco); -webkit-text-size-adjust: 100%; }
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--fonte);
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--texto);
+    background: var(--branco);
+}
+
+input, select, textarea, button { color: inherit; font: inherit; }
+
+h1, h2, h3, p, ul, dl, dd { margin: 0; }
+ul { padding: 0; list-style: none; }
+
+a { color: var(--azul); text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------- foco (3px, sempre visível) ---------- */
+:focus { outline: none; }
+:focus-visible { outline: 3px solid var(--azul); outline-offset: 2px; }
+main:focus { outline: none; }
+/* sobre fundo #3A3A3A o anel azul mede ~2,35:1 (< 3:1, WCAG 1.4.11): ali o anel e branco (~11:1) */
+.gestao-flash--erro :focus-visible,
+.gestao-erro-caixa :focus-visible { outline-color: var(--branco); }
+
+/* ---------- utilitários ---------- */
+.gestao-sr {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.gestao-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+.gestao-icone {
+    flex: none;
+    width: 20px; height: 20px;
+    fill: none; stroke: currentColor; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round;
+}
+
+.gestao-pular {
+    position: absolute; left: 16px; top: -100px; z-index: 100;
+    padding: 12px 16px; border-radius: 6px;
+    background: var(--azul); color: var(--branco); font-weight: 600; text-decoration: none;
+    border: 2px solid var(--azul);
+}
+.gestao-pular:focus { top: 16px; outline: 3px solid var(--azul); outline-offset: 2px; }
+
+/* ---------- estrutura ---------- */
+.gestao-app {
+    display: grid;
+    grid-template-columns: var(--sidebar) minmax(0, 1fr);
+    min-height: 100vh;
+}
+.gestao--sem-menu .gestao-app,
+.gestao--publica .gestao-app { grid-template-columns: minmax(0, 1fr); }
+.gestao-app--recolhida { --sidebar: 64px; }
+
+.gestao-principal { min-width: 0; display: flex; flex-direction: column; }
+
+/* ---------- sidebar ---------- */
+.gestao-sidebar {
+    position: sticky; top: 0; height: 100vh;
+    display: flex; flex-direction: column; gap: 16px;
+    padding: 20px 12px 16px;
+    overflow-y: auto; overflow-x: hidden;
+    background: var(--branco);
+    border-right: 2px solid var(--borda);
+}
+
+.gestao-marca { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0 4px 12px; border-bottom: 2px solid var(--borda); min-height: 80px; }
+.gestao-marca__logo { display: block; width: 140px; height: auto; }
+/* MINI MARCA da sidebar recolhida: pictograma de totem (favicon.svg). Decisão de identidade
+   pendente com o usuário; para trocar o asset, mexa SÓ no <img class="gestao-marca__mini">
+   de layout_topo.php (src) e nesta regra (tamanho). */
+.gestao-marca__mini { display: none; width: 40px; height: 40px; }
+.gestao-marca__texto { font-size: 16px; font-weight: 600; color: var(--texto); }
+
+.gestao-menu { display: flex; flex-direction: column; gap: 4px; }
+.gestao-menu__link {
+    display: flex; align-items: center; gap: 12px;
+    min-height: 44px; padding: 0 12px;
+    border: 2px solid transparent; border-radius: 6px;
+    color: var(--texto); font-size: 15px; font-weight: 500; text-decoration: none;
+}
+.gestao-menu__link:hover { border-color: var(--azul); }
+.gestao-menu__item--atual .gestao-menu__link {
+    background: var(--azul); color: var(--branco); border-color: var(--azul); font-weight: 700;
+}
+
+.gestao-recolher {
+    margin-top: auto;
+    display: flex; align-items: center; gap: 12px;
+    min-height: 44px; padding: 0 12px; width: 100%;
+    background: var(--branco); color: var(--texto);
+    border: 2px solid var(--borda); border-radius: 6px;
+    font: inherit; font-size: 15px; font-weight: 500; text-align: left; cursor: pointer;
+}
+.gestao-recolher:hover { border-color: var(--azul); }
+.gestao-recolher .gestao-icone { transition: transform .15s ease; }
+
+/* sidebar recolhida: só ícones (o texto continua no DOM para leitores de tela) */
+.gestao-app--recolhida .gestao-sidebar { padding-left: 8px; padding-right: 8px; }
+.gestao-app--recolhida .gestao-marca { align-items: center; padding: 0 0 12px; }
+.gestao-app--recolhida .gestao-marca__logo { display: none; }
+.gestao-app--recolhida .gestao-marca__mini { display: block; }
+.gestao-app--recolhida .gestao-marca__texto,
+.gestao-app--recolhida .gestao-menu__rotulo,
+.gestao-app--recolhida .gestao-recolher__rotulo {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.gestao-app--recolhida .gestao-menu__link,
+.gestao-app--recolhida .gestao-recolher { justify-content: center; padding: 0; }
+.gestao-app--recolhida .gestao-recolher .gestao-icone { transform: rotate(180deg); }
+
+/* ---------- topo ---------- */
+.gestao-topo {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px max(32px, calc((100% - 1600px) / 2));
+    border-bottom: 2px solid var(--borda);
+    min-height: 80px;
+}
+.gestao-topo__logo { display: block; width: 112px; height: auto; }
+.gestao-titulo { font-size: 24px; font-weight: 600; line-height: 1.25; margin-right: auto; }
+.gestao-usuario { display: flex; align-items: center; gap: 16px; }
+.gestao-usuario__dados { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.3; }
+.gestao-usuario__nome { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+.gestao-usuario__perfil { font-size: 14px; color: var(--texto); }
+.gestao-form-sair { margin: 0; }
+
+/* ---------- conteúdo ---------- */
+.gestao-conteudo {
+    flex: 1;
+    width: 100%;
+    padding: 24px max(32px, calc((100% - 1600px) / 2)) 48px;
+    display: flex; flex-direction: column; gap: 24px;
+    align-items: flex-start;
+}
+.gestao-conteudo > * { max-width: 100%; }
+
+/* ---------- botões (sempre com cor sólida visível) ---------- */
+.gestao-botao {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 44px; padding: 0 20px;
+    border: 2px solid var(--azul); border-radius: 6px;
+    font: inherit; font-size: 15px; font-weight: 600; line-height: 1.2; text-decoration: none;
+    cursor: pointer; white-space: nowrap;
+}
+.gestao-botao--primario { background: var(--azul); color: var(--branco); }
+.gestao-botao--secundario { background: var(--branco); color: var(--azul); }
+.gestao-botao--destrutivo { background: var(--branco); color: var(--texto); border: 3px solid var(--texto); }
+.gestao-botao--destrutivo-cheio { background: var(--texto); color: var(--branco); border: 3px solid var(--texto); }
+.gestao-botao--cheio { width: 100%; }
+.gestao-botao--pequeno { min-height: 44px; padding: 0 12px; font-size: 14px; }
+.gestao-botao .gestao-icone { width: 18px; height: 18px; }
+.gestao-botao:hover { box-shadow: inset 0 0 0 2px var(--branco); }
+.gestao-botao--secundario:hover, .gestao-botao--destrutivo:hover { box-shadow: inset 0 0 0 2px var(--azul); }
+.gestao-botao:disabled,
+.gestao-botao[aria-busy="true"],
+form[aria-busy="true"] .gestao-botao {
+    background: var(--branco); color: var(--texto); border: 2px dashed var(--texto);
+    cursor: progress; font-weight: 500;
+}
+
+.gestao-barra-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+
+/* ---------- formulários ---------- */
+.gestao-form { display: grid; gap: 20px; width: 100%; max-width: 480px; }
+.gestao-form-linha { display: contents; }
+.gestao-campo { display: flex; flex-direction: column; gap: 6px; }
+.gestao-campo__rotulo { font-size: 15px; font-weight: 600; }
+.gestao-campo__entrada {
+    width: 100%; min-height: 44px; padding: 0 12px;
+    background: var(--branco); color: var(--texto);
+    border: 2px solid var(--sec); border-radius: 6px;
+    font: inherit; font-size: 16px;
+}
+.gestao-campo__entrada:focus-visible { outline: 3px solid var(--azul); outline-offset: 1px; border-color: var(--azul); }
+.gestao-campo__entrada[readonly], .gestao-campo__entrada:disabled { border-style: dashed; }
+.gestao-campo__ajuda { font-size: 14px; color: var(--texto); }
+.gestao-campo--erro .gestao-campo__entrada { border: 3px solid var(--texto); }
+.gestao-campo__erro {
+    display: flex; align-items: flex-start; gap: 8px;
+    font-size: 14px; font-weight: 700; color: var(--texto);
+}
+.gestao-campo__erro .gestao-icone { margin-top: 1px; }
+
+.gestao-ajuda { display: flex; align-items: flex-start; gap: 10px; font-size: 15px; max-width: 480px; }
+.gestao-ajuda .gestao-icone { margin-top: 2px; color: var(--azul); }
+
+/* mostrar senha (inserido por JS) */
+/* a área de clique é o rótulo inteiro: >= 44px de altura */
+.gestao-mostrar { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding-right: 12px; font-size: 14px; cursor: pointer; width: fit-content; }
+.gestao-mostrar input { flex: none; width: 24px; height: 24px; margin: 0; accent-color: var(--azul); }
+
+/* requisitos da senha */
+/* estado inicial NEUTRO (instrução); só depois de digitar vira atendido/não atendido */
+.gestao-requisitos__titulo { font-size: 14px; font-weight: 600; margin-top: 4px; }
+.gestao-requisitos { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.gestao-requisitos__item { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
+.gestao-requisitos__item .gestao-icone { width: 18px; height: 18px; color: var(--terc); }
+.gestao-requisitos__estado { font-weight: 700; }
+.gestao-requisitos__item--ok { font-weight: 700; }
+.gestao-requisitos__item--ok .gestao-icone,
+.gestao-requisitos__item--ok .gestao-requisitos__estado { color: var(--azul); }
+.gestao-requisitos__item--falha { font-weight: 500; font-style: italic; }
+.gestao-requisitos__item--falha .gestao-icone { color: var(--texto); }
+
+/* ---------- avisos, erros e flash ---------- */
+.gestao-aviso-caixa,
+.gestao-erro-caixa {
+    display: flex; align-items: flex-start; gap: 12px;
+    width: 100%; max-width: 720px; padding: 14px 16px;
+    border: 3px solid var(--texto); border-radius: 8px;
+    background: var(--branco); color: var(--texto);
+}
+.gestao-erro-caixa { background: var(--texto); color: var(--branco); }
+.gestao-aviso-caixa .gestao-icone, .gestao-erro-caixa .gestao-icone { margin-top: 2px; width: 22px; height: 22px; }
+.gestao-aviso, .gestao-erro-form { font-weight: 700; font-size: 15px; }
+
+.gestao-flash {
+    display: flex; align-items: flex-start; gap: 10px;
+    width: 100%; max-width: 720px; padding: 12px 16px;
+    border-radius: 8px; font-size: 15px;
+}
+.gestao-flash .gestao-icone { margin-top: 2px; }
+.gestao-flash__tipo { font-weight: 700; }
+.gestao-flash__texto { flex: 1; }
+/* sucesso e info NÃO somem sozinhos (WCAG 2.2.1): ficam até "Dispensar"; sem deslocar o layout */
+.gestao-flash--sucesso { border: 2px solid var(--azul); background: var(--branco); color: var(--texto); }
+.gestao-flash--sucesso .gestao-icone { color: var(--azul); }
+/* info = neutro: ícone + rótulo "Informação:" + borda pontilhada com barra lateral grossa (nunca só cor) */
+.gestao-flash--info { border: 2px dashed var(--borda); border-left: 6px solid var(--azul); background: var(--branco); color: var(--texto); }
+.gestao-flash--info .gestao-icone { color: var(--azul); }
+.gestao-flash--erro { border: 3px solid var(--texto); background: var(--texto); color: var(--branco); font-weight: 600; }
+.gestao-flash__fechar {
+    flex: none; display: inline-flex; align-items: center; gap: 6px;
+    min-height: 44px; padding: 0 12px;
+    background: var(--branco); color: var(--texto);
+    border: 2px solid var(--branco); border-radius: 6px;
+    font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.gestao-flash__fechar .gestao-icone { width: 16px; height: 16px; }
+.gestao-flash--sucesso .gestao-flash__fechar,
+.gestao-flash--info .gestao-flash__fechar { border-color: var(--azul); }
+
+/* ---------- cartões e dados ---------- */
+.gestao-colunas { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; width: 100%; }
+.gestao-colunas > .gestao-cartao { flex: 1 1 380px; }
+.gestao-cartao {
+    width: 100%; max-width: 720px; padding: 24px;
+    border: 2px solid var(--borda); border-radius: 8px;
+    display: flex; flex-direction: column; gap: 20px; align-items: flex-start;
+}
+.gestao-cartao__titulo { font-size: 20px; font-weight: 600; }
+/* troca obrigatória: cartão único, em destaque (borda azul grossa) */
+.gestao-cartao--foco { border: 3px solid var(--azul); }
+.gestao-dados { display: grid; grid-template-columns: max-content 1fr; gap: 10px 24px; width: 100%; }
+.gestao-dados dt { font-weight: 600; }
+.gestao-dados dd { overflow-wrap: anywhere; }
+
+/* senha temporária (exibida uma vez) */
+.gestao-senha-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.gestao-senha-temporaria {
+    display: inline-block; padding: 12px 16px;
+    border: 3px solid var(--texto); border-radius: 6px;
+    background: var(--branco); color: var(--texto);
+    font-family: Consolas, "Courier New", monospace; font-size: 22px; font-weight: 700; letter-spacing: .06em;
+    user-select: all; overflow-wrap: anywhere;
+}
+.gestao-copiar-status { font-size: 14px; font-weight: 700; }
+.gestao-saida-senha { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.gestao-saida-senha__aviso { font-weight: 700; font-size: 15px; }
+
+/* ---------- tabela ---------- */
+.gestao-tabela-wrap { width: 100%; overflow-x: auto; border: 2px solid var(--borda); border-radius: 8px; }
+.gestao-tabela { width: 100%; border-collapse: collapse; font-size: 14px; }
+.gestao-tabela__legenda { padding: 12px 16px; text-align: left; font-size: 14px; font-weight: 600; color: var(--texto); border-bottom: 2px solid var(--borda); }
+.gestao-tabela th {
+    padding: 10px 10px; min-height: 44px; text-align: left;
+    font-size: 14px; font-weight: 700; color: var(--texto);
+    border-bottom: 3px solid var(--texto); white-space: nowrap;
+}
+.gestao-tabela td { padding: 4px 10px; min-height: 44px; height: 52px; vertical-align: middle; border-bottom: 1px solid var(--borda); }
+.gestao-tabela tbody tr:last-child td { border-bottom: 0; }
+.gestao-tabela__linha--inativa .col-nome,
+.gestao-tabela__linha--inativa .col-login { font-style: italic; }
+.col-nome { font-weight: 600; overflow-wrap: anywhere; min-width: 160px; }
+.col-login { white-space: nowrap; }
+.col-ultimo-acesso { min-width: 80px; }
+/* ações: alvos de 44px, >= 12px entre vizinhas; a ação DESTRUTIVA fica em grupo próprio, SEMPRE o último botão,
+   com 24px de afastamento e SEM separador (nem vertical nem horizontal): se a linha quebrar, ela só desce para a 2ª linha 
+   (a diferenciação é por espaço, borda grossa #3A3A3A, ícone de alerta e rótulo) */
+.col-acoes { min-width: 280px; }
+@media (min-width: 1280px) { .col-acoes { min-width: 400px; } }
+.gestao-acoes-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: flex-start; padding: 0; }
+.gestao-acoes-grupo { display: contents; }
+.gestao-acoes-grupo--destrutivo .gestao-botao { margin-inline-start: 12px; } /* 12px do gap + 12px = 24px de afastamento */
+.gestao-acoes-linha .gestao-form-linha { display: contents; }
+.gestao-acoes-dica { font-size: 14px; color: var(--texto); }
+
+.gestao-situacao { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; }
+.gestao-situacao--ativo { color: var(--azul); }
+.gestao-situacao--inativo { color: var(--texto); font-weight: 500; font-style: italic; }
+.gestao-situacao__nota { display: block; font-size: 14px; color: var(--texto); }
+.gestao-situacao__bloqueio { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 14px; font-weight: 700; color: var(--texto); }
+
+/* ---------- estados simples ---------- */
+.gestao-estado { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 32px 16px; font-size: 16px; }
+.gestao-estado .gestao-icone { width: 28px; height: 28px; color: var(--terc); }
+.gestao-estado--erro { border: 3px solid var(--texto); border-radius: 8px; font-weight: 700; }
+.gestao-estado--erro .gestao-icone { color: var(--texto); }
+.gestao-estado--carregando { font-weight: 600; }
+.gestao-estado--carregando::after { content: "..."; }
+
+/* ---------- login ---------- */
+.gestao--publica { display: block; }
+.gestao--publica .gestao-conteudo { align-items: center; justify-content: center; min-height: 100vh; padding: 32px 16px; }
+.gestao-login {
+    width: 400px; max-width: 100%; padding: 32px;
+    border: 2px solid var(--borda); border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center; gap: 20px;
+}
+.gestao-login__logo { display: block; width: 180px; height: auto; }
+.gestao-login__titulo { font-size: 24px; font-weight: 600; text-align: center; }
+.gestao-login .gestao-form { max-width: none; }
+.gestao-login .gestao-erro-caixa { max-width: none; padding: 12px 14px; }
+
+/* ---------- páginas de erro (403/404/sessão expirada) ---------- */
+.gestao--erro { display: grid; place-items: center; min-height: 100vh; padding: 24px; }
+.gestao-erro {
+    width: 480px; max-width: 100%; padding: 32px;
+    border: 3px solid var(--texto); border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center;
+}
+.gestao-erro__logo { display: block; width: 160px; height: auto; }
+.gestao-erro__titulo { font-size: 24px; font-weight: 700; }
+.gestao-erro__texto { font-size: 16px; }
+.gestao-erro .gestao-botao { margin-top: 8px; }
+
+/* ---------- diálogo de confirmação ---------- */
+.gestao-dialogo {
+    width: 460px; max-width: calc(100vw - 32px); padding: 0;
+    border: 2px solid var(--borda); border-radius: 8px;
+    background: var(--branco); color: var(--texto);
+}
+.gestao-dialogo--destrutivo { border: 3px solid var(--texto); }
+.gestao-dialogo::backdrop { background: rgba(58, 58, 58, .72); }
+.gestao-dialogo__corpo { display: flex; flex-direction: column; gap: 14px; padding: 24px; }
+.gestao-dialogo__titulo { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; }
+.gestao-dialogo__alvo { font-weight: 700; overflow-wrap: anywhere; }
+.gestao-dialogo__acoes { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 8px; }
+
+/* ---------- movimento reduzido ---------- */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+
+/* ---------- telas estreitas (fallback; uso alvo é desktop >= 1366) ---------- */
+@media (max-width: 1099px) {
+    .gestao-topo, .gestao-conteudo { padding-left: 20px; padding-right: 20px; }
+}
+@media (max-width: 720px) {
+    .gestao-topo { flex-wrap: wrap; }
+    .gestao-dados { grid-template-columns: 1fr; gap: 4px; }
+    .gestao-dados dd { margin-bottom: 10px; }
+}

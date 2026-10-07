@@ -108,6 +108,11 @@ if (!function_exists('qaDbCriar')) {
         // Migration 019 (demanda remocao-fila-reenvio-talent, 2026-10-05) --
         // DROP TABLE IF EXISTS tb_fila_envio (no-op: schema.sql ja nao cria).
         qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/019_drop_tb_fila_envio.sql');
+        // Migrations 020 e 021 (demanda gestao-totem, F1, 2026-10-06) -- usuarios,
+        // sessoes, tentativas de login e auditoria da Gestao Totem (CREATE TABLE IF
+        // NOT EXISTS: no-op, pois schema.sql ja cria).
+        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/020_gestao_usuario_sessao.sql');
+        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/021_gestao_auditoria.sql');
 
         return [$admin, $nomeBanco];
     }
