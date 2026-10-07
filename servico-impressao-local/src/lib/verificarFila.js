@@ -6,7 +6,18 @@
  * Medicao empirica (EPSON TM-T88VII Receipt, porta TMUSB001, driver
  * Receipt6): com papel o job aparece na fila e SAI em <1 s; sem papel fica
  * "Printing, Retained" com 0 paginas por 36+ s. Os campos de estado da
- * impressora nao distinguem os dois casos. So vale para este driver/porta.
+ * impressora nao distinguem os dois casos nesse driver.
+ *
+ * Mini PC de producao (EPSON TM-T88V, driver "EPSON TM-T88V Receipt5",
+ * porta ESDPRT001): o Windows registra o DocumentName com o CAMINHO COMPLETO
+ * (ex.: C:\Users\...\Temp\impressao-local-udlog-<uuid>.pdf), enquanto no
+ * Receipt6 vem so o nome do arquivo. Por isso a comparacao e feita pelo NOME
+ * BASE (ultimo segmento apos \ ou /), com igualdade exata contra o nome do
+ * arquivo temporario (UUID gerado internamente) -- sem includes/endsWith.
+ * Sem papel o job fica "Normal" na fila (>24 s) e a impressora reporta
+ * PrinterState=144 (PAPER_OUT 0x10 | OFFLINE 0x80); com papel o job sai em
+ * ~3 s. O PrinterState NAO e usado como sinal nesta versao: a deteccao e so
+ * pela permanencia do job na fila.
  *
  * Seguranca: os comandos PowerShell abaixo sao CONSTANTES. Nome da
  * impressora (allowlist/config), nome do documento (arquivo temporario com
@@ -23,13 +34,13 @@ const SCRIPT_LISTAR = [
   'ConvertTo-Json -Compress -InputObject $j',
 ].join(' ');
 
-// Remove SOMENTE o job de Id informado, e so se o nome do documento for
-// exatamente o arquivo temporario deste servico.
+// Remove SOMENTE o job de Id informado, e so se o NOME BASE do documento
+// (GetFileName aceita \ e /) for exatamente o arquivo temporario deste servico.
 const SCRIPT_REMOVER = [
   "$ErrorActionPreference='Stop';",
   '$id=[int]$env:UDLOG_JOB_ID;',
   '$j=Get-PrintJob -PrinterName $env:UDLOG_PRINTER_NAME -ID $id;',
-  'if($j.DocumentName -ne $env:UDLOG_DOC_NAME){ConvertTo-Json -Compress -InputObject @{removido=$false}; exit 0};',
+  'if([System.IO.Path]::GetFileName([string]$j.DocumentName) -ne $env:UDLOG_DOC_NAME){ConvertTo-Json -Compress -InputObject @{removido=$false}; exit 0};',
   'Remove-PrintJob -PrinterName $env:UDLOG_PRINTER_NAME -ID $id;',
   'ConvertTo-Json -Compress -InputObject @{removido=$true}',
 ].join(' ');
@@ -38,6 +49,12 @@ const TIMEOUT_POWERSHELL_MS = 5000;
 const INTERVALO_PADRAO_MS = 500;
 const JANELA_VISAO_PADRAO_MS = 3000;
 const CONFIRMACAO_TENTATIVAS = 3;
+
+/** Ultimo segmento do caminho (separadores \ e /). Sem separador, devolve o proprio texto. */
+function nomeBase(documentName) {
+  const partes = String(documentName).split(/[\\/]/);
+  return partes[partes.length - 1];
+}
 
 function dormirPadrao(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -143,7 +160,7 @@ async function verificarFila(p) {
     }
 
     const decorrido = agora() - inicio;
-    const achado = jobs.find((j) => j.nome === nomeDocumento);
+    const achado = jobs.find((j) => nomeBase(j.nome) === nomeDocumento);
 
     if (achado) {
       jobVisto = achado;
@@ -168,7 +185,7 @@ async function removerSemPapel(execFileImpl, impressora, nomeDocumento, job, dor
     if (removeu) {
       for (let i = 0; i < CONFIRMACAO_TENTATIVAS; i += 1) {
         const jobs = await listarJobs(execFileImpl, impressora);
-        if (!jobs.some((j) => j.nome === nomeDocumento)) {
+        if (!jobs.some((j) => nomeBase(j.nome) === nomeDocumento)) {
           jobRemovido = true;
           break;
         }
@@ -184,4 +201,4 @@ async function removerSemPapel(execFileImpl, impressora, nomeDocumento, job, dor
   return { resultado: 'sem_papel', jobRemovido };
 }
 
-module.exports = { verificarFila, SCRIPT_LISTAR, SCRIPT_REMOVER };
+module.exports = { verificarFila, nomeBase, SCRIPT_LISTAR, SCRIPT_REMOVER };

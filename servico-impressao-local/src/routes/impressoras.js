@@ -15,7 +15,7 @@
  */
 
 const express = require('express');
-const { getPrinters } = require('pdf-to-printer');
+const listador = require('../lib/listarImpressoras');
 const config = require('../config');
 const { autenticar } = require('../middleware/auth');
 
@@ -25,17 +25,20 @@ const IMPRESSORAS_PERMITIDAS = new Set(config.impressorasPermitidas);
 
 router.get('/impressoras', autenticar, async (req, res) => {
   try {
-    const impressoras = await getPrinters();
+    // Listagem propria (PowerShell + JSON): o getPrinters() do pdf-to-printer
+    // quebra com impressoras de lista de papeis longa. Ver lib/listarImpressoras.js.
+    const impressoras = await listador.listarImpressoras();
     res.status(200).json({
       impressoras: impressoras
         .filter((impressora) => IMPRESSORAS_PERMITIDAS.has(impressora.name))
         .map((impressora) => ({
           nome: impressora.name,
-          padrao: Boolean(impressora.isDefault ?? impressora.default ?? false),
+          padrao: impressora.isDefault === true,
         })),
     });
   } catch (erro) {
-    console.error('impressoras: falha ao listar impressoras:', erro);
+    // Sem o objeto de erro completo (evita vazar dados sensiveis no log).
+    console.error(`impressoras: falha ao listar impressoras (${erro && erro.name}: ${erro && erro.message}).`);
     res.status(500).json({ erro: 'Nao foi possivel listar as impressoras.' });
   }
 });

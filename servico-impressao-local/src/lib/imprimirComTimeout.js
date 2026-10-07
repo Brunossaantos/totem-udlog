@@ -25,9 +25,9 @@
  * atualizacao de `pdf-to-printer` mudar o nome do executavel empacotado
  * (hoje `SumatraPDF-3.4.6-32.exe`) ou os argumentos de linha de comando
  * que ela gera, este modulo precisa ser atualizado em conjunto -- ele nao
- * chama mais `pdf-to-printer`'s `print()` para a impressao em si (so
- * continua usando `getPrinters()` da biblioteca, em impressoras.js, que
- * nao foi alterado).
+ * chama mais `pdf-to-printer`'s `print()` para a impressao em si. A
+ * listagem de impressoras (impressoras.js) usa src/lib/listarImpressoras.js,
+ * nao mais `getPrinters()` da biblioteca.
  */
 
 const fs = require('fs');

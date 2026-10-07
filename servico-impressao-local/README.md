@@ -121,9 +121,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
      - **Producao (documentado, NAO ativado ainda — so no deploy final no
        mini PC)**:
        ```json
-       "origensPermitidas": ["https://udlog.online"]
+       "origensPermitidas": ["https://totem.udlog.online"]
        ```
-       Repare que e `https://udlog.online` (com HTTPS) — `http://udlog.online`
+       Repare que e `https://totem.udlog.online` (com HTTPS) — `http://totem.udlog.online`
        (sem HTTPS) **nao** e a origem autorizada e nao deve ser incluida.
      - **Nunca** deixar dev e producao juntas na mesma lista "por
        garantia" — cada ambiente usa exclusivamente a origem que
@@ -135,9 +135,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
        chamada de navegador. Voltar a lista para `[]` e o rollback seguro
        caso a origem ativa cause algum problema.
      - No deploy final em producao, depois de ativar
-       `["https://udlog.online"]` no mini PC, reconfirmar visualmente na
+       `["https://totem.udlog.online"]` no mini PC, reconfirmar visualmente na
        barra de endereco do navegador do totem que a origem realmente
-       servida e exatamente `https://udlog.online`, sem path, antes de
+       servida e exatamente `https://totem.udlog.online`, sem path, antes de
        considerar o CORS/PNA validado em producao.
    - `idempotencia.ttlMs` / `idempotencia.maxEntries`: controle de
      deduplicacao de impressao por identificador de job (padrao sugerido
@@ -294,6 +294,24 @@ este servico.
 
 Sem o cabecalho `Authorization` correto, a resposta deve ser `401`.
 
+**Nota — como a listagem e feita.** `GET /impressoras` usa um listador
+proprio (`src/lib/listarImpressoras.js`): PowerShell
+(`Get-CimInstance Win32_Printer`) com saida **JSON** em UTF-8, timeout de
+10 s. O `getPrinters()` do `pdf-to-printer` (v5.6.x) foi abandonado para
+isso porque le texto formatado e quebra com
+`TypeError: Cannot read properties of undefined (reading 'match')` quando
+alguma impressora instalada (ex.: virtual) tem lista longa de papeis — o
+PowerShell quebra o valor em linhas sem `:` e a listagem inteira falha
+(HTTP 500). O `pdf-to-printer` continua sendo usado so para imprimir.
+
+**Arquivos a copiar para o mini PC** (dentro de `servico-impressao-local/`),
+depois reiniciar o servico (encerrar o `node` e disparar a tarefa de logon):
+- `src/lib/listarImpressoras.js` (novo)
+- `src/routes/impressoras.js` (alterado)
+
+(`README.md`, `package.json` e `tests/listar-impressoras.test.js` sao so
+documentacao/testes; opcionais no mini PC.)
+
 ### 4.4. Impressao (com autorizacao explicita antes de testar em impressora real)
 
 ```
@@ -316,9 +334,25 @@ compartilhado).
   job que continua na fila ate `semPapelTimeoutMs` (padrao 10000 ms, aceita 3000-60000) = o servico
   remove so esse job (`Remove-PrintJob` por Id) e responde HTTP 409 `{"status":"sem_papel"}` (nao
   entra na idempotencia). Se a consulta falhar ou o job nunca aparecer em ~3 s, responde `impresso`.
-  Vale so para a EPSON TM-T88VII (driver Receipt6, porta TMUSB001); desligar com
-  `"deteccaoSemPapel": false`. Limitacao: job lento (>10 s) pode ser tratado como sem papel;
-  ajustar `semPapelTimeoutMs`. Chaves opcionais, invalidas = o servico nao inicia.
+  Desligar com `"deteccaoSemPapel": false`. Limitacao: job lento (>10 s) pode ser tratado como
+  sem papel; ajustar `semPapelTimeoutMs`. Chaves opcionais, invalidas = o servico nao inicia.
+  - Driver `Receipt6` (EPSON TM-T88VII, porta TMUSB001, PC de dev): `DocumentName` do job e so o
+    nome do arquivo temporario; sem papel o job fica `Printing, Retained`.
+  - Driver `Receipt5` (EPSON TM-T88V, `EPSON TM-T88V Receipt5`, porta ESDPRT001, mini PC de
+    producao): o Windows registra o `DocumentName` com o CAMINHO COMPLETO
+    (`C:\Users\...\AppData\Local\Temp\impressao-local-udlog-<uuid>.pdf`). O servico compara pelo
+    NOME BASE (ultimo segmento apos `\` ou `/`) com igualdade exata contra o arquivo temporario
+    (UUID interno); a remocao (`Remove-PrintJob`) tambem so ocorre se o nome base conferir.
+    Antes dessa correcao o job nunca era "visto" e o servico respondia `impresso`
+    (`job_nao_visto`) mesmo sem papel.
+  - Medicao no mini PC (TM-T88V Receipt5). O `PrinterState` e so referencia: NAO e usado como
+    sinal; a deteccao e pela permanencia do job na fila.
+
+    | Situacao | PrinterState | PrinterStatus | Job na fila |
+    |---|---|---|---|
+    | Com papel, parada | 0 | 3 | nenhum |
+    | Imprimindo | 1024 | - | sai em ~3 s |
+    | Sem papel | 144 (PAPER_OUT 0x10 + OFFLINE 0x80) | 2 | `Normal`, retido (>24 s) |
 - O script `scripts/teste-escpos-raw.ps1` e descartavel/diagnostico (envio ESC/POS RAW de reguas),
   nao e usado em producao nem faz parte do fluxo de impressao do servico.
 - Repetir a mesma chamada com o mesmo `identificador` deve retornar
@@ -353,7 +387,7 @@ teste/dev, nunca em cima de uma impressora fisica ou virtual real.
 
 `origensPermitidas` em `config/config.json` (ver secao 2.5) hoje esta
 ativa em desenvolvimento com `["http://localhost:8080"]`. A origem de
-producao `https://udlog.online` esta documentada mas **nao** ativada
+producao `https://totem.udlog.online` esta documentada mas **nao** ativada
 neste arquivo — sera ligada somente no deploy final no mini PC, com
 reconfirmacao da origem na barra do navegador depois do deploy (ver
 secao 2.5). Enquanto `origensPermitidas` estiver vazio (`[]`), qualquer
@@ -401,7 +435,7 @@ pessoa.
 
 ## 6. Pendencias conhecidas
 
-- **Ativacao de `origensPermitidas` para producao** (`https://udlog.online`)
+- **Ativacao de `origensPermitidas` para producao** (`https://totem.udlog.online`)
   em `config/config.json` — origem ja confirmada e documentada na secao
   2.5, mas so sera ativada no arquivo real durante o deploy final no mini
   PC (nao antes disso).
