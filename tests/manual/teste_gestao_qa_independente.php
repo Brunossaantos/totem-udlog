@@ -1065,7 +1065,21 @@ try {
         $novo2 = $T(['totem' => 'quiosque-qa-01'], '198.19.6.2', ['host' => 'totem.exemplo.test']);
         $velho2 = $cgiHead('quiosque-qa-01', '198.19.6.2');
         afirmar('QUIOSQUE: idem com o codigo em minusculas (collation)', $novo2['corpo'] === $velho2['corpo'] && $novo2['corpo'] !== '');
-        afirmar('QUIOSQUE: o HEAD nao tinha os 4 cabecalhos (a diferenca de cabecalhos e so aditiva) e nenhum Content-Security-Policy foi adicionado', !str_contains(strtolower($velho['cab']), 'referrer-policy') && gtCabecalho($novo, 'content-security-policy') === null);
+        // F2 (2026-10-07): o HEAD (785ad6f) JA contem o endurecimento da F0 (os 4 cabecalhos), entao a prova deixou de ser "a diferenca e so aditiva" e passou a ser mais forte: os cabecalhos do working tree sao IDENTICOS aos do HEAD e nenhum Content-Security-Policy existe.
+        $cabNorm = static function (string $bloco): array {
+            $linhas = [];
+            foreach (preg_split("/\r?\n/", $bloco) as $l) {
+                $l = trim($l);
+                if ($l === '' || preg_match('/^(date|content-length|x-powered-by):/i', $l) === 1) {
+                    continue;
+                }
+                $linhas[] = strtolower($l);
+            }
+            sort($linhas);
+
+            return $linhas;
+        };
+        afirmar('QUIOSQUE: os cabecalhos (os 4 da F0) do working tree sao IDENTICOS aos do HEAD e nenhum Content-Security-Policy foi adicionado', str_contains(strtolower($velho['cab']), 'referrer-policy') && $cabNorm($velho['cab']) === $cabNorm((string) (preg_split("/\r?\n\r?\n/", $novo['cru'], 2)[0] ?? '')) && gtCabecalho($novo, 'content-security-policy') === null);
     } else {
         afirmar('QUIOSQUE vs HEAD: QA_HEAD_TREE nao informado (PULADO - nao conta como aprovado)', false);
     }

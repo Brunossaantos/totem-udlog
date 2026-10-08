@@ -206,7 +206,8 @@ try {
     afirmar('troca obrigatoria: conta.php mostra o aviso e NAO mostra menu lateral', str_contains($pContaPend['corpo'], 'id="aviso-troca-obrigatoria"') && !str_contains($pContaPend['corpo'], 'gestao-sidebar'));
     $pAdminMenu = $get('usuarios.php', $lAdmin);
     $pUsuMenu = $get('conta.php', $lUsu);
-    afirmar('menu: admin ve Usuarios e Minha conta, e itens ainda inexistentes ficam ocultos', str_contains($pAdminMenu['corpo'], 'href="/gestao/usuarios.php"') && str_contains($pAdminMenu['corpo'], 'href="/gestao/conta.php"') && !str_contains($pAdminMenu['corpo'], '/gestao/totens.php') && !str_contains($pAdminMenu['corpo'], '/gestao/logs.php'));
+    afirmar('menu: admin ve Totens (F2), Usuarios e Minha conta, e itens ainda inexistentes ficam ocultos', str_contains($pAdminMenu['corpo'], 'href="/gestao/totens.php"') && str_contains($pAdminMenu['corpo'], 'href="/gestao/usuarios.php"') && str_contains($pAdminMenu['corpo'], 'href="/gestao/conta.php"') && !str_contains($pAdminMenu['corpo'], '/gestao/logs.php') && !str_contains($pAdminMenu['corpo'], '/gestao/painel.php'));
+    afirmar('menu: usuario NAO ve o item Totens (nem link para ele)', !str_contains($pUsuMenu['corpo'], '/gestao/totens.php'));
     afirmar('menu: usuario NAO ve o item Usuarios (nem link para ele)', !str_contains($pUsuMenu['corpo'], '/gestao/usuarios.php') && str_contains($pUsuMenu['corpo'], 'href="/gestao/conta.php"'));
     afirmar('403: pagina de erro sem inline e sem detalhes tecnicos', semInline($get('usuarios.php', $lUsu)['corpo']) && !str_contains($get('usuarios.php', $lUsu)['corpo'], 'ana.admin'));
     foreach ([['usuarios.php', $lAdmin], ['usuario-form.php', $lAdmin], ['conta.php', $lAdmin], ['conta.php', $lUsu], ['conta.php', $lUsuPend]] as [$pag, $l]) {

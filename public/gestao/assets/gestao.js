@@ -182,6 +182,39 @@
         texto.id = 'gestao-dialogo-texto';
         var alvo = criar('p', 'gestao-dialogo__alvo');
         var acoes = criar('div', 'gestao-dialogo__acoes');
+        // confirmação extra (só quando o formulário da ação traz o campo): digitar o nome do totem
+        var blocoNome = criar('div', 'gestao-campo gestao-dialogo__extra');
+        blocoNome.hidden = true;
+        var rotuloNome = criar('label', 'gestao-campo__rotulo', 'Para confirmar, digite o nome do totem');
+        rotuloNome.setAttribute('for', 'gestao-dialogo-nome');
+        var entradaNome = document.createElement('input');
+        entradaNome.type = 'text';
+        entradaNome.id = 'gestao-dialogo-nome';
+        entradaNome.className = 'gestao-campo__entrada';
+        entradaNome.maxLength = 100;
+        entradaNome.setAttribute('autocomplete', 'off');
+        entradaNome.setAttribute('autocapitalize', 'characters');
+        entradaNome.setAttribute('spellcheck', 'false');
+        entradaNome.setAttribute('aria-describedby', 'gestao-dialogo-nome-estado');
+        var estadoNome = criar('p', 'gestao-dialogo__estado');
+        estadoNome.id = 'gestao-dialogo-nome-estado';
+        estadoNome.setAttribute('role', 'status');
+        estadoNome.setAttribute('aria-live', 'polite');
+        blocoNome.appendChild(rotuloNome);
+        blocoNome.appendChild(entradaNome);
+        blocoNome.appendChild(estadoNome);
+
+        // confirmação extra: marcar que há atendimento em andamento e que desativa mesmo assim
+        var rotuloCaixa = criar('label', 'gestao-dialogo__caixa');
+        rotuloCaixa.hidden = true;
+        rotuloCaixa.setAttribute('for', 'gestao-dialogo-atendimento');
+        var entradaCaixa = document.createElement('input');
+        entradaCaixa.type = 'checkbox';
+        entradaCaixa.id = 'gestao-dialogo-atendimento';
+        var textoCaixa = criar('span', 'gestao-dialogo__caixa-texto');
+        rotuloCaixa.appendChild(entradaCaixa);
+        rotuloCaixa.appendChild(textoCaixa);
+
         var cancelar = criar('button', 'gestao-botao gestao-botao--secundario', 'Cancelar');
         cancelar.type = 'button';
         cancelar.id = 'gestao-dialogo-cancelar';
@@ -193,23 +226,80 @@
         corpo.appendChild(titulo);
         corpo.appendChild(texto);
         corpo.appendChild(alvo);
+        corpo.appendChild(blocoNome);
+        corpo.appendChild(rotuloCaixa);
         corpo.appendChild(acoes);
         d.appendChild(corpo);
         document.body.appendChild(d);
 
-        // foco preso entre os dois botões (Tab / Shift+Tab)
+        var obj = {
+            el: d, titulo: titulo, texto: texto, alvo: alvo, cancelar: cancelar, confirmar: confirmar, origem: null,
+            blocoNome: blocoNome, entradaNome: entradaNome, estadoNome: estadoNome, nomeEsperado: null,
+            rotuloCaixa: rotuloCaixa, entradaCaixa: entradaCaixa, textoCaixa: textoCaixa
+        };
+
+        // foco preso entre os controles visíveis e habilitados (Tab / Shift+Tab)
         d.addEventListener('keydown', function (e) {
             if (e.key !== 'Tab') { return; }
+            var lista = [entradaNome, entradaCaixa, cancelar, confirmar].filter(function (el) {
+                return !el.disabled && el.getClientRects().length > 0;
+            });
+            if (lista.length === 0) { return; }
             var ativo = document.activeElement;
-            if (e.shiftKey && ativo === cancelar) { e.preventDefault(); confirmar.focus(); }
-            else if (!e.shiftKey && ativo === confirmar) { e.preventDefault(); cancelar.focus(); }
+            var dentro = lista.indexOf(ativo) !== -1;
+            if (e.shiftKey && (!dentro || ativo === lista[0])) { e.preventDefault(); lista[lista.length - 1].focus(); }
+            else if (!e.shiftKey && (!dentro || ativo === lista[lista.length - 1])) { e.preventDefault(); lista[0].focus(); }
         });
         // clique no fundo escurecido fecha (equivale a Cancelar)
         d.addEventListener('click', function (e) { if (e.target === d) { d.close('cancelar'); } });
         cancelar.addEventListener('click', function () { d.close('cancelar'); });
+        entradaNome.addEventListener('input', function () { atualizarConfirmacao(obj); });
+        entradaCaixa.addEventListener('change', function () { atualizarConfirmacao(obj); });
+        // qualquer fechamento sem "confirmar" devolve os campos do formulário ao estado inicial
+        d.addEventListener('close', function () {
+            if (d.returnValue !== 'confirmar') { limparCamposOrigem(obj); }
+        });
 
-        dialogo = { el: d, titulo: titulo, texto: texto, alvo: alvo, cancelar: cancelar, confirmar: confirmar, origem: null };
+        dialogo = obj;
         return dialogo;
+    }
+
+    /** Comparação do nome do totem: sem espaços/tabs nas pontas e sem diferenciar maiúsculas (igual ao servidor). */
+    function normalizarNome(valor) {
+        return String(valor).replace(/^[ \t]+|[ \t]+$/g, '').toLowerCase();
+    }
+
+    /** Habilita "confirmar" só quando as confirmações extras (nome certo, caixa marcada) foram dadas. */
+    function atualizarConfirmacao(d) {
+        var liberado = true;
+        if (d.nomeEsperado !== null) {
+            var digitado = normalizarNome(d.entradaNome.value);
+            var confere = digitado !== '' && digitado === normalizarNome(d.nomeEsperado);
+            liberado = liberado && confere;
+            d.estadoNome.textContent = digitado === '' ? '' : (confere ? 'O nome confere.' : 'O nome ainda não confere.');
+        }
+        if (!d.rotuloCaixa.hidden) {
+            liberado = liberado && d.entradaCaixa.checked;
+        }
+        d.confirmar.disabled = !liberado;
+    }
+
+    function camposDoFormulario(botao) {
+        var form = botao.form;
+        return {
+            nome: form ? form.querySelector('input[name="nome_confirmacao"]') : null,
+            caixa: form ? form.querySelector('input[name="confirmar_atendimento"]') : null
+        };
+    }
+
+    function limparCamposOrigem(d) {
+        d.entradaNome.value = '';
+        d.entradaCaixa.checked = false;
+        if (d.origem) {
+            var campos = camposDoFormulario(d.origem);
+            if (campos.nome) { campos.nome.value = ''; }
+            if (campos.caixa) { campos.caixa.checked = false; }
+        }
     }
 
     function pedirConfirmacao(botao) {
@@ -230,14 +320,34 @@
         d.confirmar.className = 'gestao-botao ' + (destrutivo ? 'gestao-botao--destrutivo-cheio' : 'gestao-botao--primario');
         d.el.classList.toggle('gestao-dialogo--destrutivo', destrutivo);
 
+        // confirmações extras que o formulário pede (nome do totem; caixa de atendimento em andamento)
+        var campos = camposDoFormulario(botao);
+        d.nomeEsperado = campos.nome ? (botao.getAttribute('data-confirmar-alvo') || '') : null;
+        d.blocoNome.hidden = !campos.nome;
+        d.entradaNome.value = '';
+        d.estadoNome.textContent = '';
+        d.rotuloCaixa.hidden = !campos.caixa;
+        d.entradaCaixa.checked = false;
+        if (campos.caixa) {
+            var rotuloOriginal = campos.caixa.closest('label');
+            d.textoCaixa.textContent = rotuloOriginal ? rotuloOriginal.textContent.trim() : 'Confirmo.';
+        }
+        d.confirmar.disabled = false;
+        atualizarConfirmacao(d);
+
         d.confirmar.onclick = function () {
             var origem = d.origem;
+            if (d.confirmar.disabled) { return; }
+            // o servidor revalida: o que foi digitado/marcado no diálogo vai nos campos reais do formulário
+            if (campos.nome) { campos.nome.value = d.entradaNome.value; }
+            if (campos.caixa) { campos.caixa.checked = true; }
             d.el.close('confirmar');
             if (origem && origem.form) {
                 if (typeof origem.form.requestSubmit === 'function') { origem.form.requestSubmit(origem); }
                 else { origem.form.submit(); }
             }
         };
+        d.el.returnValue = '';
         d.el.showModal();
         d.cancelar.focus(); // foco inicial no botão seguro
     }
@@ -245,6 +355,10 @@
     function iniciarConfirmacao() {
         var teste = document.createElement('dialog');
         if (typeof teste.showModal !== 'function') { return; } // sem <dialog>: envia direto (o servidor valida)
+        // com diálogo disponível, a confirmação extra (nome / caixa) acontece nele: some do formulário da linha
+        Array.prototype.forEach.call(document.querySelectorAll('.gestao-confirmacao-inline'), function (el) {
+            el.classList.add('gestao-confirmacao-inline--oculta');
+        });
         document.addEventListener('click', function (e) {
             var alvo = e.target instanceof Element ? e.target.closest('button[data-confirmar]') : null;
             if (!alvo || alvo.disabled) { return; }
@@ -280,11 +394,21 @@
             if (!fonte) { return; }
             var botao = criar('button', 'gestao-botao gestao-botao--secundario');
             botao.type = 'button';
-            botao.id = 'btn-copiar-senha';
+            // padrão = senha temporária; a tela da URL do totem passa os próprios valores por data-copiar-*
+            var idBotao = bloco.getAttribute('data-copiar-id');
+            botao.id = idBotao && /^[a-z][a-z0-9-]{0,40}$/.test(idBotao) ? idBotao : 'btn-copiar-senha';
+            var objeto = bloco.getAttribute('data-copiar-objeto') === 'a URL' ? 'a URL' : 'a senha';
+            var rotuloAria = bloco.getAttribute('data-copiar-aria');
+            if (rotuloAria) { botao.setAttribute('aria-label', rotuloAria); }
             botao.appendChild(icone('copiar'));
-            botao.appendChild(criar('span', '', 'Copiar'));
+            botao.appendChild(criar('span', '', bloco.getAttribute('data-copiar-rotulo') || 'Copiar'));
+            // sem JS fica o link alternativo (ex.: "Abrir URL" na lista); com JS ele dá lugar ao botão
+            Array.prototype.forEach.call(bloco.querySelectorAll('[data-copiar-alternativa]'), function (alt) {
+                if (alt.parentNode) { alt.parentNode.removeChild(alt); }
+            });
             var status = criar('span', 'gestao-copiar-status');
-            status.id = 'copiar-status';
+            // ids únicos: o primeiro bloco da página usa "copiar-status" (telas com um só botão); os demais, derivados do botão
+            status.id = document.getElementById('copiar-status') ? 'copiar-status-' + botao.id : 'copiar-status';
             status.setAttribute('role', 'status');
             status.setAttribute('aria-live', 'polite');
             bloco.appendChild(botao);
@@ -292,7 +416,7 @@
 
             function resultado(ok) {
                 selecionar(fonte);
-                status.textContent = ok ? 'Copiado.' : 'Não foi possível copiar. Selecione a senha e use Ctrl+C.';
+                status.textContent = ok ? 'Copiado.' : 'Não foi possível copiar. Selecione ' + objeto + ' e use Ctrl+C.';
             }
             botao.addEventListener('click', function () {
                 var texto = fonte.textContent;

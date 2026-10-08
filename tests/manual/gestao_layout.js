@@ -7,6 +7,9 @@
 // Capturas de tela: pasta indicada em GESTAO_CAPTURAS (padrao: tmp do sistema).
 // RISCO ACEITO (sem JS): confirmacao de desativar/redefinir, "Copiar" e "Mostrar senha"
 // dependem de JS; sem JS as acoes seguem funcionando (formularios com CSRF), sem confirmacao.
+// F2 (totens, 2026-10-07): lista/novo totem/URL em 1366x768, 1920x1080 e 1000x700, dialogos (desativar, regerar com
+// nome digitado), copiar URL, sem JS, XSS, densidade e estado vazio; o servidor semeia os totens e TOTEM_URL_BASE (so no processo).
+// Rodada UX F2 (2026-10-08): "Copiar URL" copia de verdade na lista (data-copiar-*; sem JS vira "Abrir URL"), nota do legado, destaque do atendimento, nota permanente neutra da URL regerada, ajuda na tela da URL, maxlength 24.
 // Rodada de correcao de UX (2026-10-06): alvos de 44px, erro antes do toggle, requisitos
 // neutros, flash persistente, info, dialogo destrutivo cheio, troca obrigatoria em foco unico.
 const fs = require('fs');
@@ -671,6 +674,431 @@ async function cenarioSemJs(browser, srv, contadores) {
     await page.close();
 }
 
+/* ============================================================================================
+ * Gestao Totem F2 (totens): lista, novo totem, URL do totem, dialogos, copiar, sem JS, vazio.
+ * Semente do servidor: GUICHE-04 e DOCA-02 (ativos), BALCAO-01 (atendimento recente), BALCAO-09
+ * (inativo), ABCDEFGHIJKLMNOPQRSTUVWX (nome 24 + empresa 16: URL mais longa), RECEPCAO-01 (legado)
+ * e um legado/empresa com nome hostil (<img onerror>). TOTEM_URL_BASE so no processo do servidor.
+ * ============================================================================================ */
+const HOSTIL = '<img src=x onerror=window.__xss=7>';
+
+const idsTotem = page => page.evaluate(() => {
+    const m = {};
+    document.querySelectorAll('tr[data-id-totem]').forEach(tr => { m[tr.querySelector('.col-nome').textContent.trim()] = tr.getAttribute('data-id-totem'); });
+    return m;
+});
+
+const sel = id => 'tr[data-id-totem="' + id + '"]';
+
+async function esvaziarTotens(srv) {
+    const pronto = new Promise((res, rej) => {
+        const t = setTimeout(() => rej(new Error('servidor nao confirmou o esvaziamento')), 20000);
+        const h = d => { if (d.toString().includes('ESVAZIADO')) { clearTimeout(t); srv.proc.stdout.off('data', h); res(); } };
+        srv.proc.stdout.on('data', h);
+    });
+    srv.proc.stdin.write('esvaziar\n');
+    await pronto;
+}
+
+const estadoDialogo = page => page.evaluate(() => {
+    const d = document.getElementById('gestao-dialogo');
+    const vis = el => !!el && el.getClientRects().length > 0;
+    return {
+        aberto: d.open, foco: document.activeElement.id,
+        titulo: d.querySelector('h2').textContent.trim(),
+        texto: d.querySelector('.gestao-dialogo__texto').textContent,
+        alvo: d.querySelector('.gestao-dialogo__alvo').textContent,
+        nomeVisivel: vis(document.getElementById('gestao-dialogo-nome')),
+        caixaVisivel: vis(document.getElementById('gestao-dialogo-atendimento')),
+        confirmarDesab: document.getElementById('gestao-dialogo-confirmar').disabled,
+        estado: document.getElementById('gestao-dialogo-nome-estado').textContent,
+        caixaTexto: document.querySelector('.gestao-dialogo__caixa-texto').textContent,
+    };
+});
+
+async function limparCampo(page, seletor) {
+    await page.$eval(seletor, i => { i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); });
+}
+
+/** Checagens estaticas das 3 telas em um viewport (lista, novo totem, URL). */
+async function cenarioTotensViewport(browser, srv, w, h, contadores) {
+    const rot = w + 'x' + h + ' totens';
+    const { base, info } = srv;
+    const page = await novaPagina(browser, w, h, rot, contadores);
+    await limparEstado(page, base);
+    await entrar(page, base, 'ana.admin', info.senha);
+    await irPara(page, base, '/gestao/totens.php');
+
+    // ---------------- lista ----------------
+    await checagemGeral(page, rot + ' lista', contadores);
+    ok(await page.evaluate(() => { const a = document.querySelector('.gestao-menu__link[aria-current="page"]'); return a && a.textContent.trim() === 'Totens' && document.getElementById('gestao-titulo').textContent === 'Totens' && document.title.startsWith('Totens'); }), rot + ' lista: menu "Totens" atual e titulo "Totens"');
+    const ids = await idsTotem(page);
+    ok(Object.keys(ids).length === 7 && !!ids['GUICHE-04'] && !!ids['DOCA-02'] && !!ids['BALCAO-01'] && !!ids['BALCAO-09'] && !!ids['RECEPCAO-01'] && !!ids['ABCDEFGHIJKLMNOPQRSTUVWX'] && !!ids[HOSTIL], rot + ' lista: 7 totens semeados (ativos, inativo, legado, atendimento recente, URL longa, nome hostil)');
+    const t = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const tab = document.getElementById('tabela-totens');
+        const linhas = {};
+        for (const tr of tab.tBodies[0].querySelectorAll('tr[data-id-totem]')) {
+            const nome = tr.querySelector('.col-nome').textContent.trim();
+            const code = tr.querySelector('code.gestao-totem-url');
+            const td = tr.querySelector('.col-url');
+            const copiar = td.querySelector('.gestao-url-copiar button');
+            const bs = Array.from(tr.querySelectorAll('.col-acoes .gestao-botao')).filter(b => b.getClientRects().length);
+            let gapMin = 999;
+            for (let i = 0; i < bs.length; i++) for (let j = i + 1; j < bs.length; j++) {
+                const a = r(bs[i]), b = r(bs[j]);
+                if (Math.abs(a.top - b.top) < 4) { gapMin = Math.min(gapMin, Math.round(b.left - a.right)); } else if (b.top >= a.bottom - 1) { gapMin = Math.min(gapMin, Math.round(b.top - a.bottom)); }
+            }
+            const d = tr.querySelector('button[value="desativar"]');
+            const cs = getComputedStyle(tr.querySelector('.col-nome'));
+            const cd = getComputedStyle(tr.querySelector('td:first-child'));
+            const form = tr.querySelector('form.gestao-form-regerar');
+            const lab = form && form.querySelector('label.gestao-confirmacao-inline');
+            const inp = form && form.querySelector('input[name="nome_confirmacao"]');
+            const cx = tr.querySelector('input[name="confirmar_atendimento"]');
+            linhas[nome] = {
+                id: tr.getAttribute('data-id-totem'), altura: Math.round(r(tr).height), inativa: tr.classList.contains('gestao-tabela__linha--inativa'),
+                situacao: tr.querySelector('.col-situacao').textContent.replace(/\s+/g, ' ').trim(), situacaoIcone: !!tr.querySelector('.col-situacao svg'),
+                nomeItalico: cs.fontStyle === 'italic', bordaEsq: cd.borderLeftStyle + ' ' + cd.borderLeftWidth,
+                url: code.textContent, urlFonte: getComputedStyle(code).fontFamily, urlCabe: code.scrollWidth <= code.clientWidth + 1 && r(code).right <= r(td).right + 1 && r(code).left >= r(td).left - 1,
+                urlNota: (td.querySelector('.gestao-situacao__nota') || {}).textContent || '',
+                copiar: { id: copiar.id, tipo: copiar.type, aria: copiar.getAttribute('aria-label'), altura: Math.round(r(copiar).height), texto: copiar.textContent.trim(), semSobrepor: r(copiar).left >= r(code).right - 1 || r(copiar).top >= r(code).bottom - 1, alternativa: !!td.querySelector('[data-copiar-alternativa]'), dataDe: td.querySelector('.gestao-url-copiar').getAttribute('data-copiar-de') === code.id, statusId: (td.querySelector('.gestao-copiar-status') || {}).id || '', urlFonte: parseFloat(getComputedStyle(code).fontSize), quebra: getComputedStyle(code).overflowWrap },
+                destaque: (() => { const n = tr.querySelector('.col-situacao .gestao-situacao__nota--destaque'); return n && { icone: !!n.querySelector('svg'), peso: getComputedStyle(n).fontWeight, cor: getComputedStyle(n).color }; })(),
+                botoes: bs.map(b => b.textContent.trim()), alturas: bs.map(b => Math.round(r(b).height)), gapMin,
+                desativarUltimo: !d || bs[bs.length - 1] === d,
+                desativarBorda: d ? [getComputedStyle(d).borderTopWidth, getComputedStyle(d).borderTopColor, !!d.querySelector('svg')].join('|') : null,
+                regerar: form ? { campos: Array.from(form.querySelectorAll('input[type=hidden]')).map(i => i.name).join(','), requerido: !!inp.required, rotuloOculto: getComputedStyle(lab).display === 'none', entradaOculta: getComputedStyle(inp).display === 'none', destrutivo: form.querySelector('button').getAttribute('data-confirmar-destrutivo') } : null,
+                caixa: cx ? { oculta: getComputedStyle(cx.closest('label')).display === 'none', requerida: cx.required } : null,
+                ativarSemConfirmar: tr.querySelector('button[value="ativar"]') ? !tr.querySelector('button[value="ativar"]').hasAttribute('data-confirmar') : null,
+            };
+        }
+        return {
+            cabecalhos: Array.from(tab.tHead.rows[0].cells).map(c => c.textContent.trim()),
+            wrap: { sw: document.querySelector('.gestao-tabela-wrap').scrollWidth, cw: document.querySelector('.gestao-tabela-wrap').clientWidth },
+            linhas, imgs: tab.querySelectorAll('img, script').length, novo: (() => { const a = document.getElementById('btn-novo-totem'); return a && { href: a.getAttribute('href'), h: Math.round(r(a).height), texto: a.textContent.trim() }; })(),
+        };
+    });
+    const L = t.linhas;
+    ok(JSON.stringify(t.cabecalhos) === JSON.stringify(['Nome', 'Empresa', 'Situação', 'Criado em', 'URL do quiosque', 'Ações']), rot + ' lista: cabecalhos Nome, Empresa, Situacao, Criado em, URL do quiosque, Acoes');
+    ok(t.novo && t.novo.href === '/gestao/totem-form.php' && t.novo.h >= 44 && t.novo.texto === 'Novo totem', rot + ' lista: botao "Novo totem" com 44px');
+    ok(t.wrap.sw <= t.wrap.cw + 1, rot + ' lista: tabela cabe na largura util sem rolagem interna (' + t.wrap.sw + '/' + t.wrap.cw + ')');
+    ok(L['GUICHE-04'].situacao.startsWith('Ativo') && L['GUICHE-04'].situacaoIcone && L['BALCAO-09'].situacao === 'Inativo' && L['BALCAO-09'].situacaoIcone, rot + ' lista: situacao "Ativo"/"Inativo" em texto + icone');
+    ok(L['BALCAO-09'].inativa && L['BALCAO-09'].nomeItalico && L['BALCAO-09'].bordaEsq === 'dotted 5px' && !L['GUICHE-04'].inativa && !L['GUICHE-04'].nomeItalico, rot + ' lista: totem inativo distinto por texto "Inativo", italico e barra pontilhada (nao so cor)');
+    ok(L['BALCAO-01'].situacao.includes('Atendimento em andamento') && !L['GUICHE-04'].situacao.includes('Atendimento'), rot + ' lista: nota "Atendimento em andamento" so no totem com atendimento recente');
+    ok(L['BALCAO-01'].destaque && L['BALCAO-01'].destaque.icone && parseInt(L['BALCAO-01'].destaque.peso, 10) >= 700 && L['BALCAO-01'].destaque.cor === 'rgb(58, 58, 58)' && !L['GUICHE-04'].destaque, rot + ' lista: atendimento em andamento destacado com icone + negrito (sem cor nova)');
+    ok(/^https:\/\/totem\.udlog\.online\/totem\/\?totem=GUICHE-04-MAUAI-[A-Z2-7]{16}$/.test(L['GUICHE-04'].url) && L['RECEPCAO-01'].url === 'https://totem.udlog.online/totem/?totem=RECEPCAO-01' && /-MAUAII-[A-Z2-7]{16}$/.test(L['DOCA-02'].url), rot + ' lista: URL em code no formato BASE?totem=NOME-EMPRESA-HASH16 (legado com a URL antiga)');
+    ok(L['RECEPCAO-01'].urlNota === 'Endereço fixo; continua valendo até ser regerado.' && L[HOSTIL].urlNota === 'Endereço fixo; continua valendo até ser regerado.' && L['GUICHE-04'].urlNota === '' && L['BALCAO-09'].urlNota === '', rot + ' lista: nota "Endereço fixo; continua valendo até ser regerado." so nos legados');
+    ok(Object.values(L).every(l => l.urlCabe && /Consolas|Courier|monospace/.test(l.urlFonte)), rot + ' lista: URL (monoespacada) quebra linha sem estourar a celula, inclusive a mais longa (' + L['ABCDEFGHIJKLMNOPQRSTUVWX'].url.length + ' caracteres)');
+    ok(Object.values(L).every(l => l.copiar.id === 'btn-copiar-url-' + l.id && l.copiar.tipo === 'button' && l.copiar.altura >= 44 && l.copiar.texto === 'Copiar URL' && /^Copiar a URL de /.test(l.copiar.aria) && l.copiar.semSobrepor && !l.copiar.alternativa && l.copiar.dataDe), rot + ' lista: botao "Copiar URL" por linha (data-copiar-de/id, aria-label com o nome), 44px, sem sobrepor a URL, link alternativo trocado pelo JS');
+    ok(Object.values(L).every(l => l.copiar.urlFonte >= 14 && l.copiar.quebra === 'anywhere') && new Set(Object.values(L).map(l => l.copiar.statusId)).size === Object.keys(L).length, rot + ' lista: URL com fonte >= 14px e overflow-wrap:anywhere; ids do status de copia unicos');
+    ok(Object.values(L).every(l => l.alturas.every(a => a >= 44) && l.gapMin >= 12), rot + ' lista: botoes de acao com altura >= 44px e espaco >= 12px entre acoes');
+    ok(Object.values(L).every(l => l.desativarUltimo) && Object.values(L).filter(l => l.desativarBorda).every(l => l.desativarBorda === '3px|rgb(58, 58, 58)|true'), rot + ' lista: "Desativar" e o ultimo botao, borda 3px #3A3A3A + icone (sem cor de perigo)');
+    ok(Object.values(L).every(l => l.botoes.includes('Ativar') === l.inativa && l.botoes.includes('Desativar') === !l.inativa && l.botoes.includes('Regerar URL')) && L['BALCAO-09'].ativarSemConfirmar === true, rot + ' lista: inativo mostra "Ativar" (sem dialogo) e nao "Desativar"; ativo mostra "Desativar"; todos "Regerar URL"');
+    ok(Object.values(L).every(l => l.regerar && l.regerar.campos === 'csrf_token,id_totem,versao_url' && l.regerar.requerido && l.regerar.rotuloOculto && l.regerar.entradaOculta && l.regerar.destrutivo === '1'), rot + ' lista: formulario "Regerar URL" (csrf, id_totem, versao_url, nome_confirmacao required) com os campos inline ocultos pelo JS e dialogo destrutivo');
+    ok(L['BALCAO-01'].caixa && L['BALCAO-01'].caixa.oculta && L['BALCAO-01'].caixa.requerida && !L['GUICHE-04'].caixa, rot + ' lista: caixa "Desativar mesmo assim" so no totem com atendimento recente (obrigatoria; oculta pelo JS)');
+    if (w >= 1366) {
+        const tipicas = ['GUICHE-04', 'DOCA-02', 'BALCAO-09'].map(n => L[n].altura);
+        ok(tipicas.every(a => a <= 100), rot + ' lista: densidade, linhas tipicas <= 100px (botao Copiar URL em linha propria, URL a 14px) (' + tipicas.join(',') + ')');
+        ok(L['RECEPCAO-01'].altura <= 125 && L['ABCDEFGHIJKLMNOPQRSTUVWX'].altura <= 125 && L['BALCAO-01'].altura <= 125, rot + ' lista: linhas com nota/URL maxima/atendimento ate 125px (' + [L['RECEPCAO-01'].altura, L['ABCDEFGHIJKLMNOPQRSTUVWX'].altura, L['BALCAO-01'].altura].join(',') + ')');
+    }
+    ok(t.imgs === 0 && await page.evaluate(h => Array.from(document.querySelectorAll('.col-empresa')).some(c => c.textContent === '<img src=x onerror=window.__xss=8>') && Array.from(document.querySelectorAll('.col-nome')).some(c => c.textContent.trim() === h), HOSTIL), rot + ' lista: nome do totem e empresa hostis aparecem LITERAIS (sem img/script injetado)');
+    await botoesSolidos(page, rot + ' lista');
+    await page.evaluate(() => { document.activeElement && document.activeElement.blur(); window.scrollTo(0, 0); });
+    await focoVisivel(page, rot + ' lista', 24);
+    await page.evaluate(() => { document.activeElement && document.activeElement.blur(); window.scrollTo(0, 0); });
+    await page.screenshot({ path: path.join(CAPTURAS, 'totens-' + w + '.png') });
+
+    // ---------------- novo totem ----------------
+    await irPara(page, base, '/gestao/totem-form.php');
+    await checagemGeral(page, rot + ' novo totem', contadores);
+    const f = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const sl = document.getElementById('id_empresa'), nome = document.getElementById('nome');
+        const previa = document.querySelector('#ajuda-url-totem .gestao-totem-previa');
+        return {
+            titulo: document.getElementById('gestao-titulo').textContent, cartao: document.querySelector('#totem-form-cartao h2').textContent,
+            opcoes: Array.from(sl.options).map(o => o.textContent), campos: Array.from(document.querySelectorAll('#form-totem input:not([type=hidden]), #form-totem select')).map(c => c.name).join(','),
+            alturas: [r(sl).height, r(nome).height, r(document.getElementById('btn-salvar-totem')).height, r(document.getElementById('btn-cancelar-totem')).height].map(Math.round),
+            rotulos: Array.from(document.querySelectorAll('#form-totem label')).map(l => l.textContent.trim() + '>' + l.getAttribute('for')).join('|'),
+            ajuda: document.getElementById('ajuda-url-totem').textContent.replace(/\s+/g, ' ').trim(), previa: previa && previa.textContent, previaBorda: previa && getComputedStyle(previa).borderTopStyle, previaFonte: previa && getComputedStyle(previa).fontFamily,
+            salvar: document.getElementById('btn-salvar-totem').textContent.trim(), cancelar: document.getElementById('btn-cancelar-totem').getAttribute('href'), gap: Math.round(r(document.getElementById('btn-cancelar-totem')).left - r(document.getElementById('btn-salvar-totem')).right),
+        };
+    });
+    ok(f.titulo === 'Novo totem' && f.cartao !== 'Novo totem' && f.campos === 'id_empresa,nome', rot + ' novo totem: titulo do topo e SOMENTE 2 campos (empresa + nome)');
+    ok(f.opcoes.length === 5 && f.opcoes[0] === 'Escolha a empresa' && f.opcoes.includes('Maua I') && f.opcoes.includes('<img src=x onerror=window.__xss=8>') && !f.opcoes.includes('Empresa Inativa'), rot + ' novo totem: select so com empresas ativas (nome hostil da empresa literal)');
+    ok(f.rotulos === 'Empresa>id_empresa|Nome do totem>nome', rot + ' novo totem: rotulos associados aos campos');
+    ok(await page.evaluate(() => document.getElementById('nome').maxLength === 24), rot + ' novo totem: maxlength do nome = 24 (igual ao limite do servidor)');
+    ok(f.alturas.every(a => a >= 44) && f.gap >= 12 && f.salvar === 'Criar totem' && f.cancelar === '/gestao/totens.php', rot + ' novo totem: campos e botoes com >= 44px, gap >= 12px, "Criar totem" e Cancelar (' + f.alturas.join(',') + ')');
+    ok(f.previa === 'NOME-EMPRESA-<16 caracteres gerados ao salvar>' && f.previaBorda === 'dashed' && /Consolas|Courier|monospace/.test(f.previaFonte) && f.ajuda.includes('A URL do quiosque terá este formato'), rot + ' novo totem: dica com a previa textual NOME-EMPRESA-<16 caracteres gerados ao salvar> (sem hash inventado)');
+    await botoesSolidos(page, rot + ' novo totem');
+    if (w === 1366) { await page.evaluate(() => { document.activeElement && document.activeElement.blur(); }); await page.screenshot({ path: path.join(CAPTURAS, 'totem-form.png') }); }
+    await page.focus('#id_empresa');
+    await focoVisivel(page, rot + ' novo totem', 4);
+
+    // ---------------- URL do totem (ainda NAO regerado) ----------------
+    await irPara(page, base, '/gestao/totem-url.php?id=' + ids['GUICHE-04']);
+    await checagemGeral(page, rot + ' URL', contadores);
+    const u = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const c = document.getElementById('totem-url-valor'), cs = getComputedStyle(c), cartao = document.getElementById('totem-url-cartao');
+        const b = document.getElementById('btn-copiar-url');
+        return {
+            titulo: document.getElementById('gestao-titulo').textContent, nome: document.getElementById('totem-url-nome').textContent, empresa: document.getElementById('totem-url-empresa').textContent, situacao: document.getElementById('totem-url-situacao').textContent.trim(),
+            url: c.textContent, fonte: cs.fontSize, familia: cs.fontFamily, borda: cs.borderTopWidth + ' ' + cs.borderTopColor, sel: cs.userSelect, larg: r(c).width, cartaoL: r(cartao).width,
+            cabe: c.scrollWidth <= c.clientWidth + 1 && r(c).right <= r(cartao).right,
+            botao: b && { texto: b.textContent.trim(), h: Math.round(r(b).height), tipo: b.type, antigo: !!document.getElementById('btn-copiar-senha') },
+            aviso: document.getElementById('totem-url-aviso').textContent.trim(), avisoBorda: getComputedStyle(document.getElementById('totem-url-aviso')).borderTopWidth, avisoIcone: !!document.querySelector('#totem-url-aviso svg'),
+            regerada: !!document.getElementById('totem-url-regerada'), inativo: !!document.getElementById('totem-url-inativo'),
+            voltar: (() => { const a = document.getElementById('btn-voltar-totens'); return a && [a.getAttribute('href'), Math.round(r(a).height), a.textContent.trim()].join('|'); })(),
+            dd: document.querySelector('dd[data-copiar-de="totem-url-valor"]') !== null && document.querySelector('dd[data-copiar-de]').contains(c),
+        };
+    });
+    ok(u.titulo === 'URL do totem' && u.nome === 'GUICHE-04' && u.empresa === 'Maua I' && u.situacao === 'Ativo' && u.dd, rot + ' URL: titulo "URL do totem", totem, empresa e situacao');
+    ok(/^https:\/\/totem\.udlog\.online\/totem\/\?totem=GUICHE-04-MAUAI-[A-Z2-7]{16}$/.test(u.url) && parseFloat(u.fonte) >= 20 && u.borda === '3px rgb(58, 58, 58)' && u.sel === 'all' && /Consolas|Courier|monospace/.test(u.familia) && u.cabe && u.larg >= u.cartaoL * 0.8, rot + ' URL: caixa grande em destaque (fonte monoespacada ' + u.fonte + ', borda 3px, user-select all = um clique seleciona tudo, ocupa a largura do cartao)');
+    ok(u.botao && u.botao.texto === 'Copiar URL' && u.botao.h >= 44 && u.botao.tipo === 'button' && !u.botao.antigo, rot + ' URL: botao #btn-copiar-url "Copiar URL" com 44px (JS generico com rotulo/id proprios)');
+    ok(u.aviso === 'Guarde esta URL: ela é a chave de acesso do totem; qualquer pessoa com ela abre o totem.' && u.avisoBorda === '3px' && u.avisoIcone, rot + ' URL: aviso "Guarde esta URL..." em caixa com icone e borda 3px');
+    ok(await page.evaluate(() => { const a = document.getElementById('totem-url-ajuda'); const c = document.getElementById('totem-url-valor'); return a && !!a.querySelector('svg') && a.textContent.trim() === 'Não envie esta URL por e-mail ou mensagem; use-a apenas no mini PC do totem.' && getComputedStyle(c).overflowWrap === 'anywhere' && getComputedStyle(c).wordBreak === 'normal'; }), rot + ' URL: linha de ajuda curta sobre o segredo da URL e quebra com overflow-wrap:anywhere');
+    ok(!u.regerada && !u.inativo && u.voltar === '/gestao/totens.php|44|Voltar para totens', rot + ' URL: totem nunca regerado nao mostra o aviso de URL antiga; botao "Voltar para totens" com 44px');
+    await botoesSolidos(page, rot + ' URL');
+    await page.focus('#btn-copiar-url');
+    await focoVisivel(page, rot + ' URL', 3);
+    if (w === 1366) {
+        await page.evaluate(() => { document.activeElement && document.activeElement.blur(); window.scrollTo(0, 0); });
+        await page.screenshot({ path: path.join(CAPTURAS, 'totem-url.png') });
+        // totem inativo: aviso proprio
+        await irPara(page, base, '/gestao/totem-url.php?id=' + ids['BALCAO-09']);
+        ok(await page.evaluate(() => { const a = document.getElementById('totem-url-inativo'); return a && !!a.querySelector('svg') && a.textContent.includes('desativado') && document.getElementById('totem-url-situacao').textContent.trim() === 'Inativo'; }), rot + ' URL: totem inativo mostra "Inativo" e o aviso de que a URL nao abre');
+        await checagemGeral(page, rot + ' URL inativo', contadores);
+        // id inexistente: volta para a lista com mensagem
+        await irPara(page, base, '/gestao/totem-url.php?id=999999');
+        ok(page.url().endsWith('/gestao/totens.php') && await page.evaluate(() => document.getElementById('gestao-flash').textContent.includes('Totem não encontrado')), rot + ' URL: id inexistente volta para a lista com "Totem nao encontrado"');
+    }
+    await page.close();
+}
+
+/** Fluxos com JS (1366x768): dialogos, regerar com nome, desativar com atendimento, copiar URL, criar totem. */
+async function cenarioTotensFluxo(browser, srv, contadores) {
+    const w = 1366, h = 768, rot = '1366x768 totens-fluxo';
+    const { base, info } = srv;
+    const ctx = browser.defaultBrowserContext();
+    await ctx.overridePermissions(base, ['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write']);
+    const page = await novaPagina(browser, w, h, rot, contadores);
+    const posts = [];
+    page.on('request', r => { if (r.method() === 'POST') { posts.push(r.url()); } });
+    const postsTotens = () => posts.filter(u => u.includes('/gestao/totens.php')).length;
+    await limparEstado(page, base);
+    await entrar(page, base, 'ana.admin', info.senha);
+    await irPara(page, base, '/gestao/totens.php');
+    const ids = await idsTotem(page);
+    const urlDe = (pg, id) => pg.$eval(sel(id) + ' code.gestao-totem-url', c => c.textContent);
+
+    // ---- dialogo "Desativar" sem atendimento (DOCA-02): efeito imediato, sem extras
+    await page.click(sel(ids['DOCA-02']) + ' button[value="desativar"]');
+    let d = await estadoDialogo(page);
+    ok(d.aberto && d.foco === 'gestao-dialogo-cancelar' && d.titulo === 'Desativar totem' && d.alvo === 'DOCA-02' && /agora/.test(d.texto) && !/interrompido/.test(d.texto) && !d.nomeVisivel && !d.caixaVisivel && !d.confirmarDesab, rot + ' desativar: dialogo com efeito imediato ("agora"), alvo DOCA-02, foco inicial em Cancelar, sem confirmacao extra');
+    ok(await page.evaluate(() => { const c = document.getElementById('gestao-dialogo-confirmar'), cs = getComputedStyle(c); return c.classList.contains('gestao-botao--destrutivo-cheio') && cs.backgroundColor === 'rgb(58, 58, 58)' && cs.color === 'rgb(255, 255, 255)' && !!c.querySelector('svg') && c.textContent.trim() === 'Desativar' && getComputedStyle(document.getElementById('gestao-dialogo')).borderTopWidth === '3px'; }), rot + ' desativar: confirmar no estilo destrutivo cheio (#3A3A3A, texto branco, icone) e dialogo com borda 3px');
+    await checagemGeral(page, rot + ' dialogo desativar', contadores);
+    await page.keyboard.press('Escape');
+    ok(await page.evaluate(id => !document.getElementById('gestao-dialogo').open && document.activeElement === document.querySelector('tr[data-id-totem="' + id + '"] button[value="desativar"]'), ids['DOCA-02']) && postsTotens() === 0, rot + ' desativar: Esc fecha, nada e enviado e o foco volta ao botao de origem');
+
+    // ---- dialogo "Desativar" com atendimento recente (BALCAO-01): caixa obrigatoria + aviso
+    await page.click(sel(ids['BALCAO-01']) + ' button[value="desativar"]');
+    d = await estadoDialogo(page);
+    ok(d.aberto && d.foco === 'gestao-dialogo-cancelar' && d.caixaVisivel && !d.nomeVisivel && d.confirmarDesab && /atendimento em andamento será interrompido/.test(d.texto) && /Há atendimento em andamento nos últimos 30 minutos\. Desativar mesmo assim\./.test(d.caixaTexto), rot + ' desativar com atendimento: aviso de interrupcao, caixa obrigatoria no dialogo e "Desativar" desabilitado ate marcar');
+    ok(await page.evaluate(() => { const c = document.getElementById('gestao-dialogo-confirmar'), cs = getComputedStyle(c); const cx = document.getElementById('gestao-dialogo-atendimento'); return cs.borderTopStyle === 'dashed' && cs.backgroundColor === 'rgb(255, 255, 255)' && Math.round(cx.closest('label').getBoundingClientRect().height) >= 44 && Math.round(cx.getBoundingClientRect().width) >= 24; }), rot + ' desativar com atendimento: botao desabilitado distinto (tracejado, nao so cor) e area da caixa >= 44px');
+    await page.screenshot({ path: path.join(CAPTURAS, 'dialogo-desativar.png') });
+    await checagemGeral(page, rot + ' dialogo desativar atendimento', contadores);
+    await page.click('#gestao-dialogo-atendimento');
+    ok(!(await estadoDialogo(page)).confirmarDesab, rot + ' desativar com atendimento: marcar a caixa habilita "Desativar"');
+    await page.click('#gestao-dialogo-atendimento');
+    ok((await estadoDialogo(page)).confirmarDesab, rot + ' desativar com atendimento: desmarcar desabilita de novo');
+    await page.click('#gestao-dialogo-cancelar');
+    ok(await page.evaluate(id => !document.getElementById('gestao-dialogo').open && !document.querySelector('tr[data-id-totem="' + id + '"] input[name="confirmar_atendimento"]').checked, ids['BALCAO-01']) && postsTotens() === 0, rot + ' desativar com atendimento: Cancelar nao marca nada no formulario nem envia');
+    await page.click(sel(ids['BALCAO-01']) + ' button[value="desativar"]');
+    await page.click('#gestao-dialogo-atendimento');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#gestao-dialogo-confirmar')]);
+    ok(await page.evaluate(id => { const f = document.getElementById('gestao-flash'); const tr = document.querySelector('tr[data-id-totem="' + id + '"]'); return f && f.getAttribute('role') === 'status' && f.textContent.includes('Totem desativado') && tr.classList.contains('gestao-tabela__linha--inativa') && tr.querySelector('.col-situacao').textContent.trim().startsWith('Inativo'); }, ids['BALCAO-01']) && postsTotens() === 1, rot + ' desativar com atendimento: confirmar (caixa marcada) envia 1 POST, flash de sucesso e linha Inativa');
+    await checagemGeral(page, rot + ' lista apos desativar', contadores);
+    // reativar: sem dialogo
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click(sel(ids['BALCAO-01']) + ' button[value="ativar"]')]);
+    ok(await page.evaluate(id => document.getElementById('gestao-flash').textContent.includes('Totem ativado') && !document.querySelector('tr[data-id-totem="' + id + '"]').classList.contains('gestao-tabela__linha--inativa') && !document.getElementById('gestao-dialogo'), ids['BALCAO-01']), rot + ' ativar: sem dialogo, flash "Totem ativado" e a linha volta a Ativo');
+    await page.click('#gestao-flash-fechar');
+
+    // ---- dialogo "Regerar URL": exige o nome do totem (GUICHE-04)
+    const urlAntes = await urlDe(page, ids['GUICHE-04']);
+    const postsAntes = postsTotens();
+    await page.click(sel(ids['GUICHE-04']) + ' button[value="regerar-url"]');
+    d = await estadoDialogo(page);
+    ok(d.aberto && d.foco === 'gestao-dialogo-cancelar' && d.titulo === 'Regerar URL' && d.alvo === 'GUICHE-04' && d.nomeVisivel && !d.caixaVisivel && d.confirmarDesab && /endereço anterior deixa de funcionar agora/.test(d.texto) && d.texto === 'O endereço anterior deixa de funcionar agora. O token do totem não muda; para bloquear um totem, desative-o. Atualize a URL no .bat do mini PC e reinicie o PC.' && !/ao lado|caixa/i.test(d.texto), rot + ' regerar: dialogo destrutivo com alvo GUICHE-04, campo do nome, foco inicial em Cancelar e "Regerar URL" desabilitado');
+    ok(await page.evaluate(() => { const c = document.getElementById('gestao-dialogo-confirmar'); const i = document.getElementById('gestao-dialogo-nome'); const l = document.querySelector('label[for="gestao-dialogo-nome"]'); return c.classList.contains('gestao-botao--destrutivo-cheio') && !!c.querySelector('svg') && i.getAttribute('autocomplete') === 'off' && Math.round(i.getBoundingClientRect().height) >= 44 && l.textContent.includes('digite o nome do totem') && document.getElementById('gestao-dialogo').getAttribute('aria-labelledby') === 'gestao-dialogo-titulo'; }), rot + ' regerar: estilo destrutivo cheio, campo rotulado, 44px, autocomplete off');
+    await page.type('#gestao-dialogo-nome', 'guiche-0');
+    d = await estadoDialogo(page);
+    ok(d.confirmarDesab && d.estado === 'O nome ainda não confere.', rot + ' regerar: nome incompleto mantem o botao desabilitado e avisa por texto');
+    await page.type('#gestao-dialogo-nome', '4');
+    d = await estadoDialogo(page);
+    ok(!d.confirmarDesab && d.estado === 'O nome confere.', rot + ' regerar: "guiche-04" (minusculas) confere sem diferenciar maiusculas e habilita o botao');
+    await limparCampo(page, '#gestao-dialogo-nome');
+    await page.type('#gestao-dialogo-nome', '  GuIcHe-04 ');
+    ok(!(await estadoDialogo(page)).confirmarDesab, rot + ' regerar: espacos nas pontas e caixa mista tambem conferem (igual ao servidor)');
+    await limparCampo(page, '#gestao-dialogo-nome');
+    await page.type('#gestao-dialogo-nome', 'DOCA-02');
+    ok((await estadoDialogo(page)).confirmarDesab, rot + ' regerar: nome de OUTRO totem nao habilita');
+    await limparCampo(page, '#gestao-dialogo-nome');
+    d = await estadoDialogo(page);
+    ok(d.confirmarDesab && d.estado === '', rot + ' regerar: campo vazio mantem desabilitado e sem mensagem');
+    await page.type('#gestao-dialogo-nome', '<GUICHE-04>');
+    ok((await estadoDialogo(page)).confirmarDesab && await page.evaluate(() => !document.querySelector('#gestao-dialogo img, #gestao-dialogo script')), rot + ' regerar: texto com simbolos nunca confere e nao injeta elemento (textContent)');
+    await limparCampo(page, '#gestao-dialogo-nome');
+    await page.type('#gestao-dialogo-nome', 'guiche-04');
+    await checagemGeral(page, rot + ' dialogo regerar', contadores);
+    await page.screenshot({ path: path.join(CAPTURAS, 'dialogo-regerar.png') });
+    // foco preso (campo + Cancelar + Regerar)
+    let preso = true;
+    await page.focus('#gestao-dialogo-nome');
+    for (let i = 0; i < 7; i++) { await page.keyboard.press('Tab'); preso = preso && await page.evaluate(() => document.getElementById('gestao-dialogo').contains(document.activeElement)); }
+    for (let i = 0; i < 5; i++) { await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift'); preso = preso && await page.evaluate(() => document.getElementById('gestao-dialogo').contains(document.activeElement)); }
+    ok(preso, rot + ' regerar: foco preso dentro do dialogo (Tab e Shift+Tab, com o campo do nome)');
+    await page.focus('#gestao-dialogo-nome');
+    const ordem = [];
+    for (let i = 0; i < 4; i++) { await page.keyboard.press('Tab'); ordem.push(await page.evaluate(() => document.activeElement.id)); }
+    ok(ordem.join(',') === 'gestao-dialogo-cancelar,gestao-dialogo-confirmar,gestao-dialogo-nome,gestao-dialogo-cancelar', rot + ' regerar: ordem do Tab campo > Cancelar > Regerar > campo (' + ordem.join(',') + ')');
+    await page.focus('#gestao-dialogo-nome');
+    const fn = await page.evaluate(() => { const c = getComputedStyle(document.getElementById('gestao-dialogo-nome')); return c.outlineStyle + ' ' + c.outlineWidth + ' ' + c.outlineColor; });
+    ok(fn === 'solid 3px rgb(1, 121, 173)', rot + ' regerar: foco visivel no campo do nome (' + fn + ')');
+    await page.keyboard.press('Escape');
+    ok(await page.evaluate(id => !document.getElementById('gestao-dialogo').open && document.activeElement === document.querySelector('tr[data-id-totem="' + id + '"] button[value="regerar-url"]') && document.querySelector('tr[data-id-totem="' + id + '"] input[name="nome_confirmacao"]').value === '', ids['GUICHE-04']) && postsTotens() === postsAntes, rot + ' regerar: Esc fecha, devolve o foco, nao envia nada e deixa o campo do formulario vazio');
+    await page.click(sel(ids['GUICHE-04']) + ' button[value="regerar-url"]');
+    ok((await page.$eval('#gestao-dialogo-nome', i => i.value)) === '' && (await estadoDialogo(page)).confirmarDesab, rot + ' regerar: ao reabrir o campo vem vazio e o botao desabilitado');
+    await page.evaluate(() => document.getElementById('gestao-dialogo-confirmar').click());
+    ok(await page.evaluate(() => document.getElementById('gestao-dialogo').open) && postsTotens() === postsAntes, rot + ' regerar: clique no botao desabilitado nao fecha nem envia');
+    await page.type('#gestao-dialogo-nome', 'Guiche-04');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#gestao-dialogo-confirmar')]);
+    ok(page.url().includes('/gestao/totem-url.php?id=' + ids['GUICHE-04']) && postsTotens() === postsAntes + 1, rot + ' regerar: confirmar com o nome certo envia 1 POST e vai para a tela da URL (PRG)');
+    const novaUrl = await page.$eval('#totem-url-valor', c => c.textContent);
+    ok(novaUrl !== urlAntes && /\?totem=GUICHE-04-MAUAI-[A-Z2-7]{16}$/.test(novaUrl) && novaUrl.split('-').pop() !== urlAntes.split('-').pop(), rot + ' regerar: a URL nova tem outro HASH16 (a antiga deixou de ser a do totem)');
+    ok(await page.evaluate(() => { const f = document.getElementById('gestao-flash'); const r = document.getElementById('totem-url-regerada'); return f && f.textContent.includes('URL regerada') && r && /^O endereço anterior deixou de funcionar \(URL regerada em .+\)\. O acesso do totem em si \(token\) não foi alterado; para bloquear um totem, desative-o\.$/.test(r.textContent.trim()) && !!r.querySelector('svg') && getComputedStyle(r).borderTopWidth === '1px' && getComputedStyle(r).borderTopColor === 'rgb(176, 176, 177)' && getComputedStyle(f).borderTopWidth !== getComputedStyle(r).borderTopWidth &&  document.getElementById('totem-url-aviso').textContent.includes('Guarde esta URL'); }), rot + ' regerar: tela da URL com flash "URL regerada", nota permanente neutra (borda 1px #B0B0B1, distinta do flash) "O endereco anterior deixou de funcionar..." e o aviso de guarda');
+    await checagemGeral(page, rot + ' URL regerada', contadores);
+    await page.screenshot({ path: path.join(CAPTURAS, 'totem-url-regerada.png') });
+
+    // ---- copiar URL: clique seleciona, clipboard e fallback
+    await page.click('#totem-url-valor');
+    ok(await page.evaluate(() => getSelection().toString().trim() === document.getElementById('totem-url-valor').textContent), rot + ' copiar URL: UM clique na caixa seleciona a URL inteira');
+    await page.bringToFront();
+    await page.click('#btn-copiar-url');
+    await espera(300);
+    const copiado = await page.evaluate(() => navigator.clipboard.readText());
+    ok(copiado === novaUrl && await page.$eval('#copiar-status', s => s.textContent) === 'Copiado.' && await page.$eval('#copiar-status', s => s.getAttribute('aria-live')) === 'polite', rot + ' copiar URL: botao "Copiar URL" usa navigator.clipboard e confirma por texto (aria-live)');
+    await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true }); document.getElementById('copiar-status').textContent = ''; getSelection().removeAllRanges(); });
+    await page.click('#btn-copiar-url');
+    await espera(200);
+    const st = await page.$eval('#copiar-status', s => s.textContent);
+    ok((st === 'Copiado.' || st === 'Não foi possível copiar. Selecione a URL e use Ctrl+C.') && await page.evaluate(() => getSelection().toString() === document.getElementById('totem-url-valor').textContent), rot + ' copiar URL: fallback (execCommand) seleciona a URL e informa o resultado (' + st + ')');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-voltar-totens')]);
+    ok(page.url().endsWith('/gestao/totens.php') && (await urlDe(page, ids['GUICHE-04'])) === novaUrl, rot + ' voltar: a lista mostra a URL nova');
+
+    // ---- copiar URL pela lista
+    await irPara(page, base, '/gestao/totens.php');
+    await page.bringToFront();
+    await page.click('#btn-copiar-url-' + ids['GUICHE-04']);
+    await espera(300);
+    const copiadoLista = await page.evaluate(() => navigator.clipboard.readText());
+    ok(copiadoLista === novaUrl && await page.$eval(sel(ids['GUICHE-04']) + ' .gestao-copiar-status', s => s.textContent) === 'Copiado.' && !page.url().includes('totem-url.php') && postsTotens() === postsAntes + 1, rot + ' copiar URL (lista): o botao copia a URL da linha para a area de transferencia, mostra "Copiado." e nao sai da lista');
+
+    // ---- criar totem: erro de servidor, XSS literal, sucesso
+    await irPara(page, base, '/gestao/totem-form.php');
+    const maua2 = await page.evaluate(() => Array.from(document.getElementById('id_empresa').options).find(o => o.textContent === 'Maua II').value);
+    await page.select('#id_empresa', maua2);
+    await page.type('#nome', 'A');
+    const [r422] = await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-salvar-totem')]);
+    ok(r422.status() === 422 && await page.evaluate(() => { const e = document.getElementById('erro-nome'); const n = document.getElementById('nome'); return e && e.getAttribute('role') === 'alert' && !!e.querySelector('svg') && e.textContent.includes('Erro:') && n.getAttribute('aria-invalid') === 'true' && n.getAttribute('aria-describedby') === 'erro-nome' && getComputedStyle(n).borderTopWidth === '3px' && n.value === 'A' && !document.getElementById('erro-empresa'); }), rot + ' novo totem: nome invalido => 422 com erro por icone + texto "Erro:", role=alert, aria-invalid e borda 3px');
+    ok(await page.$eval('#id_empresa', s => s.value) === maua2, rot + ' novo totem: a empresa escolhida volta selecionada');
+    await checagemGeral(page, rot + ' novo totem com erro', contadores);
+    await page.screenshot({ path: path.join(CAPTURAS, 'totem-form-erro.png') });
+    await limparCampo(page, '#nome');
+    await page.evaluate(() => document.getElementById('nome').removeAttribute('maxlength')); // simula POST sem o limite do navegador
+    await page.type('#nome', '"><img src=x onerror=window.__xss=9>');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-salvar-totem')]);
+    ok(await page.evaluate(() => document.getElementById('nome').value === '"><img src=x onerror=window.__xss=9>' && !document.querySelector('main img[src="x"]') && window.__xss === undefined && !!document.getElementById('erro-nome')), rot + ' novo totem: nome hostil volta LITERAL no campo, rejeitado, sem executar');
+    await limparCampo(page, '#nome');
+    await page.type('#nome', 'Painel 07');
+    const antesC = posts.filter(u => u.includes('totem-form.php')).length;
+    const navC = page.waitForNavigation({ waitUntil: 'networkidle0' });
+    const busy = await page.evaluate(() => { const f = document.getElementById('form-totem'); f.requestSubmit(); f.requestSubmit(); f.requestSubmit(); return f.getAttribute('aria-busy'); });
+    await navC;
+    ok(busy === 'true' && posts.filter(u => u.includes('totem-form.php')).length - antesC === 1, rot + ' novo totem: anti duplo clique, 3 envios geram 1 POST');
+    ok(await page.evaluate(() => { const f = document.getElementById('gestao-flash'); return location.pathname === '/gestao/totem-url.php' && f && f.textContent.includes('Totem criado e ativo') && document.getElementById('totem-url-nome').textContent === 'PAINEL-07' && /^https:\/\/totem\.udlog\.online\/totem\/\?totem=PAINEL-07-MAUAII-[A-Z2-7]{16}$/.test(document.getElementById('totem-url-valor').textContent) && !document.getElementById('totem-url-regerada'); }), rot + ' novo totem: criado => tela da URL (PRG) com flash, nome normalizado PAINEL-07, URL no padrao e sem aviso de regeracao');
+    await page.screenshot({ path: path.join(CAPTURAS, 'totem-url-criado.png') });
+    await checagemGeral(page, rot + ' URL criada', contadores);
+    await page.close();
+}
+
+/** Sem JS: as acoes sao formularios; sem dialogo o servidor valida (nome e confirmacao obrigatorios). */
+async function cenarioTotensSemJs(browser, srv, contadores) {
+    const rot = 'sem JS totens';
+    const { base, info } = srv;
+    const page = await novaPagina(browser, 1366, 768, rot, contadores);
+    await limparEstado(page, base);
+    await page.setJavaScriptEnabled(false);
+    await entrar(page, base, 'ana.admin', info.senha);
+    await irPara(page, base, '/gestao/totens.php');
+    const ids = await idsTotem(page);
+    const e = await page.evaluate(estadoPagina);
+    ok(e.scrollW <= e.clientW, rot + ' lista: sem overflow horizontal');
+    ok(await page.evaluate(id => { const a = document.querySelector('tr[data-id-totem="' + id + '"] a[data-copiar-alternativa]'); return a && a.getAttribute('href') === '/gestao/totem-url.php?id=' + id && a.textContent.trim() === 'Abrir URL' && !document.querySelector('.gestao-url-copiar button'); }, ids['GUICHE-04']), rot + ' lista: sem JS o link "Abrir URL" leva a tela da URL (nao promete copiar)');
+    const vis = await page.evaluate(ids => {
+        const v = el => !!el && el.getClientRects().length > 0;
+        const g = document.querySelector('tr[data-id-totem="' + ids['GUICHE-04'] + '"]'), b = document.querySelector('tr[data-id-totem="' + ids['BALCAO-01'] + '"]');
+        return { nome: v(g.querySelector('input[name="nome_confirmacao"]')), rotulo: v(g.querySelector('label.gestao-confirmacao-inline')), caixa: v(b.querySelector('input[name="confirmar_atendimento"]')), dialogo: !!document.getElementById('gestao-dialogo'), altura: Math.round(g.getBoundingClientRect().height), botoes: Array.from(document.querySelectorAll('.gestao-botao')).filter(x => x.getClientRects().length).every(x => Math.round(x.getBoundingClientRect().height) >= 44) };
+    }, ids);
+    ok(vis.nome && vis.rotulo && vis.caixa && !vis.dialogo && vis.botoes, rot + ' lista: campo do nome e caixa de atendimento ficam VISIVEIS (o servidor valida), sem dialogo, botoes >= 44px (linha do regerar com ' + vis.altura + 'px)');
+    await page.screenshot({ path: path.join(CAPTURAS, 'totens-sem-js.png') });
+    await checagemGeral(page, rot + ' lista', contadores);
+    // desativar com atendimento recente: sem marcar a caixa o navegador nao envia (required)
+    const antes = page.url();
+    await page.click(sel(ids['BALCAO-01']) + ' button[value="desativar"]');
+    await espera(300);
+    ok(page.url() === antes && await page.evaluate(id => document.querySelector('tr[data-id-totem="' + id + '"] input[name="confirmar_atendimento"]').validity.valueMissing, ids['BALCAO-01']), rot + ' desativar com atendimento: sem marcar a caixa nada e enviado (required nativo)');
+    await page.click(sel(ids['BALCAO-01']) + ' input[name="confirmar_atendimento"]');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click(sel(ids['BALCAO-01']) + ' button[value="desativar"]')]);
+    ok(await page.evaluate(id => document.getElementById('gestao-flash').textContent.includes('Totem desativado') && document.querySelector('tr[data-id-totem="' + id + '"] .col-situacao').textContent.trim().startsWith('Inativo') && !document.getElementById('gestao-flash-fechar'), ids['BALCAO-01']), rot + ' desativar: formulario com CSRF funciona sem JS (caixa marcada) e o flash aparece');
+    // ativar
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click(sel(ids['BALCAO-09']) + ' button[value="ativar"]')]);
+    ok(await page.evaluate(id => document.getElementById('gestao-flash').textContent.includes('Totem ativado') && !document.querySelector('tr[data-id-totem="' + id + '"]').classList.contains('gestao-tabela__linha--inativa'), ids['BALCAO-09']), rot + ' ativar: funciona sem JS');
+    // regerar sem o nome: o navegador exige (required)
+    await page.click(sel(ids['DOCA-02']) + ' button[value="regerar-url"]');
+    await espera(300);
+    ok(await page.evaluate(id => document.querySelector('tr[data-id-totem="' + id + '"] input[name="nome_confirmacao"]').validity.valueMissing, ids['DOCA-02']), rot + ' regerar: nome em branco nao e enviado (required nativo)');
+    // regerar com nome errado: o servidor recusa e a URL nao muda
+    const urlDoca = await page.$eval(sel(ids['DOCA-02']) + ' code.gestao-totem-url', c => c.textContent);
+    await page.type(sel(ids['DOCA-02']) + ' input[name="nome_confirmacao"]', 'OUTRO-NOME');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click(sel(ids['DOCA-02']) + ' button[value="regerar-url"]')]);
+    ok(await page.evaluate(() => { const f = document.getElementById('gestao-flash'); return f && f.getAttribute('data-tipo') === 'erro' && f.textContent.includes('O nome digitado não confere'); }) && await page.$eval(sel(ids['DOCA-02']) + ' code.gestao-totem-url', c => c.textContent) === urlDoca, rot + ' regerar: nome errado => o SERVIDOR recusa (flash de erro) e a URL nao muda');
+    // regerar com o nome certo
+    await page.type(sel(ids['DOCA-02']) + ' input[name="nome_confirmacao"]', 'doca-02');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click(sel(ids['DOCA-02']) + ' button[value="regerar-url"]')]);
+    ok(page.url().includes('/gestao/totem-url.php?id=' + ids['DOCA-02']) && await page.evaluate(u => document.getElementById('totem-url-valor').textContent !== u && !!document.getElementById('totem-url-regerada') && document.getElementById('gestao-flash').textContent.includes('URL regerada'), urlDoca), rot + ' regerar: nome certo => URL nova e aviso de URL antiga, sem JS');
+    const sj = await page.evaluate(() => { const c = document.getElementById('totem-url-valor'); return { sel: getComputedStyle(c).userSelect, botao: !!document.getElementById('btn-copiar-url') || !!document.getElementById('btn-copiar-senha'), fonte: getComputedStyle(c).fontSize }; });
+    ok(sj.sel === 'all' && !sj.botao && parseFloat(sj.fonte) >= 20, rot + ' URL: sem JS a URL segue em destaque e selecionavel com um clique (user-select all); o botao Copiar depende de JS (risco aceito)');
+    await checagemGeral(page, rot + ' URL', contadores);
+    await page.close();
+}
+
+/** Estado vazio da lista (esvazia o banco QA do servidor por stdin). */
+async function cenarioTotensVazio(browser, srv, contadores) {
+    const rot = '1366x768 totens-vazio';
+    const { base, info } = srv;
+    await esvaziarTotens(srv);
+    const page = await novaPagina(browser, 1366, 768, rot, contadores);
+    await limparEstado(page, base);
+    await entrar(page, base, 'ana.admin', info.senha);
+    await irPara(page, base, '/gestao/totens.php');
+    await checagemGeral(page, rot, contadores);
+    ok(await page.evaluate(() => { const l = document.querySelectorAll('#tabela-totens tbody tr'); const c = document.querySelector('.gestao-tabela__vazio .gestao-estado'); return l.length === 1 && c && c.textContent.trim() === 'Nenhum totem cadastrado. Crie o primeiro.' && !!c.querySelector('svg') && document.querySelector('.gestao-tabela__vazio td').getAttribute('colspan') === '6' && Math.round(document.getElementById('btn-novo-totem').getBoundingClientRect().height) >= 44; }), rot + ': estado vazio "Nenhum totem cadastrado. Crie o primeiro." com icone e botao "Novo totem" (44px) acima');
+    await botoesSolidos(page, rot);
+    await page.screenshot({ path: path.join(CAPTURAS, 'vazio.png') });
+    await page.close();
+}
+
 (async () => {
     const contadores = { csp: [], erros: [], externos: [], semCsp: [], secundarios: [] };
     let srv = null, browser = null;
@@ -683,6 +1111,13 @@ async function cenarioSemJs(browser, srv, contadores) {
         await cenarioCompleto(browser, srv, contadores);
         await cenarioEstreito(browser, srv, contadores);
         await cenarioSemJs(browser, srv, contadores);
+        // F2 (totens): lista, novo totem e URL em 3 viewports; fluxos com JS; sem JS; estado vazio (ultimo: esvazia o banco QA)
+        await cenarioTotensViewport(browser, srv, 1366, 768, contadores);
+        await cenarioTotensViewport(browser, srv, 1920, 1080, contadores);
+        await cenarioTotensViewport(browser, srv, 1000, 700, contadores);
+        await cenarioTotensFluxo(browser, srv, contadores);
+        await cenarioTotensSemJs(browser, srv, contadores);
+        await cenarioTotensVazio(browser, srv, contadores);
         ok(contadores.csp.length === 0, 'console: nenhuma mensagem de CSP no Chrome' + (contadores.csp.length ? ' -> ' + contadores.csp.slice(0, 3).join(' | ') : ''));
         ok(contadores.erros.length === 0, 'nenhum erro de JavaScript nas paginas' + (contadores.erros.length ? ' -> ' + contadores.erros.slice(0, 3).join(' | ') : ''));
         ok(contadores.externos.length === 0, 'nenhuma requisicao externa (CDN/fonte/imagem)' + (contadores.externos.length ? ' -> ' + contadores.externos.slice(0, 3).join(' | ') : ''));

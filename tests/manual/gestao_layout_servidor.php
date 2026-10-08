@@ -16,6 +16,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/qa_gestao_infra.php';
 
+use App\Rn\TotemGestaoRn;
+
 $porta = (int) ($argv[1] ?? 0);
 if ($porta < 1024 || $porta > 65000) {
     fwrite(STDERR, "porta invalida\n");
@@ -39,7 +41,45 @@ try {
     gtSemear($pdo, 'xss.um', 'usuario', GT_SENHA_BOA, false, true, '<img src=x onerror=window.__xss=1>');
     gtSemear($pdo, 'xss.dois', 'usuario', GT_SENHA_BOA, false, true, '"><script>window.__xss=2</script>');
 
-    $env = array_merge(gtEnvPadrao(), ['GESTAO_PERMITIR_HTTP' => 'true']);
+    // F2 (totens): empresas e totens semeados (ativo, inativo, legado fora do padrao, com atendimento recente,
+    // nome/empresa hostis, URL longa). TOTEM_URL_BASE existe SO no ambiente deste processo (nunca no .env).
+    $urlBase = 'https://totem.udlog.online/totem/';
+    $idAdmin = (int) $pdo->query("SELECT id_usuario FROM tb_gestao_usuario WHERE login = 'ana.admin'")->fetchColumn();
+    $emp = static function (string $nome, string $cnpj, int $ativo = 1) use ($pdo): int {
+        $pdo->prepare('INSERT INTO tb_empresa (nome, cnpj, ativo) VALUES (:n, :c, :a)')->execute(['n' => $nome, 'c' => $cnpj, 'a' => $ativo]);
+
+        return (int) $pdo->lastInsertId();
+    };
+    $eMaua1 = $emp('Maua I', '14706199000182');
+    $eMaua2 = $emp('Maua II', '14706199000344');
+    $eLonga = $emp('Empresa16Chars00', '55555555000155');
+    $eXss = $emp('<img src=x onerror=window.__xss=8>', '66666666000166');
+    $emp('Empresa Inativa', '44444444000144', 0);
+    $rnTotem = new TotemGestaoRn($pdo, $urlBase);
+    $criarTotem = static function (int $empresa, string $nome) use ($rnTotem, $idAdmin): int {
+        $r = $rnTotem->criar($idAdmin, $empresa, $nome, '203.0.113.5');
+        if (!($r['ok'] ?? false)) {
+            throw new RuntimeException('semente de totem falhou: ' . ($r['codigo'] ?? '?'));
+        }
+
+        return (int) $r['id'];
+    };
+    $idGuiche = $criarTotem($eMaua1, 'Guiche 04');
+    $idDoca = $criarTotem($eMaua2, 'Doca 02');
+    $idInativo = $criarTotem($eMaua1, 'Balcao 09');
+    $rnTotem->definirAtivo($idAdmin, $idInativo, false, true, '203.0.113.5');
+    $idAtend = $criarTotem($eMaua1, 'Balcao 01');
+    $criarTotem($eLonga, 'ABCDEFGHIJKLMNOPQRSTUVWX');
+    $pdo->prepare("INSERT INTO tb_atendimento (codigo_publico, id_totem, tipo, status, atualizado_em) VALUES (:c, :t, 'expedicao', 'em_andamento', NOW())")->execute(['c' => vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex(random_bytes(16)), 4)), 't' => $idAtend]);
+    $legado = static function (string $codigo, string $nome, ?int $empresa) use ($pdo): int {
+        $pdo->prepare('INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo) VALUES (:c, :n, :e, :t, 1)')->execute(['c' => $codigo, 'n' => $nome, 'e' => $empresa, 't' => bin2hex(random_bytes(32))]);
+
+        return (int) $pdo->lastInsertId();
+    };
+    $legado('RECEPCAO-01', 'RECEPCAO-01', $eMaua1);
+    $legado('XSS_LEGADO', '<img src=x onerror=window.__xss=7>', $eXss);
+
+    $env = array_merge(gtEnvPadrao(), ['GESTAO_PERMITIR_HTTP' => 'true', 'TOTEM_URL_BASE' => $urlBase]);
     putenv('QA_GESTAO_ENV_JSON=' . json_encode($env));
     $raiz = dirname(__DIR__, 2);
     $cmd = [PHP_BINARY, '-S', '127.0.0.1:' . $porta, '-t', $raiz . '/public', '-d', 'auto_prepend_file=' . __DIR__ . '/qa_gestao_prepend.php', '-d', 'display_errors=0', '-d', 'log_errors=0'];
@@ -67,6 +107,12 @@ try {
     while (($linha = fgets(STDIN)) !== false) {
         if (trim($linha) === 'fim') {
             break;
+        }
+        if (trim($linha) === 'esvaziar') { // estado vazio da lista de totens (captura/teste)
+            $pdo->exec('DELETE FROM tb_atendimento');
+            $pdo->exec('DELETE FROM tb_totem');
+            echo "ESVAZIADO\n";
+            fflush(STDOUT);
         }
     }
 } catch (Throwable $e) {

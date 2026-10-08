@@ -23,6 +23,8 @@ final class GestaoContexto
 
     public const CAMINHO_USUARIOS = '/gestao/usuarios.php';
 
+    public const CAMINHO_TOTENS = '/gestao/totens.php';
+
     /**
      * Itens do menu lateral. `disponivel` false = ainda nao existe (fica oculto
      * ate a fase que o cria). `perfil` = perfil MINIMO para ver o item.
@@ -31,7 +33,7 @@ final class GestaoContexto
      */
     public const MENU = [
         ['id' => 'painel', 'rotulo' => 'Painel', 'href' => '/gestao/painel.php', 'perfil' => 'admin', 'disponivel' => false],
-        ['id' => 'totens', 'rotulo' => 'Totens', 'href' => '/gestao/totens.php', 'perfil' => 'admin', 'disponivel' => false],
+        ['id' => 'totens', 'rotulo' => 'Totens', 'href' => '/gestao/totens.php', 'perfil' => 'admin', 'disponivel' => true],
         ['id' => 'atendimentos', 'rotulo' => 'Atendimentos', 'href' => '/gestao/atendimentos.php', 'perfil' => 'admin', 'disponivel' => false],
         ['id' => 'ordens', 'rotulo' => 'Ordens de coleta', 'href' => '/gestao/ordens.php', 'perfil' => 'usuario', 'disponivel' => false],
         ['id' => 'anexos', 'rotulo' => 'Anexos órfãos', 'href' => '/gestao/anexos.php', 'perfil' => 'admin', 'disponivel' => false],
@@ -59,6 +61,17 @@ final class GestaoContexto
         'proprio_perfil' => ['erro', 'Você não pode alterar o seu próprio perfil. Nada foi alterado. Peça a outro administrador.'],
         'proprio_ativo' => ['erro', 'Você não pode ativar nem desativar a sua própria conta. Nada foi alterado. Peça a outro administrador.'],
         'proprio_desbloqueio' => ['erro', 'Você não pode desbloquear a própria conta. Nada foi alterado. Peça a outro administrador.'],
+        'totem_criado' => ['sucesso', 'Totem criado e ativo. Copie a URL abaixo e abra no navegador do quiosque.'],
+        'totem_ativado' => ['sucesso', 'Totem ativado. O quiosque já abre normalmente.'],
+        'totem_desativado' => ['sucesso', 'Totem desativado. A página e a API do quiosque pararam de responder agora. Para voltar a usar, ative o totem de novo.'],
+        'url_regerada' => ['sucesso', 'URL regerada. O endereço anterior deixou de funcionar. O acesso do totem em si (token) não foi alterado; para bloquear um totem, desative-o.'],
+        'totem_sem_mudanca' => ['info', 'Nada foi alterado. O totem já estava nesse estado.'],
+        'totem_nao_encontrado' => ['erro', 'Totem não encontrado. Nada foi alterado. Atualize a lista e tente de novo.'],
+        'totem_atendimento_em_andamento' => ['erro', 'Há atendimento recente neste totem. Desative novamente e confirme a desativação.'],
+        'url_ja_regerada' => ['erro', 'A URL deste totem já foi regerada por outro pedido. Nada foi alterado. Confira a URL atual na lista antes de tentar de novo.'],
+        'totem_nome_confirmacao' => ['erro', 'O nome digitado não confere com o nome do totem. A URL não foi regerada. Digite o nome exatamente como aparece na lista.'],
+        'totem_legado_invalido' => ['erro', 'Este totem é antigo e o nome ou a empresa dele não permitem montar uma URL no padrão novo. A URL não foi alterada. Avise quem administra o sistema.'],
+        'totem_colisao' => ['erro', 'Não foi possível gerar um código único agora. Nada foi alterado. Tente novamente.'],
         'sessao_expirada' => ['info', 'Sua sessão terminou. Digite o login e a senha para entrar de novo.'],
         'saiu' => ['sucesso', 'Você saiu da gestão. Para voltar, digite o login e a senha.'],
         'senha_alterada_entrar' => ['sucesso', 'Senha alterada. Digite o login e a nova senha para entrar.'],

@@ -12,14 +12,24 @@ CREATE TABLE tb_empresa (
 -- Totens cadastrados: e isso que deixa o sistema pronto pra multi-totem
 CREATE TABLE tb_totem (
     id_totem      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    codigo        VARCHAR(30) NOT NULL UNIQUE,
+    codigo        VARCHAR(64) NOT NULL UNIQUE,
     nome          VARCHAR(100) NOT NULL,
     localizacao   VARCHAR(150) NULL,
     id_empresa    INT UNSIGNED NULL,
     token_api     CHAR(64) NOT NULL UNIQUE,
     ativo         TINYINT(1) NOT NULL DEFAULT 1,
     criado_em     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (id_empresa) REFERENCES tb_empresa(id_empresa)
+    -- Gestao de totens (migration 022, demanda gestao-totem F2): quem criou, ultima
+    -- alteracao, ultima regeracao do HASH da URL e contador de regeracoes. A chave
+    -- estrangeira de criado_por (tb_gestao_usuario) e adicionada mais abaixo, depois
+    -- da criacao dessa tabela.
+    criado_por       INT UNSIGNED NULL,
+    atualizado_em    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    url_regerada_em  DATETIME NULL,
+    url_versao       INT UNSIGNED NOT NULL DEFAULT 1,
+    FOREIGN KEY (id_empresa) REFERENCES tb_empresa(id_empresa),
+    KEY idx_totem_empresa_ativo (id_empresa, ativo),
+    UNIQUE KEY uk_totem_empresa_nome (id_empresa, nome)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Diretorio local de clientes (autocomplete do recebimento + casamento por
@@ -321,3 +331,9 @@ CREATE TABLE tb_gestao_auditoria (
     KEY idx_gestao_auditoria_acao (acao, criado_em),
     KEY idx_gestao_auditoria_alvo (alvo_tipo, alvo_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Gestao de totens (migration 022, demanda gestao-totem F2): chave estrangeira de
+-- tb_totem.criado_por, adicionada aqui porque tb_gestao_usuario e criada depois de
+-- tb_totem. Mesmo nome e regra da migration 022.
+ALTER TABLE tb_totem
+    ADD CONSTRAINT fk_totem_criado_por FOREIGN KEY (criado_por) REFERENCES tb_gestao_usuario(id_usuario) ON DELETE SET NULL;

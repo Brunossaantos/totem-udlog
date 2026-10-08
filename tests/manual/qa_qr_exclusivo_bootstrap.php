@@ -61,7 +61,7 @@ function qaQrCriarBanco(): array
     $pdo->exec("USE `{$nome}`");
     if ($pdo->query('SELECT DATABASE()')->fetchColumn() !== $nome) throw new RuntimeException('Sentinela do banco QA falhou');
     $raiz = dirname(__DIR__, 2);
-    foreach (['sql/schema.sql', 'sql/migrations/014_tb_lgpd_aceite.sql', 'sql/migrations/015_vio_api_br_estados_e_id_externo.sql', 'sql/migrations/016_vio_api_br_cache.sql', 'sql/migrations/017_cnh_modo_captura.sql', 'sql/migrations/018_nota_client_uid.sql', 'sql/migrations/019_drop_tb_fila_envio.sql', 'sql/migrations/020_gestao_usuario_sessao.sql', 'sql/migrations/021_gestao_auditoria.sql'] as $arquivo) qaQrAplicarSql($pdo, $raiz . '/' . $arquivo);
+    foreach (['sql/schema.sql', 'sql/migrations/014_tb_lgpd_aceite.sql', 'sql/migrations/015_vio_api_br_estados_e_id_externo.sql', 'sql/migrations/016_vio_api_br_cache.sql', 'sql/migrations/017_cnh_modo_captura.sql', 'sql/migrations/018_nota_client_uid.sql', 'sql/migrations/019_drop_tb_fila_envio.sql', 'sql/migrations/020_gestao_usuario_sessao.sql', 'sql/migrations/021_gestao_auditoria.sql', 'sql/migrations/022_totem_gestao.sql'] as $arquivo) qaQrAplicarSql($pdo, $raiz . '/' . $arquivo);
     return [$pdo, $nome];
 }
 

@@ -39,15 +39,18 @@ class AuditoriaDao
         'USUARIO_PERFIL',
         'USUARIO_ATIVO',
         'USUARIO_DESBLOQUEAR',
+        'TOTEM_CRIAR',
+        'TOTEM_ATIVO',
+        'TOTEM_URL_REGERAR',
     ];
 
-    public const ALVO_TIPOS = ['usuario'];
+    public const ALVO_TIPOS = ['usuario', 'totem'];
 
     public const RESULTADOS_FINAIS = ['OK', 'SEM_EFEITO', 'ERRO'];
 
     /**
      * Allowlist de `detalhe`: chave => lista fechada de valores permitidos, ou
-     * 'int' (inteiro 0..9999).
+     * 'int' (inteiro 0..9999) ou 'id' (inteiro positivo de ate 10 digitos, ex.: id da empresa).
      */
     public const DETALHE_CAMPOS = [
         'origem' => ['web', 'cli'],
@@ -56,6 +59,7 @@ class AuditoriaDao
         'perfil_para' => ['admin', 'usuario'],
         'ativo_para' => ['0', '1'],
         'sessoes_revogadas' => 'int',
+        'empresa' => 'id',
     ];
 
     public function __construct(private PDO $pdo)
@@ -115,7 +119,11 @@ class AuditoriaDao
             }
             $regra = self::DETALHE_CAMPOS[$chave];
             $texto = (string) $valor;
-            if ($regra === 'int') {
+            if ($regra === 'id') {
+                if (preg_match('/\A[1-9][0-9]{0,9}\z/D', $texto) !== 1) {
+                    throw new InvalidArgumentException('valor de detalhe fora da allowlist');
+                }
+            } elseif ($regra === 'int') {
                 if (preg_match('/\A[0-9]{1,4}\z/D', $texto) !== 1) {
                     throw new InvalidArgumentException('valor de detalhe fora da allowlist');
                 }

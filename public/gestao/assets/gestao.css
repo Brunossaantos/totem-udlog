@@ -129,7 +129,7 @@ main:focus { outline: none; }
 .gestao-recolher .gestao-icone { transition: transform .15s ease; }
 
 /* sidebar recolhida: só ícones (o texto continua no DOM para leitores de tela) */
-.gestao-app--recolhida .gestao-sidebar { padding-left: 8px; padding-right: 8px; }
+.gestao-app--recolhida .gestao-sidebar { padding-left: 6px; padding-right: 6px; }
 .gestao-app--recolhida .gestao-marca { align-items: center; padding: 0 0 12px; }
 .gestao-app--recolhida .gestao-marca__logo { display: none; }
 .gestao-app--recolhida .gestao-marca__mini { display: block; }
@@ -394,3 +394,86 @@ form[aria-busy="true"] .gestao-botao {
     .gestao-dados { grid-template-columns: 1fr; gap: 4px; }
     .gestao-dados dd { margin-bottom: 10px; }
 }
+
+/* ==========================================================================
+   Totens (demanda gestao-totem, F2): lista, novo totem e tela da URL.
+   Mesma paleta/estados da lista de usuarios (texto + icone + peso + borda).
+   ========================================================================== */
+
+/* ---------- lista de totens: tabela densa (linha ~53-65px a partir de 1366px) ---------- */
+.gestao-tabela--totens { table-layout: fixed; }
+.gestao-tabela--totens th,
+.gestao-tabela--totens td { padding-left: 6px; padding-right: 6px; }
+.gestao-tabela--totens .gestao-col-nome { width: 104px; }
+.gestao-tabela--totens .gestao-col-empresa { width: 74px; }
+.gestao-tabela--totens .gestao-col-situacao { width: 128px; }
+.gestao-tabela--totens .gestao-col-criado { width: 112px; }
+.gestao-tabela--totens .gestao-col-acoes { width: 284px; }
+.gestao-tabela--totens .col-nome { min-width: 0; }
+.gestao-tabela--totens .col-empresa,
+.gestao-tabela--totens .col-situacao { overflow-wrap: anywhere; }
+.gestao-tabela--totens .col-acoes { min-width: 0; }
+.gestao-tabela--totens .col-criado time { white-space: nowrap; }
+.gestao-tabela--totens th { white-space: normal; }
+/* totem inativo: texto "Inativo" + italico no nome/empresa + barra pontilhada na borda esquerda (nunca so cor) */
+.gestao-tabela--totens .gestao-tabela__linha--inativa td:first-child { border-left: 5px dotted var(--texto); }
+.gestao-tabela--totens .gestao-tabela__linha--inativa .col-nome,
+.gestao-tabela--totens .gestao-tabela__linha--inativa .col-empresa { font-style: italic; }
+
+/* URL do quiosque: caixa de codigo com quebra segura (anywhere); botao "Copiar URL" na linha de baixo */
+.gestao-url-celula { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.gestao-totem-url {
+    flex: 1 1 100%; min-width: 0; max-width: 100%;
+    font-family: Consolas, "Courier New", monospace; font-size: 14px; line-height: 1.4; font-weight: 600;
+    overflow-wrap: anywhere;
+}
+.gestao-url-celula .gestao-botao { flex: none; }
+.gestao-url-copiar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.gestao-url-celula__nota { flex: 1 1 100%; }
+/* atendimento em andamento: icone + negrito (sem cor nova) */
+.gestao-situacao__nota--destaque { display: flex; align-items: flex-start; gap: 4px; font-weight: 700; }
+.gestao-situacao__nota--destaque .gestao-icone { flex: none; width: 16px; height: 16px; margin-top: 1px; }
+
+/* confirmacao do formulario da linha (sem JS: aparece em linha propria; com JS o dialogo a substitui) */
+.gestao-confirmacao-inline { flex: 1 1 100%; max-width: 260px; font-size: 14px; }
+.gestao-confirmacao-inline--caixa { max-width: 100%; font-weight: 600; }
+.gestao-confirmacao-inline--caixa input { width: 20px; height: 20px; margin-right: 6px; vertical-align: middle; accent-color: var(--azul); }
+.gestao-confirmacao-inline--oculta { display: none; }
+
+/* ---------- novo totem ---------- */
+.gestao-ajuda__corpo { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.gestao-totem-previa {
+    display: block; padding: 8px 12px; width: fit-content; max-width: 100%;
+    border: 2px dashed var(--texto); border-radius: 6px;
+    font-family: Consolas, "Courier New", monospace; font-size: 14px; font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+/* ---------- tela da URL (pos-criacao / regerar / "Copiar URL") ---------- */
+.gestao-cartao--url { max-width: 880px; }
+.gestao-cartao--url .gestao-aviso-caixa { max-width: none; }
+.gestao-dados--url { grid-template-columns: 1fr; gap: 8px; }
+.gestao-url-destaque { flex-direction: row; }
+.gestao-totem-url--destaque {
+    flex: 1 1 100%; max-width: none; display: block; width: 100%; padding: 16px 20px;
+    border: 3px solid var(--texto); border-radius: 8px; background: var(--branco); color: var(--texto);
+    font-size: 20px; line-height: 1.5; font-weight: 700; letter-spacing: .02em;
+    user-select: all; -webkit-user-select: all; overflow-wrap: anywhere;
+}
+/* nota permanente (URL ja regerada): informativa e neutra, sem a caixa de 3px dos avisos/flash */
+.gestao-nota-permanente {
+    display: flex; align-items: flex-start; gap: 10px; max-width: none; padding: 10px 14px;
+    border: 1px solid var(--borda); border-left: 6px solid var(--borda); border-radius: 6px;
+    background: var(--branco); color: var(--texto); font-size: 15px;
+}
+.gestao-nota-permanente .gestao-icone { flex: none; margin-top: 2px; color: var(--terc); }
+.gestao-nota-permanente p { font-weight: 400; }
+.gestao-ajuda--url { max-width: none; }
+@media (max-width: 700px) { .gestao-totem-url--destaque { font-size: 16px; padding: 12px 14px; } }
+
+/* ---------- dialogo com confirmacao extra (nome do totem / atendimento em andamento) ---------- */
+.gestao-dialogo [hidden] { display: none; }
+.gestao-dialogo__extra { gap: 8px; }
+.gestao-dialogo__estado { min-height: 21px; font-size: 14px; font-weight: 700; }
+.gestao-dialogo__caixa { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.gestao-dialogo__caixa input { flex: none; width: 24px; height: 24px; margin: 0; accent-color: var(--azul); }
