@@ -19,13 +19,16 @@ use Util\IpCliente;
  *
  * IP: a coluna `ip` guarda o IP COMPLETO em binario, em CLARO (nao e hash nem
  * truncado), de proposito: a trilha serve a analise forense. A contrapartida e
- * a retencao curta de 90 dias (decisao do usuario), a ser implementada na fase
- * F3 junto do cron de logs; ate la a tabela nao e podada. (O hash de IP com sal
- * existe so nos contadores de login, tb_gestao_login_tentativa.)
+ * a retencao curta de 90 dias (decisao do usuario): a poda e feita por
+ * App\Dao\AuditoriaRetencaoDao, chamado so pelo cron cron/limpar-logs-gestao.php
+ * (F3d). (O hash de IP com sal existe so nos contadores de login,
+ * tb_gestao_login_tentativa.)
  *
- * Esta classe so faz INSERT e UM UPDATE: o fechamento do `resultado` de uma
- * linha PENDENTE (abrir antes da acao, fechar depois). Nao existe DELETE nem
- * outro UPDATE (o teste da gestao varre este arquivo para garantir).
+ * Esta classe so faz INSERT e UM UPDATE: o fechamento do `resultado` (e, se
+ * informado, do `detalhe` com as contagens finais) de uma linha PENDENTE (abrir
+ * antes da acao, fechar depois). Nao existe DELETE nem outro UPDATE aqui: a poda
+ * por idade (90 dias) fica SO em AuditoriaRetencaoDao (o teste da gestao varre o
+ * codigo para garantir).
  */
 class AuditoriaDao
 {
@@ -42,24 +45,29 @@ class AuditoriaDao
         'TOTEM_CRIAR',
         'TOTEM_ATIVO',
         'TOTEM_URL_REGERAR',
+        'RETENCAO_EXECUTAR',
     ];
 
-    public const ALVO_TIPOS = ['usuario', 'totem'];
+    public const ALVO_TIPOS = ['usuario', 'totem', 'sistema'];
 
     public const RESULTADOS_FINAIS = ['OK', 'SEM_EFEITO', 'ERRO'];
 
     /**
      * Allowlist de `detalhe`: chave => lista fechada de valores permitidos, ou
-     * 'int' (inteiro 0..9999) ou 'id' (inteiro positivo de ate 10 digitos, ex.: id da empresa).
+     * 'int' (inteiro 0..9999), 'int_grande' (inteiro 0..999999999, contagens do cron de
+     * retencao) ou 'id' (inteiro positivo de ate 10 digitos, ex.: id da empresa).
      */
     public const DETALHE_CAMPOS = [
-        'origem' => ['web', 'cli'],
+        'origem' => ['web', 'cli', 'cron'],
         'motivo' => ['credenciais', 'conta_bloqueada', 'ip_limitado', 'conta_inativa'],
         'perfil_de' => ['admin', 'usuario'],
         'perfil_para' => ['admin', 'usuario'],
         'ativo_para' => ['0', '1'],
         'sessoes_revogadas' => 'int',
         'empresa' => 'id',
+        'logs_apagados' => 'int_grande',
+        'auditoria_apagados' => 'int_grande',
+        'lotes' => 'int_grande',
     ];
 
     public function __construct(private PDO $pdo)
@@ -91,16 +99,26 @@ class AuditoriaDao
         return $this->inserir($idUsuario, $acao, $alvoTipo, $alvoId, $detalhe, $ip, $resultado);
     }
 
-    /** Fecha uma linha PENDENTE. Unico UPDATE desta classe: nunca altera linha ja fechada. */
-    public function fechar(int $idAuditoria, string $resultado): bool
+    /**
+     * Fecha uma linha PENDENTE. Unico UPDATE desta classe: nunca altera linha ja fechada.
+     * `$detalhe` (opcional, mesma allowlist) substitui o detalhe aberto, para registrar
+     * contagens finais, vazio mantem o detalhe da abertura.
+     *
+     * @param array<string,string|int> $detalhe
+     */
+    public function fechar(int $idAuditoria, string $resultado, array $detalhe = []): bool
     {
         if (!in_array($resultado, self::RESULTADOS_FINAIS, true)) {
             throw new InvalidArgumentException('resultado de auditoria invalido');
         }
+        $texto = self::montarDetalhe($detalhe);
         $stmt = $this->pdo->prepare(
-            "UPDATE tb_gestao_auditoria SET resultado = :resultado WHERE id_auditoria = :id AND resultado = 'PENDENTE'"
+            "UPDATE tb_gestao_auditoria SET resultado = :resultado, detalhe = COALESCE(:detalhe, detalhe) WHERE id_auditoria = :id AND resultado = 'PENDENTE'"
         );
-        $stmt->execute(['resultado' => $resultado, 'id' => $idAuditoria]);
+        $stmt->bindValue('resultado', $resultado);
+        $stmt->bindValue('detalhe', $texto, $texto === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+        $stmt->bindValue('id', $idAuditoria, PDO::PARAM_INT);
+        $stmt->execute();
 
         return $stmt->rowCount() === 1;
     }
@@ -121,6 +139,10 @@ class AuditoriaDao
             $texto = (string) $valor;
             if ($regra === 'id') {
                 if (preg_match('/\A[1-9][0-9]{0,9}\z/D', $texto) !== 1) {
+                    throw new InvalidArgumentException('valor de detalhe fora da allowlist');
+                }
+            } elseif ($regra === 'int_grande') {
+                if (preg_match('/\A[0-9]{1,9}\z/D', $texto) !== 1) {
                     throw new InvalidArgumentException('valor de detalhe fora da allowlist');
                 }
             } elseif ($regra === 'int') {

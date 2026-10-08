@@ -199,14 +199,14 @@ try {
     foreach (['app', 'util', 'public', 'tools', 'cron'] as $pasta) {
         $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($raiz . '/' . $pasta, FilesystemIterator::SKIP_DOTS));
         foreach ($it as $f) {
-            if ($f->isFile() && $f->getExtension() === 'php' && !str_ends_with(str_replace('\\', '/', $f->getPathname()), 'app/Dao/AuditoriaDao.php')) {
+            if ($f->isFile() && $f->getExtension() === 'php' && !str_ends_with(str_replace('\\', '/', $f->getPathname()), 'app/Dao/AuditoriaDao.php') && !str_ends_with(str_replace('\\', '/', $f->getPathname()), 'app/Dao/AuditoriaRetencaoDao.php')) {
                 if (preg_match('/(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+tb_gestao_auditoria/i', (string) file_get_contents($f->getPathname())) === 1) {
                     $escritasFora[] = $f->getFilename();
                 }
             }
         }
     }
-    afirmar('Auditoria: nenhum outro arquivo da aplicacao escreve em tb_gestao_auditoria', $escritasFora === []);
+    afirmar('Auditoria: nenhum outro arquivo da aplicacao escreve em tb_gestao_auditoria (excecao exata: AuditoriaRetencaoDao, so DELETE de retencao, coberto em teste_gestao_retencao)', $escritasFora === []);
 
     // =====================================================================
     // E. UsuarioGestaoRn

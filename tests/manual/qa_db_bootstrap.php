@@ -116,6 +116,9 @@ if (!function_exists('qaDbCriar')) {
         // Migration 022 (demanda gestao-totem, F2, 2026-10-07) -- colunas de gestao em
         // tb_totem e codigo VARCHAR(64) (no-op: schema.sql ja traz tudo).
         qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/022_totem_gestao.sql');
+        // Migration 023 (demanda gestao-totem, F3a, 2026-10-08) -- tb_log_sistema (no-op:
+        // schema.sql ja cria).
+        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/023_log_sistema.sql');
 
         return [$admin, $nomeBanco];
     }

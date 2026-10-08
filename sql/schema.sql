@@ -337,3 +337,28 @@ CREATE TABLE tb_gestao_auditoria (
 -- tb_totem. Mesmo nome e regra da migration 022.
 ALTER TABLE tb_totem
     ADD CONSTRAINT fk_totem_criado_por FOREIGN KEY (criado_por) REFERENCES tb_gestao_usuario(id_usuario) ON DELETE SET NULL;
+
+-- Log central do sistema (migration 023, demanda gestao-totem F3a): alimentado so por
+-- Util\LogSistema a partir do catalogo fechado Util\LogCatalogo. Sem IP, sem texto livre,
+-- sem FK. Retencao de 90 dias (cron/limpar-logs-gestao.php). Ver o cabecalho da migration.
+CREATE TABLE tb_log_sistema (
+    id_log             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    nivel              ENUM('INFO','AVISO','ERRO') NOT NULL,
+    origem             ENUM('API','RECEBIMENTO','EXPEDICAO','CRON','GESTAO') NOT NULL,
+    categoria          VARCHAR(40) NOT NULL,
+    mensagem           VARCHAR(160) NOT NULL,
+    id_atendimento     BIGINT UNSIGNED NULL,
+    id_totem           INT UNSIGNED NULL,
+    detalhe            VARCHAR(255) NULL,
+    dedup_chave        CHAR(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    janela             DATETIME NOT NULL,
+    contador           INT UNSIGNED NOT NULL DEFAULT 1,
+    criado_em          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ultima_ocorrencia  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_log_sistema_dedup (dedup_chave, janela),
+    KEY idx_log_sistema_origem (origem, ultima_ocorrencia),
+    KEY idx_log_sistema_nivel (nivel, ultima_ocorrencia),
+    KEY idx_log_sistema_totem (id_totem, ultima_ocorrencia),
+    KEY idx_log_sistema_atendimento (id_atendimento),
+    KEY idx_log_sistema_criado (criado_em)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

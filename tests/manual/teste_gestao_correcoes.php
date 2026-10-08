@@ -323,7 +323,7 @@ try {
     // =====================================================================
     // E. M2: desbloquear (Rn)
     // =====================================================================
-    afirmar('desbloquear: AuditoriaDao::ACOES inclui USUARIO_DESBLOQUEAR (catalogo fechado)', in_array('USUARIO_DESBLOQUEAR', AuditoriaDao::ACOES, true) && count(AuditoriaDao::ACOES) === 12 && in_array('TOTEM_CRIAR', AuditoriaDao::ACOES, true) && in_array('TOTEM_ATIVO', AuditoriaDao::ACOES, true) && in_array('TOTEM_URL_REGERAR', AuditoriaDao::ACOES, true));
+    afirmar('desbloquear: AuditoriaDao::ACOES inclui USUARIO_DESBLOQUEAR (catalogo fechado)', in_array('USUARIO_DESBLOQUEAR', AuditoriaDao::ACOES, true) && count(AuditoriaDao::ACOES) === 13 && in_array('RETENCAO_EXECUTAR', AuditoriaDao::ACOES, true) && in_array('TOTEM_CRIAR', AuditoriaDao::ACOES, true) && in_array('TOTEM_ATIVO', AuditoriaDao::ACOES, true) && in_array('TOTEM_URL_REGERAR', AuditoriaDao::ACOES, true));
     $bloquear($idCarla);
     $dao->registrarFalhaSenha($idDavi, 5, 15);
     afirmar('desbloquear: pre-condicao (carla bloqueada; davi com 1 falha)', $dao->estaBloqueada($idCarla) && (int) $dao->buscarPorId($idDavi)['tentativas_falhas'] === 1);

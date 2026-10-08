@@ -731,10 +731,16 @@ try {
         }
         afirmar("auditoria: detalhe fora da allowlist ($k=$v) => excecao, nada gravado", $lan);
     }
-    // varredura estatica: o app so faz INSERT + 1 UPDATE (fechar) em tb_gestao_auditoria
+    // varredura estatica: o app so faz INSERT + 1 UPDATE (fechar) em tb_gestao_auditoria; a unica
+    // exclusao permitida e a retencao de 90 dias em app/Dao/AuditoriaRetencaoDao.php (F3d)
     $raizRepo = dirname(__DIR__, 2);
     $nUpd = 0;
-    $nDel = 0;
+    $nDelFora = 0;
+    $nDelDao = 0;
+    $destrutivoNoDao = 0;
+    $nArquivosVarridos = 0;
+    $consumidoresProibidos = [];
+    $daoRetencao = 'app/Dao/AuditoriaRetencaoDao.php';
     foreach (['app', 'util', 'tools', 'public', 'cron'] as $pasta) {
         if (!is_dir($raizRepo . '/' . $pasta)) {
             continue;
@@ -744,12 +750,30 @@ try {
             if (!$f->isFile() || !preg_match('/\.php$/', $f->getFilename()) || str_contains($f->getPathname(), 'vendor')) {
                 continue;
             }
+            $nArquivosVarridos++;
+            $rel = str_replace('\\', '/', substr($f->getPathname(), strlen($raizRepo) + 1));
             $c = (string) file_get_contents($f->getPathname());
             $nUpd += preg_match_all('/UPDATE\s+`?tb_gestao_auditoria/i', $c);
-            $nDel += preg_match_all('/(DELETE\s+FROM|TRUNCATE(\s+TABLE)?|REPLACE\s+INTO|DROP\s+TABLE(\s+IF\s+EXISTS)?)\s+`?tb_gestao_auditoria/i', $c);
+            $del = preg_match_all('/DELETE\s+FROM\s+`?tb_gestao_auditoria/i', $c);
+            $outros = preg_match_all('/(TRUNCATE(\s+TABLE)?|REPLACE\s+INTO|DROP\s+TABLE(\s+IF\s+EXISTS)?)\s+`?tb_gestao_auditoria/i', $c);
+            if ($rel === $daoRetencao) {
+                $nDelDao += $del;
+                $destrutivoNoDao += $outros;
+            } else {
+                $nDelFora += $del + $outros;
+            }
+            if (preg_match('#^(public|util)/#', $rel) === 1 || str_starts_with($rel, 'app/Controller/') || str_starts_with($rel, 'app/Views/')) {
+                if (str_contains($c, 'AuditoriaRetencaoDao')) {
+                    $consumidoresProibidos[] = $rel;
+                }
+            }
         }
     }
-    afirmar("auditoria append-only no codigo: UPDATE=$nUpd (esperado 1, so o fechamento) e DELETE/TRUNCATE/REPLACE/DROP=$nDel (esperado 0)", $nUpd === 1 && $nDel === 0);
+    $fonteRetencao = (string) file_get_contents($raizRepo . '/' . $daoRetencao);
+    afirmar("auditoria append-only no codigo: UPDATE=$nUpd (esperado 1, so o fechamento) e DELETE/TRUNCATE/REPLACE/DROP fora do DAO de retencao=$nDelFora (esperado 0, $nArquivosVarridos arquivos)", $nUpd === 1 && $nDelFora === 0 && $nArquivosVarridos > 50);
+    afirmar("auditoria retencao: exatamente 1 DELETE FROM tb_gestao_auditoria, so em $daoRetencao, com predicado de idade e LIMIT, sem TRUNCATE/REPLACE/DROP", $nDelDao === 1 && $destrutivoNoDao === 0 && preg_match('/DELETE FROM tb_gestao_auditoria WHERE criado_em < :corte ORDER BY id_auditoria LIMIT :limite/', $fonteRetencao) === 1);
+    afirmar('auditoria retencao: nenhum arquivo de public/, app/Controller/, app/Views/ ou util/ referencia AuditoriaRetencaoDao', $consumidoresProibidos === []);
+    afirmar('auditoria: AuditoriaDao.php sem DELETE', preg_match('/\bDELETE\b/i', preg_replace('#/\*.*?\*/#s', '', (string) file_get_contents($raizRepo . '/app/Dao/AuditoriaDao.php'))) !== 1);
 
     // =====================================================================
     // 10. Cabecalhos/CSP em todas as respostas, 500 e views
