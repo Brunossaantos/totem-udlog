@@ -99,8 +99,8 @@ main:focus { outline: none; }
 
 .gestao-marca { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0 4px 12px; border-bottom: 2px solid var(--borda); min-height: 80px; }
 .gestao-marca__logo { display: block; width: 140px; height: auto; }
-/* MINI MARCA da sidebar recolhida: pictograma de totem (favicon.svg). Decisão de identidade
-   pendente com o usuário; para trocar o asset, mexa SÓ no <img class="gestao-marca__mini">
+/* MINI MARCA da sidebar recolhida: leão da UDLOG (udlog-leao.png, recorte do símbolo
+   de udlog.png, 80x80 = 2x). O favicon do navegador segue sendo o pictograma do totem. Para trocar o asset, mexa SÓ no <img class="gestao-marca__mini">
    de layout_topo.php (src) e nesta regra (tamanho). */
 .gestao-marca__mini { display: none; width: 40px; height: 40px; }
 .gestao-marca__texto { font-size: 16px; font-weight: 600; color: var(--texto); }

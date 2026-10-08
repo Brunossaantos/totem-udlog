@@ -780,8 +780,8 @@ try {
     };
 
     // (1) caminho de producao: schema.sql ANTIGO (HEAD) + 014..021 + 022 duas vezes
-    $schemaAntigo = shell_exec('git -C ' . escapeshellarg($raiz) . ' show HEAD:sql/schema.sql');
-    afirmar('git: schema.sql do HEAD disponivel e ainda com codigo VARCHAR(30)', is_string($schemaAntigo) && str_contains($schemaAntigo, 'codigo        VARCHAR(30)'));
+    $schemaAntigo = shell_exec('git -C ' . escapeshellarg($raiz) . ' show ' . escapeshellarg('fab53ab^:sql/schema.sql') . '');
+    afirmar('git: schema.sql pre-F2 (fab53ab^) disponivel e ainda com codigo VARCHAR(30)', is_string($schemaAntigo) && str_contains($schemaAntigo, 'codigo        VARCHAR(30)'));
     [$pAnt, $bAnt] = $criarVazio();
     $tmpSchema = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qa_schema_antigo_' . bin2hex(random_bytes(4)) . '.sql';
     file_put_contents($tmpSchema, (string) $schemaAntigo);

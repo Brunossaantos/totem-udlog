@@ -32,7 +32,7 @@
 <aside class="gestao-sidebar" id="gestao-sidebar">
 <div class="gestao-marca" id="gestao-marca">
 <img class="gestao-marca__logo" src="<?= h(gestaoAsset('udlog.png')) ?>" width="140" height="45" alt="UDLOG">
-<img class="gestao-marca__mini" src="<?= h(gestaoAsset('favicon.svg')) ?>" width="40" height="40" alt="">
+<img class="gestao-marca__mini" src="<?= h(gestaoAsset('udlog-leao.png')) ?>" width="40" height="40" alt="">
 <span class="gestao-marca__texto">Gestão Totem</span>
 </div>
 <nav class="gestao-nav" aria-label="Menu principal">

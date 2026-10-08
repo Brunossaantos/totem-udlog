@@ -6,10 +6,11 @@ backend PHP) em base64 e manda para a impressora fisica indicada. Nao
 gera conteudo de etiqueta, nao decide layout/formato — isso e sempre do
 backend PHP.
 
-Este documento cobre instalacao e operacao. Impressao real, papel "totem" 80x80,
-`printSettings`, tarefa de logon e deteccao de falta de papel foram exercitados no
-PC de desenvolvimento com a EPSON TM-T88VII; a validacao no mini PC de producao
-continua pendente (secao 6).
+Este documento cobre instalacao e operacao. O hardware de producao e a EPSON
+TM-T88VII (driver `Receipt6`, porta `TMUSB001`, impressora `EPSON TM-T88VII Receipt`).
+Impressao real, papel "totem" 80x80, `printSettings`, tarefa de logon e deteccao de
+falta de papel foram exercitados no PC de desenvolvimento com a TM-T88VII; a
+validacao fisica completa no mini PC de producao continua pendente (secao 6).
 
 ## 1. Por que Node.js + `pdf-to-printer` + `node-windows`
 
@@ -336,17 +337,23 @@ compartilhado).
   entra na idempotencia). Se a consulta falhar ou o job nunca aparecer em ~3 s, responde `impresso`.
   Desligar com `"deteccaoSemPapel": false`. Limitacao: job lento (>10 s) pode ser tratado como
   sem papel; ajustar `semPapelTimeoutMs`. Chaves opcionais, invalidas = o servico nao inicia.
-  - Driver `Receipt6` (EPSON TM-T88VII, porta TMUSB001, PC de dev): `DocumentName` do job e so o
-    nome do arquivo temporario; sem papel o job fica `Printing, Retained`.
-  - Driver `Receipt5` (EPSON TM-T88V, `EPSON TM-T88V Receipt5`, porta ESDPRT001, mini PC de
-    producao): o Windows registra o `DocumentName` com o CAMINHO COMPLETO
-    (`C:\Users\...\AppData\Local\Temp\impressao-local-udlog-<uuid>.pdf`). O servico compara pelo
-    NOME BASE (ultimo segmento apos `\` ou `/`) com igualdade exata contra o arquivo temporario
-    (UUID interno); a remocao (`Remove-PrintJob`) tambem so ocorre se o nome base conferir.
-    Antes dessa correcao o job nunca era "visto" e o servico respondia `impresso`
-    (`job_nao_visto`) mesmo sem papel.
-  - Medicao no mini PC (TM-T88V Receipt5). O `PrinterState` e so referencia: NAO e usado como
-    sinal; a deteccao e pela permanencia do job na fila.
+  - **Producao atual** (mini PC): EPSON TM-T88VII, driver `EPSON TM-T88VII Receipt6`, porta
+    `TMUSB001`, impressora renomeada para `EPSON TM-T88VII Receipt` (nome usado na allowlist e no
+    campo `impressora`). Com este driver o `DocumentName` do job e so o nome do arquivo
+    temporario; sem papel o job fica `Printing, Retained` (0 paginas, 36+ s), e com papel sai da
+    fila em menos de 1 s (medicao registrada em `src/lib/verificarFila.js`). Os campos de estado
+    da impressora nao distinguem os dois casos nesse driver; a deteccao e so pela permanencia do
+    job na fila. A comparacao e sempre pelo NOME BASE do documento (ultimo segmento apos `\` ou
+    `/`) com igualdade exata contra o arquivo temporario (UUID interno); a remocao
+    (`Remove-PrintJob`) tambem so ocorre se o nome base conferir.
+  - **Historico / outro modelo** (nao e a producao atual): EPSON TM-T88V, driver
+    `EPSON TM-T88V Receipt5`, porta `ESDPRT001`. Nele o Windows registra o `DocumentName` com o
+    CAMINHO COMPLETO (`C:\Users\...\AppData\Local\Temp\impressao-local-udlog-<uuid>.pdf`), e foi
+    isso que motivou a comparacao pelo nome base: antes dela o job nunca era "visto" e o servico
+    respondia `impresso` (`job_nao_visto`) mesmo sem papel. A medicao abaixo vale so para esse
+    modelo/driver. O `PrinterState` e so referencia: NAO e usado como sinal.
+
+    Medicao historica (TM-T88V, Receipt5, ESDPRT001):
 
     | Situacao | PrinterState | PrinterStatus | Job na fila |
     |---|---|---|---|
@@ -440,7 +447,7 @@ pessoa.
   2.5, mas so sera ativada no arquivo real durante o deploy final no mini
   PC (nao antes disso).
 - **Validacao no hardware fisico do mini PC de producao** (`EPSON TM-T88VII
-  Receipt` via USB + Epson Advanced Printer Driver 6, papel "totem" 80x80,
+  Receipt` via USB (porta `TMUSB001`) + Epson Advanced Printer Driver 6 (`Receipt6`), papel "totem" 80x80,
   tarefa de logon com login automatico): pendente, adiada para o deploy final.
   Testes fisicos ainda nao feitos: falta de papel real pela fila, duas etiquetas
   (motorista + ajudante) em sequencia.

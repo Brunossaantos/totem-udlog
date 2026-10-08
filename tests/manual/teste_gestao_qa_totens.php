@@ -10,7 +10,7 @@
  *
  * Uso: php tests/manual/teste_gestao_qa_totens.php
  * Banco QA descartavel (qa_qr_exclusivo_<hex>); NUNCA toca em udlog_totem; sem rede.
- * Requer `git` no PATH (le o schema.sql do HEAD para a prova da migration).
+ * Requer `git` no PATH (le o schema.sql pre-F2 (fab53ab^) para a prova da migration).
  */
 declare(strict_types=1);
 
@@ -808,8 +808,8 @@ try {
     // =====================================================================
     // (k) Migration 022 sobre o schema ANTIGO do HEAD
     // =====================================================================
-    $schemaHead = shell_exec('git -C ' . escapeshellarg($raiz) . ' show HEAD:sql/schema.sql 2>NUL');
-    afirmar('(k) schema.sql do HEAD lido via git (tem tb_totem com codigo VARCHAR(30))', is_string($schemaHead) && str_contains($schemaHead, 'codigo        VARCHAR(30) NOT NULL UNIQUE'));
+    $schemaHead = shell_exec('git -C ' . escapeshellarg($raiz) . ' show ' . escapeshellarg('fab53ab^:sql/schema.sql') . ' 2>NUL');
+    afirmar('(k) schema.sql pre-F2 (fab53ab^) lido via git (tem tb_totem com codigo VARCHAR(30))', is_string($schemaHead) && str_contains($schemaHead, 'codigo        VARCHAR(30) NOT NULL UNIQUE'));
     $sql022 = (string) file_get_contents($raiz . '/sql/migrations/022_totem_gestao.sql');
     $aplicarHead = static function () use ($schemaHead, $raiz): array {
         [$p, $n] = criarBancoVazioQa();
