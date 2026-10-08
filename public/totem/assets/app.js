@@ -482,8 +482,11 @@ function montarTeclado() {
 
 function abrirTeclado(el) { campoAtivo = el; document.getElementById('teclado').classList.add('aberto'); }
 function fecharTeclado() { document.getElementById('teclado').classList.remove('aberto'); campoAtivo = null; }
-function digitar(c) { if (campoAtivo) { campoAtivo.value += c; ajustarAlturaTextarea(campoAtivo); } }
-function apagar() { if (campoAtivo) { campoAtivo.value = campoAtivo.value.slice(0, -1); ajustarAlturaTextarea(campoAtivo); } }
+// Atribuir .value por codigo NAO dispara 'input' (so a digitacao fisica dispara);
+// por isso o teclado virtual avisa os listeners (ex.: autocomplete de cliente).
+function notificarInput(el) { el.dispatchEvent(new Event('input', { bubbles: true })); }
+function digitar(c) { if (campoAtivo) { campoAtivo.value += c; ajustarAlturaTextarea(campoAtivo); notificarInput(campoAtivo); } }
+function apagar() { if (campoAtivo) { campoAtivo.value = campoAtivo.value.slice(0, -1); ajustarAlturaTextarea(campoAtivo); notificarInput(campoAtivo); } }
 
 // -------------------- inatividade --------------------
 
