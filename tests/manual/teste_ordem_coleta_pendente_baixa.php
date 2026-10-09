@@ -31,7 +31,7 @@
  * Uso: php tests/manual/teste_ordem_coleta_pendente_baixa.php
  */
 
-require_once __DIR__ . '/../../vendor/autoload.php';
+require_once __DIR__ . '/qa_qr_exclusivo_legado.php';
 require_once __DIR__ . '/_fixtures_talent.php';
 
 use Dotenv\Dotenv;
@@ -49,10 +49,18 @@ use App\Rn\TalentClient;
 use App\Rn\DocumentoRn;
 use App\Controller\AtendimentoController;
 
-$dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
-$dotenv->load();
-
+// F4a: roda SO em banco QA descartavel (qa_qr_exclusivo_<hex>); nunca em udlog_totem.
+[$pdoAdmQa, $bancoQa, $storageQa] = qaLegadoCriarAmbiente();
+$_ENV['DB_NAME'] = $bancoQa; // LogSistema/Conexao do processo pai tambem apontam para o banco QA
+register_shutdown_function(static function () use ($bancoQa, $storageQa): void {
+    qaLegadoLimparAmbiente($bancoQa, $storageQa); // idempotente: nunca deixa banco QA residual, mesmo em fatal
+});
 $pdo = Conexao::obter();
+if ($pdo->query('SELECT DATABASE()')->fetchColumn() !== $bancoQa) {
+    fwrite(STDERR, "banco nao e o QA\n");
+    exit(3);
+}
+$pdo->exec("INSERT INTO tb_empresa (nome, cnpj) VALUES ('Maua I', '14706199000182')");
 
 $totalTestes = 0;
 $totalFalhas = 0;
@@ -73,6 +81,9 @@ class OrdemColetaClientDuble extends OrdemColetaClient
 {
     public int $chamadas = 0;
     public int $chamadasStatusAtual = 0;
+    public ?string $ultimoCnpj = null;
+    public ?string $ultimoNumero = null;
+    public ?string $ultimoCnpjStatus = null;
     private $comportamento;
     private $comportamentoStatus;
 
@@ -90,24 +101,27 @@ class OrdemColetaClientDuble extends OrdemColetaClient
         $this->comportamentoStatus = $comportamentoStatus ?? fn() => 'ATIVA';
     }
 
-    public function marcarConcluida(string $numero): bool
+    public function marcarConcluida(string $cnpj, string $numero): bool
     {
         $this->chamadas++;
+        $this->ultimoCnpj = $cnpj;
+        $this->ultimoNumero = $numero;
         return ($this->comportamento)($numero);
     }
 
-    public function statusAtual(string $numero): ?string
+    public function statusAtual(string $cnpj, string $numero): ?string
     {
         $this->chamadasStatusAtual++;
+        $this->ultimoCnpjStatus = $cnpj;
         return ($this->comportamentoStatus)($numero);
     }
 }
 
-function chamarTentarMarcarOrdemConcluida(AtendimentoController $controller, int $idAtendimento, string $numero): void
+function chamarTentarMarcarOrdemConcluida(AtendimentoController $controller, int $idAtendimento, string $numero, string $cnpj = "11222333000181"): void
 {
     $reflexao = new ReflectionMethod(AtendimentoController::class, 'tentarMarcarOrdemConcluida');
     $reflexao->setAccessible(true);
-    $reflexao->invoke($controller, $idAtendimento, $numero);
+    $reflexao->invoke($controller, $idAtendimento, $numero, $cnpj);
 }
 
 $atendimentoDao = new AtendimentoDao($pdo);
@@ -228,6 +242,100 @@ try {
 afirmar('JA_ENVIADO com ordem ja INATIVA: NENHUMA excecao propagada (tratado como sucesso, nao erro)', $lancouExcecaoCenario4 === false);
 
 // ============================================================
+// Cenario 5 (F4a): CNPJ do cliente AUSENTE -> NAO inativa por numero ambiguo:
+// marcarConcluida()/statusAtual() NUNCA chamados, pendencia registrada.
+// ============================================================
+foreach (['', '   ', '..-/'] as $i => $cnpjAusente) {
+    $fix5 = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'PEN5' . $i . '55', '11222333000181', 'SP', true, '12345678', 'CAMINHAO', 'OC-PEN5' . $i);
+    $pastas[] = $fix5['pasta_completa'];
+    $idsAtendimento[] = $fix5['id_atendimento'];
+
+    $clienteSemCnpj = new OrdemColetaClientDuble(fn() => true);
+    $controller5 = montarController($atendimentoDao, $pdo, $clienteSemCnpj);
+    $lancou5 = false;
+    try {
+        chamarTentarMarcarOrdemConcluida($controller5, $fix5['id_atendimento'], 'OC-PEN5' . $i, $cnpjAusente);
+    } catch (\Throwable $e) {
+        $lancou5 = true;
+    }
+    $stmt->execute(['id' => $fix5['id_atendimento']]);
+    $registro5 = $stmt->fetch();
+    afirmar("CNPJ ausente (caso " . $i . "): nenhuma excecao propagada", $lancou5 === false);
+    afirmar("CNPJ ausente (caso " . $i . "): marcarConcluida() NUNCA chamado (nao inativa por numero ambiguo)", $clienteSemCnpj->chamadas === 0);
+    afirmar("CNPJ ausente (caso " . $i . "): statusAtual() NUNCA chamado", $clienteSemCnpj->chamadasStatusAtual === 0);
+    afirmar("CNPJ ausente (caso " . $i . "): pendencia de baixa registrada", $registro5 !== false && $registro5['resolvido_em'] === null);
+}
+
+// ============================================================
+// Cenario 6 (F4a): o CNPJ chega ao client SO com digitos (normalizado no
+// controller) e junto do numero da ordem escolhida.
+// ============================================================
+$fix6 = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'PEN6666', '11222333000181', 'SP', true, '12345678', 'CAMINHAO', 'OC-PEN6666');
+$pastas[] = $fix6['pasta_completa'];
+$idsAtendimento[] = $fix6['id_atendimento'];
+$cliente6 = new OrdemColetaClientDuble(fn() => false, fn() => 'ATIVA');
+chamarTentarMarcarOrdemConcluida(montarController($atendimentoDao, $pdo, $cliente6), $fix6['id_atendimento'], 'OC-PEN6666', '11.222.333/0001-81');
+afirmar('CNPJ mascarado: marcarConcluida() recebe so digitos e o numero da OC', $cliente6->ultimoCnpj === '11222333000181' && $cliente6->ultimoNumero === 'OC-PEN6666');
+afirmar('CNPJ mascarado: statusAtual() tambem recebe so digitos', $cliente6->ultimoCnpjStatus === '11222333000181');
+
+// ============================================================
+// Cenario 7 (F4a): finalizar() ponta a ponta le cliente_cnpj do atendimento
+// persistido (nao do front) e o repassa ao client.
+// ============================================================
+$stmtSrc = file_get_contents(__DIR__ . '/../../app/Controller/AtendimentoController.php');
+afirmar("finalizar(): chama tentarMarcarOrdemConcluida com atendimento['cliente_cnpj'] (nunca so o numero)", str_contains($stmtSrc, "(string) (\$atendimento['cliente_cnpj'] ?? '')"));
+afirmar('Metodos antigos por numero removidos do DAO/Client (so cliente+numero)', !str_contains(file_get_contents(__DIR__ . '/../../app/Dao/OrdemColetaDao.php'), 'function marcarInativaPorNumero') && !str_contains(file_get_contents(__DIR__ . '/../../app/Dao/OrdemColetaDao.php'), 'function statusPorNumero'));
+
+// ============================================================
+// Cenario 8 (F4a, apontado pelo QA): finalizar() REAL (subprocesso, Talent falso,
+// sem rede) de uma Expedicao com cliente_cnpj vazio / so sem digitos.
+// (a) NAO_ENVIADO: o TalentRn real exige CNPJ do depositante com 14 digitos, entao o
+//     payload nao monta (202 erro_montagem_payload): nada e baixado, nenhuma pendencia,
+//     nenhuma chamada ao externo. (b) JA_ENVIADO (check-in ja aceito antes): resposta de
+//     SUCESSO ao motorista, UMA linha de pendencia, NENHUMA chamada ao banco externo
+//     (duble que falha se chamado) e LogSistema oc_baixa_falhou motivo=baixa_pendente.
+// ============================================================
+foreach (['' => 'vazio', '..-/ ' => 'so sem digitos'] as $cnpjSemDigitos => $rotulo) {
+    $cnpjSemDigitos = (string) $cnpjSemDigitos;
+    $fix8 = talentCriarAtendimentoPronto($pdo, $atendimentoDao, $idTotem, 'expedicao', 'PEN8' . strlen($cnpjSemDigitos) . '88', $cnpjSemDigitos, 'SP', true, '12345678', 'CAMINHAO', 'OC-PEN8' . strlen($cnpjSemDigitos));
+    $pastas[] = $fix8['pasta_completa'];
+    $idsAtendimento[] = $fix8['id_atendimento'];
+    $id8 = $fix8['id_atendimento'];
+    $pdo->prepare('UPDATE tb_atendimento SET cliente_cnpj = :c WHERE id_atendimento = :id')->execute(['c' => $cnpjSemDigitos, 'id' => $id8]);
+    $rodar8 = static function () use ($idTotem, $id8): array {
+        $log8 = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qa_pendbaixa_log_' . bin2hex(random_bytes(6)) . '.log';
+        file_put_contents($log8, '');
+        $r = qaLegadoRodar(__DIR__ . '/_caso_finalizar_baixa_sem_cnpj.php', [$idTotem, $id8, $log8]);
+        @unlink($log8);
+        $partes = explode("
+HTTP_CODE:", $r['saida']);
+
+        return ['bruto' => $partes[0], 'http' => (int) trim($partes[1] ?? '0'), 'corpo' => json_decode(trim(str_replace("TALENT_CHAMADO
+", '', $partes[0])), true)];
+    };
+    $stLog = $pdo->prepare("SELECT origem, nivel, detalhe FROM tb_log_sistema WHERE categoria = 'oc_baixa_falhou' AND id_atendimento = :id");
+
+    // (a) NAO_ENVIADO
+    $ra = $rodar8();
+    $stmt->execute(['id' => $id8]);
+    $stLog->execute(['id' => $id8]);
+    afirmar("finalizar() NAO_ENVIADO com CNPJ {$rotulo}: payload nao monta (202), Talent NAO chamado, nenhuma pendencia, nenhum log de baixa, externo intacto",
+        $ra['http'] === 202 && !str_contains($ra['bruto'], 'TALENT_CHAMADO') && $stmt->fetchAll() === [] && $stLog->fetchAll() === [] && !str_contains($ra['bruto'], 'EXTERNO_CHAMADO'));
+
+    // (b) JA_ENVIADO
+    $pdo->prepare("UPDATE tb_atendimento SET talent_checkin_status = 'ENVIADO', talent_senha = 'JA123', talent_protocolo = 'PROTO-JA' WHERE id_atendimento = :id")->execute(['id' => $id8]);
+    $rb = $rodar8();
+    $stmt->execute(['id' => $id8]);
+    $linhas8 = $stmt->fetchAll();
+    $stLog->execute(['id' => $id8]);
+    $logs8 = $stLog->fetchAll();
+    afirmar("finalizar() JA_ENVIADO com CNPJ {$rotulo}: resposta de SUCESSO ao motorista (HTTP 200, senha/protocolo) sem chamar o Talent", $rb['http'] === 200 && is_array($rb['corpo']) && ($rb['corpo']['sucesso'] ?? null) === true && ($rb['corpo']['dados']['senha'] ?? null) === 'JA123' && !str_contains($rb['bruto'], 'TALENT_CHAMADO'));
+    afirmar("finalizar() JA_ENVIADO com CNPJ {$rotulo}: UMA linha em tb_ordem_coleta_pendente_baixa (resolvido_em NULL)", count($linhas8) === 1 && $linhas8[0]['resolvido_em'] === null && $linhas8[0]['numero_ordem_coleta'] === 'OC-PEN8' . strlen($cnpjSemDigitos));
+    afirmar("finalizar() JA_ENVIADO com CNPJ {$rotulo}: NENHUMA chamada ao banco externo (duble que falha se chamado)", !str_contains($rb['bruto'], 'EXTERNO_CHAMADO'));
+    afirmar("finalizar() JA_ENVIADO com CNPJ {$rotulo}: LogSistema oc_baixa_falhou motivo=baixa_pendente (EXPEDICAO/ERRO)", count($logs8) === 1 && $logs8[0]['detalhe'] === 'motivo=baixa_pendente' && $logs8[0]['origem'] === 'EXPEDICAO' && $logs8[0]['nivel'] === 'ERRO');
+}
+
+// ============================================================
 // Limpeza
 // ============================================================
 foreach ($pastas as $p) {
@@ -240,4 +348,5 @@ foreach ($idsAtendimento as $id) {
 $pdo->prepare('DELETE FROM tb_totem WHERE id_totem = :id')->execute(['id' => $idTotem]);
 
 echo "\n=== RESULTADO: {$totalTestes} testes, " . ($totalTestes - $totalFalhas) . " passaram, {$totalFalhas} falharam ===\n";
+qaLegadoLimparAmbiente($bancoQa, $storageQa);
 exit($totalFalhas > 0 ? 1 : 0);

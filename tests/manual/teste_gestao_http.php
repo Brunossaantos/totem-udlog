@@ -153,7 +153,7 @@ try {
     $lAdmin2 = gtLogin('ana.admin', GT_SENHA_BOA, $base + ['ip' => '198.51.100.4']);
     afirmar('login: sid NOVO a cada login (diferente do anterior)', $lAdmin2['sid'] !== null && $lAdmin2['sid'] !== $lAdmin['sid'] && $lAdmin['csrf'] !== $lAdmin2['csrf']);
     $lUsu = gtLogin('carla.usuario', GT_SENHA_BOA, $base + ['ip' => '198.51.100.5']);
-    afirmar('login usuario: 302 para /gestao/conta.php', $lUsu['resp']['status'] === 302 && localizacao($lUsu['resp']) === '/gestao/conta.php' && $lUsu['sid'] !== null);
+    afirmar('login usuario: 302 para /gestao/ordens.php (home do usuario desde a F4)', $lUsu['resp']['status'] === 302 && localizacao($lUsu['resp']) === '/gestao/ordens.php' && $lUsu['sid'] !== null);
     $lUsuPend = gtLogin('davi.pendente', GT_SENHA_BOA, $base + ['ip' => '198.51.100.6']);
     afirmar('login com troca de senha pendente: 302 para /gestao/conta.php', localizacao($lUsuPend['resp']) === '/gestao/conta.php' && $lUsuPend['sid'] !== null);
     $lAdmPend = gtLogin('edu.pendente', GT_SENHA_BOA, $base + ['ip' => '198.51.100.7']);
@@ -184,11 +184,11 @@ try {
     }
     $espera('anonimo GET login.php', $get('login.php', null), 200);
     $espera('anonimo com cookie invalido GET usuarios.php', gtChamar($base + ['arquivo' => 'usuarios.php', 'cookies' => ['gestao_sid' => str_repeat('a', 64)], 'ip' => '198.51.100.9']), 302, $login);
-    $espera('usuario GET index.php', $get('index.php', $lUsu), 302, '/gestao/conta.php');
+    $espera('usuario GET index.php', $get('index.php', $lUsu), 302, '/gestao/ordens.php');
     $espera('usuario GET usuarios.php', $get('usuarios.php', $lUsu), 403);
     $espera('usuario GET usuario-form.php', $get('usuario-form.php', $lUsu), 403);
     $espera('usuario GET conta.php', $get('conta.php', $lUsu), 200);
-    $espera('usuario GET login.php (ja logado)', $get('login.php', $lUsu), 302, '/gestao/conta.php');
+    $espera('usuario GET login.php (ja logado)', $get('login.php', $lUsu), 302, '/gestao/ordens.php');
     $espera('admin GET index.php', $get('index.php', $lAdmin), 302, '/gestao/usuarios.php');
     $espera('admin GET usuarios.php', $get('usuarios.php', $lAdmin), 200);
     $espera('admin GET usuario-form.php', $get('usuario-form.php', $lAdmin), 200);
@@ -208,7 +208,7 @@ try {
     $pUsuMenu = $get('conta.php', $lUsu);
     afirmar('menu: admin ve Totens (F2), Logs (F3c), Usuarios e Minha conta, e itens ainda inexistentes ficam ocultos', str_contains($pAdminMenu['corpo'], 'href="/gestao/totens.php"') && str_contains($pAdminMenu['corpo'], 'href="/gestao/logs.php"') && str_contains($pAdminMenu['corpo'], 'href="/gestao/usuarios.php"') && str_contains($pAdminMenu['corpo'], 'href="/gestao/conta.php"') && !str_contains($pAdminMenu['corpo'], '/gestao/painel.php'));
     afirmar('menu: usuario NAO ve o item Totens (nem link para ele)', !str_contains($pUsuMenu['corpo'], '/gestao/totens.php'));
-    afirmar('menu: usuario NAO ve o item Usuarios (nem link para ele)', !str_contains($pUsuMenu['corpo'], '/gestao/usuarios.php') && str_contains($pUsuMenu['corpo'], 'href="/gestao/conta.php"'));
+    afirmar('menu: usuario NAO ve o item Usuarios, ve Ordens de coleta (F4) e Minha conta', !str_contains($pUsuMenu['corpo'], '/gestao/usuarios.php') && str_contains($pUsuMenu['corpo'], 'href="/gestao/conta.php"') && str_contains($pUsuMenu['corpo'], 'href="/gestao/ordens.php"'));
     afirmar('403: pagina de erro sem inline e sem detalhes tecnicos', semInline($get('usuarios.php', $lUsu)['corpo']) && !str_contains($get('usuarios.php', $lUsu)['corpo'], 'ana.admin'));
     foreach ([['usuarios.php', $lAdmin], ['usuario-form.php', $lAdmin], ['conta.php', $lAdmin], ['conta.php', $lUsu], ['conta.php', $lUsuPend]] as [$pag, $l]) {
         $rr = $get($pag, $l);
@@ -322,7 +322,7 @@ try {
     $lFabOutra = gtLogin('fabio.souza', $temp, $base + ['ip' => '198.51.100.11']);
     $rTroca = $post('conta.php', $lFab, ['senha_atual' => $temp, 'senha_nova' => 'Nova-Senha-Do-Fabio-1', 'senha_confirmacao' => 'Nova-Senha-Do-Fabio-1']);
     $sidNovo = gtSid($rTroca);
-    afirmar('trocar senha: ok => 302 para a pagina inicial, cookie NOVO e sessao antiga invalida', $rTroca['status'] === 302 && localizacao($rTroca) === '/gestao/conta.php' && $sidNovo !== null && $sidNovo !== $lFab['sid']);
+    afirmar('trocar senha: ok => 302 para a pagina inicial (usuario: /gestao/ordens.php), cookie NOVO e sessao antiga invalida', $rTroca['status'] === 302 && localizacao($rTroca) === '/gestao/ordens.php' && $sidNovo !== null && $sidNovo !== $lFab['sid']);
     afirmar('trocar senha: a OUTRA sessao do usuario tambem foi revogada', $get('conta.php', $lFabOutra)['status'] === 302 && $get('conta.php', $lFab)['status'] === 302);
     $pNova = gtChamar($base + ['arquivo' => 'conta.php', 'cookies' => ['gestao_sid' => (string) $sidNovo], 'ip' => '198.51.100.9']);
     afirmar('trocar senha: a sessao nova funciona e a troca obrigatoria acabou (aviso some, menu volta)', $pNova['status'] === 200 && !str_contains($pNova['corpo'], 'aviso-troca-obrigatoria') && str_contains($pNova['corpo'], 'gestao-sidebar'));

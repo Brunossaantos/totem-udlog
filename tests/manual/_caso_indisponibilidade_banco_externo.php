@@ -18,10 +18,12 @@ use Util\Conexao;
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\OrdemColetaDao;
+use App\Dao\AceiteLgpdDao;
 use App\Rn\AtendimentoRn;
 use App\Rn\OrdemColetaClient;
 use App\Rn\TalentRn;
 use App\Rn\TalentClient;
+use App\Rn\LgpdRn;
 use App\Controller\AtendimentoController;
 
 $dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
@@ -39,8 +41,15 @@ $_ENV['GESTAO_COLETAS_DB_NAME'] = 'inexistente_para_teste';
 $idTotem = (int) ($argv[1] ?? 0);
 $placa = $argv[2] ?? '';
 
+// O gate de privacidade (aceite LGPD) roda ANTES da consulta ao banco externo:
+// sem um token de aceite valido a chamada seria barrada la e nunca chegaria ao
+// ponto testado. O token e emitido pelo mesmo caminho real do LgpdController,
+// com a conexao do totem ja aberta (a sobrescrita de $_ENV so afeta conexoes novas).
+$lgpdRn = new LgpdRn(new AceiteLgpdDao($pdo));
+$tokenAceite = $lgpdRn->emitir($idTotem)['token_aceite'];
+
 $atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), new OrdemColetaClient(new OrdemColetaDao()));
 $talentRn = new TalentRn(new TalentClient('', ''), new AtendimentoDao($pdo), $_ENV['STORAGE_PATH']);
-$controller = new AtendimentoController($atendimentoRn, $talentRn, new AtendimentoNotaDao($pdo));
+$controller = new AtendimentoController($atendimentoRn, $talentRn, new AtendimentoNotaDao($pdo), null, null, null, null, null, $lgpdRn, $pdo);
 
-$controller->iniciar($idTotem, ['tipo' => 'expedicao', 'placa' => $placa]);
+$controller->iniciar($idTotem, ['tipo' => 'expedicao', 'placa' => $placa, 'token_aceite' => $tokenAceite]);

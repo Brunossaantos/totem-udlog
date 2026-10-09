@@ -46,9 +46,13 @@ class AuditoriaDao
         'TOTEM_ATIVO',
         'TOTEM_URL_REGERAR',
         'RETENCAO_EXECUTAR',
+        'OC_ATIVAR',
+        'OC_INATIVAR',
+        'OC_VER_PDF',
+        'OC_BAIXA_RESOLVER',
     ];
 
-    public const ALVO_TIPOS = ['usuario', 'totem', 'sistema'];
+    public const ALVO_TIPOS = ['usuario', 'totem', 'sistema', 'ordem_coleta', 'oc_baixa'];
 
     public const RESULTADOS_FINAIS = ['OK', 'SEM_EFEITO', 'ERRO'];
 
@@ -68,6 +72,9 @@ class AuditoriaDao
         'logs_apagados' => 'int_grande',
         'auditoria_apagados' => 'int_grande',
         'lotes' => 'int_grande',
+        'status_de' => ['ATIVA', 'INATIVA'],
+        'status_para' => ['ATIVA', 'INATIVA'],
+        'motivo_oc' => ['ja_no_estado', 'estado_mudou', 'oc_inexistente', 'externo_indisponivel', 'arquivo_ausente', 'confirmado_andamento', 'confirmado_ja_baixada', 'cliente_ausente', 'oc_ambigua', 'oc_ativa'],
     ];
 
     public function __construct(private PDO $pdo)

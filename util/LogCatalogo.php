@@ -47,6 +47,8 @@ final class LogCatalogo
         'categoria_desconhecida', 'chave_desconhecida', 'valor_invalido',
         'categoria_interna', 'teto_diario', 'teto_total', 'teto_categoria',
         'baixa_pendente', 'pendencia_nao_registrada',
+        'caminho_invalido', 'tamanho_invalido', 'nao_e_pdf', 'sha256_divergente',
+        'leitura_falhou', 'prefixo_cnpj_divergente',
     ];
 
     public const CATEGORIAS_ERRO_TALENT = [

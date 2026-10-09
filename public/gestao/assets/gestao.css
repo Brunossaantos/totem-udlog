@@ -596,3 +596,121 @@ form[aria-busy="true"] .gestao-botao {
     .gestao-paginacao .gestao-botao { flex: 1 1 0; }
     .gestao-paginacao__posicao { flex: 1 1 100%; order: -1; }
 }
+
+/* ==========================================================================
+   Ordens de coleta (F4): /gestao/ordens.php (4 abas) e /gestao/ordem.php.
+   Reaproveita abas, filtros, tabela, paginacao, cartoes, botoes e a nota
+   permanente da F2/F3c. Estado NUNCA so por cor: texto + icone + peso + borda
+   (ATIVA = azul 700; INATIVA = italico 500 so no rotulo da situacao; "Pendente" 700; "Resolvida" 500;
+   OC ativa ha mais de 15 dias = etiqueta com icone, borda 3px + barra tracejada).
+   ========================================================================== */
+
+/* ---------- painel, aviso fixo, erro e vazio ---------- */
+.gestao-painel-ordens { width: 100%; display: flex; flex-direction: column; gap: 16px; }
+#ordens-aviso-retencao, #ordens-erro-carga { width: 100%; }
+@media (min-width: 1100px) {
+    .gestao-filtros .gestao-campo:has(#filtro-numero) { max-width: 300px; }
+    .gestao-filtros .gestao-campo:has(#filtro-cliente) { flex-basis: 240px; max-width: 340px; }
+}
+.gestao-filtros select.gestao-campo__entrada { text-overflow: ellipsis; }
+.gestao-estado--vazio { width: 100%; flex-wrap: wrap; border: 2px dashed var(--borda); border-radius: 8px; font-weight: 600; text-align: center; }
+.gestao-estado .gestao-link { display: inline-flex; align-items: center; min-height: 44px; }
+/* aviso com confirmacao (detalhe): caixa de 3px, texto a esquerda, nunca so cor */
+.gestao-estado--aviso {
+    align-self: stretch; justify-content: flex-start; align-items: flex-start; width: 100%;
+    padding: 14px 16px; border: 3px solid var(--texto); border-radius: 8px;
+    background: var(--branco); color: var(--texto); font-weight: 700; text-align: left;
+}
+.gestao-estado--aviso .gestao-icone { width: 24px; height: 24px; margin-top: 0; color: var(--texto); }
+/* nota informativa neutra (aviso do PDF) */
+.gestao-nota {
+    align-self: stretch; display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px;
+    border: 1px solid var(--borda); border-left: 6px solid var(--borda); border-radius: 6px;
+    background: var(--branco); color: var(--texto); font-size: 15px;
+}
+.gestao-nota .gestao-icone { margin-top: 2px; color: var(--texto); }
+
+/* ---------- tabelas (colunas fixas; rolagem horizontal so no .gestao-tabela-wrap abaixo de ~1100px) ---------- */
+.gestao-tabela--ordens, .gestao-tabela--baixas { table-layout: fixed; min-width: 1000px; }
+.gestao-tabela--ordens th, .gestao-tabela--baixas th { padding: 0 6px; height: 48px; white-space: normal; }
+.gestao-tabela--ordens td, .gestao-tabela--baixas td { padding: 6px; height: 56px; }
+.gestao-tabela--ordens th.col-numero { width: 150px; }
+.gestao-tabela--ordens th.col-cliente { width: 162px; }
+.gestao-tabela--ordens th.col-transportadora { width: 140px; }
+.gestao-tabela--ordens th.col-situacao { width: 100px; }
+.gestao-tabela--ordens th.col-criada { width: 130px; }
+.gestao-tabela--ordens th.col-pdf { width: 92px; }
+.gestao-tabela--ordens th.col-acoes { width: 226px; }
+.gestao-tabela--baixas th.col-atendimento { width: 110px; }
+.gestao-tabela--baixas th.col-numero-oc { width: 210px; }
+.gestao-tabela--baixas th.col-baixa-criada { width: 140px; }
+.gestao-tabela--baixas th.col-baixa-situacao { width: 190px; }
+.gestao-tabela--baixas th.col-acoes { width: 350px; }
+.gestao-tabela--ordens .col-acoes, .gestao-tabela--baixas .col-acoes { min-width: 0; }
+.gestao-tabela--ordens .col-numero, .gestao-tabela--baixas .col-numero-oc { overflow-wrap: anywhere; }
+.gestao-tabela--ordens .col-numero { font-weight: 600; }
+.gestao-tabela--ordens .col-cliente, .gestao-tabela--ordens .col-transportadora, .gestao-tabela--ordens .col-pdf { overflow-wrap: anywhere; }
+/* "Acoes" fixa na borda direita: continua visivel e clicavel quando a tabela rola (ex.: 1000x700) */
+.gestao-tabela--ordens th.col-acoes, .gestao-tabela--ordens td.col-acoes,
+.gestao-tabela--baixas th.col-acoes, .gestao-tabela--baixas td.col-acoes { position: sticky; right: 0; background: var(--branco); box-shadow: -1px 0 0 var(--borda); }
+
+/* celula em duas linhas: principal (600) + secundaria (400) */
+.gestao-celula-principal { display: block; font-weight: 600; }
+.gestao-celula-sec { display: block; font-size: 14px; font-weight: 400; color: var(--texto); }
+.gestao-tabela--ordens .col-cliente .gestao-celula-principal,
+.gestao-tabela--ordens .col-transportadora .gestao-celula-principal {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
+.gestao-acoes-linha .gestao-celula-sec { white-space: nowrap; }
+/* baixa sem ordem unica: icone + texto (600), pode quebrar em 2 linhas */
+.gestao-acoes-linha .gestao-oc-estado { display: flex; align-items: flex-start; gap: 6px; max-width: 150px; white-space: normal; font-weight: 600; }
+.gestao-oc-estado .gestao-icone { width: 16px; height: 16px; margin-top: 2px; flex: none; }
+
+/* barra esquerda: ativa ha mais de 15 dias = tracejada 6px; as demais reservam o mesmo espaco (transparente) */
+.gestao-tabela--ordens td:first-child { border-left: 6px solid transparent; }
+.gestao-tabela--ordens tr[data-idade="atencao"] td:first-child { border-left: 6px dashed var(--texto); }
+
+/* situacao */
+.gestao-situacao--ativa { color: var(--azul); font-weight: 700; }
+.gestao-situacao--inativa { color: var(--texto); font-weight: 500; font-style: italic; }
+.gestao-situacao--pendente { color: var(--texto); font-weight: 700; }
+.gestao-situacao--resolvida { color: var(--texto); font-weight: 500; }
+.gestao-tabela--baixas .gestao-situacao { white-space: normal; align-items: flex-start; }
+.gestao-tabela--baixas .gestao-situacao .gestao-icone { margin-top: 2px; }
+
+/* idade: "Ha N dias" (500) ou, em ativa ha mais de 15 dias, etiqueta com icone + borda 3px + 700 */
+.gestao-idade { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+.gestao-idade .gestao-icone { width: 16px; height: 16px; }
+.gestao-idade--atencao { padding: 1px 6px; border: 3px solid var(--texto); border-radius: 6px; font-weight: 700; font-style: normal; }
+
+/* sinal "Mesmo numero em outros clientes": icone + texto + borda tracejada */
+.gestao-sinal {
+    display: flex; align-items: flex-start; gap: 6px; width: fit-content; max-width: 100%; margin-top: 4px;
+    padding: 2px 6px; border: 1px dashed var(--texto); border-radius: 4px;
+    font-size: 13px; font-weight: 700; line-height: 1.3; font-style: normal;
+}
+.gestao-sinal .gestao-icone { width: 16px; height: 16px; margin-top: 1px; }
+p.gestao-sinal { margin-top: 0; padding: 8px 12px; border-width: 2px; font-size: 15px; }
+
+/* cabecalho ordenavel: link de 44px; a direcao fica no aria-sort e na seta (alem da espessura do sublinhado) */
+.gestao-ordenar { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 700; color: var(--azul); }
+th[aria-sort="ascending"] .gestao-ordenar, th[aria-sort="descending"] .gestao-ordenar { text-decoration-thickness: 3px; }
+th[aria-sort="ascending"] .gestao-ordenar::after { content: "\25B2"; content: "\25B2" / ""; font-size: 11px; }
+th[aria-sort="descending"] .gestao-ordenar::after { content: "\25BC"; content: "\25BC" / ""; font-size: 11px; }
+
+/* ---------- acoes da linha: Abrir + Ativar/Inativar lado a lado, sem quebra ---------- */
+.gestao-tabela--ordens .gestao-acoes-linha, .gestao-tabela--baixas .gestao-acoes-linha { flex-wrap: nowrap; }
+.gestao-tabela--ordens .gestao-acoes-grupo--destrutivo .gestao-botao { margin-inline-start: 12px; } /* 12px do gap + 12px = 24px */
+.gestao-tabela--ordens .col-acoes .gestao-botao--pequeno { padding: 0 10px; }
+
+/* ---------- detalhe: cartoes em 2 colunas (>= 1100px) ou 1 ---------- */
+.gestao-ordem { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+.gestao-ordem .gestao-cartao { max-width: none; min-width: 0; }
+.gestao-ordem .gestao-cartao__titulo { max-width: 100%; overflow-wrap: anywhere; }
+#ordem-numero { font-weight: 700; }
+.gestao-dados #ordem-idade { font-weight: 500; }
+.gestao-form-acao { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+@media (min-width: 1100px) {
+    .gestao-ordem { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #ordem-cartao-ordem { grid-column: 1 / -1; }
+}

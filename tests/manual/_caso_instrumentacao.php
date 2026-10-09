@@ -156,12 +156,12 @@ switch ($cenario) {
                 {
                 }
 
-                public function marcarConcluida(string $numero): bool
+                public function marcarConcluida(string $cnpj, string $numero): bool
                 {
                     return false;
                 }
 
-                public function statusAtual(string $numero): ?string
+                public function statusAtual(string $cnpj, string $numero): ?string
                 {
                     return 'ATIVA';
                 }

@@ -11,7 +11,7 @@
  * Cobre: Storage (nome/pasta/traversal/symlink/leitura/remocao), Rn::receber
  * (limites, base64, PDF, sobrescrita, duplicado, falha de transacao),
  * AuthServidor (HTTPS, chave, 401/503/429), retencao (regras a/b) e cron,
- * marcarInativaPorNumero, leitor + TalentRn (payload so Expedicao, falhas
+ * marcarInativaPorClienteNumero, leitor + TalentRn (payload so Expedicao, falhas
  * seguem sem anexo, nunca ERRO_REPROCESSAVEL), concorrencia basica e prova
  * negativa de vazamento nos logs.
  *
@@ -534,21 +534,21 @@ try {
     afirmar('rate limit: pasta do contador indisponivel => ainda 401 (sem excecao) e chave correta autentica', $semPasta->verificar($srvA, 'Bearer errada')['http'] === 401 && $semPasta->verificar($srvA, 'Bearer chave-forte-QA') === null);
     unlink($storage . DIRECTORY_SEPARATOR . 'ordens_coleta' . DIRECTORY_SEPARATOR . 'arquivo-comum');
 
-    // ======================= marcarInativaPorNumero =======================
+    // ======================= marcarInativaPorClienteNumero =======================
     $cid = ocQaCliente($pdo, '33444555000100');
     $oAtiva = ocQaOrdem($pdo, $cid, 'BAIXA-1');
     $oJaInativa = ocQaOrdem($pdo, $cid, 'BAIXA-2', 'INATIVA', '2026-01-01 08:00:00');
     $daoOc = new OrdemColetaDao();
-    $r1 = $daoOc->marcarInativaPorNumero('BAIXA-1');
+    $r1 = $daoOc->marcarInativaPorClienteNumero('33444555000100', 'BAIXA-1');
     $s1 = $pdo->query("SELECT status, inativada_em FROM tb_ordens_coleta WHERE id=$oAtiva")->fetch();
-    afirmar('marcarInativaPorNumero: ATIVA => true, status INATIVA e inativada_em preenchida (agora)', $r1 === true && $s1['status'] === 'INATIVA' && $s1['inativada_em'] !== null && abs(strtotime((string) $s1['inativada_em']) - time()) < 600 + 3 * 3600);
-    $r2 = $daoOc->marcarInativaPorNumero('BAIXA-1');
+    afirmar('marcarInativaPorClienteNumero: ATIVA => true, status INATIVA e inativada_em preenchida (agora)', $r1 === true && $s1['status'] === 'INATIVA' && $s1['inativada_em'] !== null && abs(strtotime((string) $s1['inativada_em']) - time()) < 600 + 3 * 3600);
+    $r2 = $daoOc->marcarInativaPorClienteNumero('33.444.555/0001-00', 'BAIXA-1');
     $s2 = $pdo->query("SELECT inativada_em FROM tb_ordens_coleta WHERE id=$oAtiva")->fetchColumn();
-    afirmar('marcarInativaPorNumero: idempotente (false) e nao altera inativada_em', $r2 === false && $s2 === $s1['inativada_em']);
-    $r3 = $daoOc->marcarInativaPorNumero('BAIXA-2');
-    afirmar('marcarInativaPorNumero: ja INATIVA => false e inativada_em original preservada', $r3 === false && $pdo->query("SELECT inativada_em FROM tb_ordens_coleta WHERE id=$oJaInativa")->fetchColumn() === '2026-01-01 08:00:00');
-    afirmar('marcarInativaPorNumero: numero inexistente => false', $daoOc->marcarInativaPorNumero('NAO-EXISTE') === false);
-    afirmar('statusPorNumero continua funcionando', $daoOc->statusPorNumero('BAIXA-1') === 'INATIVA' && $daoOc->statusPorNumero('NAO-EXISTE') === null);
+    afirmar('marcarInativaPorClienteNumero: idempotente (false) e nao altera inativada_em', $r2 === false && $s2 === $s1['inativada_em']);
+    $r3 = $daoOc->marcarInativaPorClienteNumero('33444555000100', 'BAIXA-2');
+    afirmar('marcarInativaPorClienteNumero: ja INATIVA => false e inativada_em original preservada', $r3 === false && $pdo->query("SELECT inativada_em FROM tb_ordens_coleta WHERE id=$oJaInativa")->fetchColumn() === '2026-01-01 08:00:00');
+    afirmar('marcarInativaPorClienteNumero: numero inexistente => false', $daoOc->marcarInativaPorClienteNumero('33444555000100', 'NAO-EXISTE') === false);
+    afirmar('statusPorClienteNumero funcionando', $daoOc->statusPorClienteNumero('33444555000100', 'BAIXA-1') === 'INATIVA' && $daoOc->statusPorClienteNumero('33444555000100', 'NAO-EXISTE') === null);
     // backfill da migration 003 (re-executada): INATIVA sem inativada_em recebe atualizado_em; ATIVA fica NULL
     $oSem = ocQaOrdem($pdo, $cid, 'BACKFILL-1', 'INATIVA', null);
     $oAt = ocQaOrdem($pdo, $cid, 'BACKFILL-2', 'ATIVA', null);

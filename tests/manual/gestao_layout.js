@@ -12,6 +12,8 @@
 // Rodada UX F2 (2026-10-08): "Copiar URL" copia de verdade na lista (data-copiar-*; sem JS vira "Abrir URL"), nota do legado, destaque do atendimento, nota permanente neutra da URL regerada, ajuda na tela da URL, maxlength 24.
 // F3c (logs, 2026-10-08): /gestao/logs.php e /gestao/log.php em 1366x768, 1920x1080 e 1000x700 (+ 680x900 estreito), 5 abas semeadas
 // (ERRO/AVISO/INFO, mensagem longa, repeticoes, 122 linhas na API para paginar), Cron/Gestao sem coluna Totem, filtros, vazio, detalhe e sem JS.
+// F4 (ordens de coleta, 2026-10-09): /gestao/ordens.php (4 abas: Ativas, Ativas ha mais de 15 dias, Inativas, Baixas pendentes) e /gestao/ordem.php
+// em 1366x768, 1920x1080, 1000x700 e 680x900, sem JS e vazio; usa o banco QA do totem + um banco QA EXTERNO de coletas (qa_gestao_oc_infra.php).
 // Rodada de correcao de UX (2026-10-06): alvos de 44px, erro antes do toggle, requisitos
 // neutros, flash persistente, info, dialogo destrutivo cheio, troca obrigatoria em foco unico.
 const fs = require('fs');
@@ -450,8 +452,10 @@ async function cenarioCompleto(browser, srv, contadores) {
 
     // ---- 403 como perfil usuario
     await entrar(page, base, 'otavio.usuario', info.senha);
-    ok(page.url().endsWith('/gestao/conta.php'), rot + ' perfil usuario entra em Minha conta');
-    ok(await page.evaluate(() => Array.from(document.querySelectorAll('.gestao-menu__link')).map(l => l.textContent.trim()).join(',') === 'Minha conta'), rot + ' perfil usuario ve so "Minha conta" no menu');
+    // F4: o perfil usuario entra em Ordens de coleta (home) e o menu tem "Ordens de coleta" + "Minha conta" (antes so Minha conta)
+    ok(page.url().endsWith('/gestao/ordens.php'), rot + ' perfil usuario entra em Ordens de coleta');
+    ok(await page.evaluate(() => Array.from(document.querySelectorAll('.gestao-menu__link')).map(l => l.textContent.trim()).join(',') === 'Ordens de coleta,Minha conta'), rot + ' perfil usuario ve so "Ordens de coleta" e "Minha conta" no menu');
+    await irPara(page, base, '/gestao/conta.php');
     await checagemGeral(page, rot + ' conta', contadores);
     let r = await page.goto(base + '/gestao/usuarios.php', { waitUntil: 'networkidle0' });
     ok(r.status() === 403, rot + ' erro: usuario em /gestao/usuarios.php => 403');
@@ -1475,6 +1479,519 @@ async function cenarioTotensVazio(browser, srv, contadores) {
     await page.close();
 }
 
+/* ============================================================================================
+ * Gestao Totem F4 (ordens de coleta): /gestao/ordens.php (4 abas) e /gestao/ordem.php (detalhe).
+ * Semente do servidor (gestao_layout_servidor.php + qa_gestao_oc_infra.php): ativas 73 (3 paginas; ativa recente,
+ * ativa > 15 dias, mesmo numero em 2 clientes, numero de 50 caracteres, texto hostil, confirmacao de inativar),
+ * ativas > 15 dias 7, inativas 6 (PDF disponivel, apagado, sem PDF, confirmacao de ativar) e baixas pendentes 35
+ * (2 paginas; localizada, nao localizada, ambigua) + 1 resolvida. Login como "usuario" (perfil do dia a dia; usuario proprio 'rita.ordens', que nenhum outro cenario altera).
+ * ============================================================================================ */
+const IDS_ORDENS = ['ordens-abas', 'ordens-painel', 'ordens-descricao', 'ordens-filtros', 'ordens-aba-campo', 'btn-aplicar-filtros', 'btn-limpar-filtros', 'ordens-contador', 'aba-ativas', 'aba-ativas-15d', 'aba-inativas', 'aba-baixas'];
+const IDS_ORDEM_DETALHE = ['ordem-voltar', 'ordem-detalhe', 'ordem-situacao', 'ordem-idade', 'ordem-dados', 'ordem-numero', 'ordem-criada', 'ordem-inativada', 'ordem-cliente', 'ordem-transportadora', 'ordem-motorista', 'ordem-acao-form', 'ordem-pdf'];
+const LARGURAS_ORDENS = { numero: 150, cliente: 162, transportadora: 140, situacao: 100, criada: 130, pdf: 92, acoes: 226 };
+const LARGURAS_BAIXAS = { atendimento: 110, 'numero-oc': 210, 'baixa-criada': 140, 'baixa-situacao': 190, acoes: 350 };
+
+async function paginaOrdens(browser, srv, w, h, rot, contadores, semJs) {
+    const page = await novaPagina(browser, w, h, rot, contadores);
+    await limparEstado(page, srv.base);
+    if (semJs) { await page.setJavaScriptEnabled(false); }
+    await entrar(page, srv.base, 'rita.ordens', srv.info.senha);
+    return page;
+}
+
+/** Sem style=, on*=, <style> nem script inline em nenhum elemento (alem do DOM, ja checado em checagemGeral). */
+async function semInlineOrdens(page, rot) {
+    const r = await page.evaluate(() => {
+        const out = { on: 0, style: 0, scriptInline: 0, styleTag: document.querySelectorAll('style').length };
+        for (const el of document.querySelectorAll('*')) {
+            for (const a of Array.from(el.attributes)) { if (/^on/i.test(a.name)) { out.on++; } if (a.name.toLowerCase() === 'style') { out.style++; } }
+        }
+        out.scriptInline = Array.from(document.scripts).filter(s => !s.src).length;
+        return out;
+    });
+    ok(r.on === 0 && r.style === 0 && r.scriptInline === 0 && r.styleTag === 0, rot + ': sem style=, on*=, <style> nem script inline (' + JSON.stringify(r) + ')');
+}
+
+/** Abas: 4, exatamente 1 com aria-current="page", alvo >= 44px, contagem com texto para leitor de tela. */
+async function verificarAbasOrdens(page, rot, idAtiva) {
+    const a = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const as = Array.from(document.querySelectorAll('#ordens-abas a.gestao-aba'));
+        const ativa = document.querySelector('#ordens-abas a[aria-current]');
+        const cs = ativa && getComputedStyle(ativa);
+        const ci = getComputedStyle(as.find(x => !x.hasAttribute('aria-current')));
+        let gapMin = 999;
+        for (let i = 0; i < as.length - 1; i++) { const p = r(as[i]), q = r(as[i + 1]); if (Math.abs(p.top - q.top) < 4) { gapMin = Math.min(gapMin, Math.round(q.left - p.right)); } }
+        return {
+            n: as.length, ids: as.map(x => x.id), atuais: document.querySelectorAll('#ordens-abas [aria-current]').length, atualId: ativa && ativa.id, ariaAtual: ativa && ativa.getAttribute('aria-current'),
+            ativaCls: !!ativa && ativa.classList.contains('gestao-aba--ativa'), estAtiva: cs && [cs.backgroundColor, cs.color, cs.fontWeight].join('|'),
+            estInativa: [ci.backgroundColor, ci.color, ci.borderTopWidth, ci.borderTopStyle, ci.borderTopColor].join('|'),
+            altMin: Math.min(...as.map(x => Math.round(r(x).height))), gapMin,
+            contagens: as.map(x => x.querySelector('.gestao-aba__contagem').textContent.trim()),
+            sr: as.map(x => x.querySelector('.gestao-sr').textContent.trim()),
+            rotulos: as.map(x => x.querySelector('.gestao-aba__rotulo').textContent.trim()),
+            rolagemH: document.querySelector('.gestao-abas__lista').scrollWidth > document.querySelector('.gestao-abas__lista').clientWidth + 1,
+        };
+    });
+    ok(a.n === 4 && JSON.stringify(a.ids) === JSON.stringify(['aba-ativas', 'aba-ativas-15d', 'aba-inativas', 'aba-baixas']), rot + ': 4 abas com os ids do contrato (' + a.ids.join(',') + ')');
+    ok(a.atuais === 1 && a.ariaAtual === 'page' && a.atualId === idAtiva && a.ativaCls, rot + ': exatamente 1 aba com aria-current="page" (' + a.atualId + ' = ' + idAtiva + ') e a classe --ativa');
+    ok(a.estAtiva === 'rgb(1, 121, 173)|rgb(255, 255, 255)|700', rot + ': aba ativa fundo #0179AD, texto branco, 700 (' + a.estAtiva + ')');
+    ok(a.estInativa === 'rgb(255, 255, 255)|rgb(58, 58, 58)|2px|solid|rgb(176, 176, 177)', rot + ': aba inativa fundo branco, borda 2px #B0B0B1, texto #3A3A3A (' + a.estInativa + ')');
+    ok(a.altMin >= 44 && a.gapMin >= 12 && !a.rolagemH, rot + ': abas com alvo >= 44px (' + a.altMin + '), >= 12px entre abas (' + a.gapMin + ') e sem rolagem horizontal');
+    ok(a.contagens.every(c => /^[\d.]+$/.test(c)) && a.sr.every(s => /^\([\d.]+ registros?\)$/.test(s)), rot + ': contagem dentro da aba e texto para leitor de tela (' + a.contagens.join(',') + ' | ' + a.sr[0] + ')');
+    ok(a.rotulos.join('|') === 'Ativas|Ativas há mais de 15 dias|Inativas|Baixas pendentes', rot + ': rotulos das abas (' + a.rotulos.join('|') + ')');
+}
+
+/** Filtros e aviso de retencao (estrutura comum). */
+async function verificarFiltrosOrdens(page, rot, aba) {
+    const f = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const form = document.getElementById('ordens-filtros'), fr = r(form);
+        const campos = Array.from(form.querySelectorAll('select, input:not([type=hidden])'));
+        const rotulos = campos.map(c => { const l = document.querySelector('label[for="' + c.id + '"]'); return !!l && l.getClientRects().length > 0 && l.textContent.trim() !== ''; });
+        const btns = Array.from(form.querySelectorAll('.gestao-botao'));
+        const av = document.getElementById('ordens-aviso-retencao');
+        return {
+            ids: campos.map(c => c.id), alturas: campos.map(c => Math.round(r(c).height)), rotulos, btnsAlt: btns.map(b => Math.round(r(b).height)),
+            dentro: Array.from(form.querySelectorAll('select, input, a, button')).filter(e => e.getClientRects().length).every(e => r(e).right <= fr.right + 0.5 && r(e).left >= fr.left - 0.5),
+            borda: getComputedStyle(campos[0]).borderTopColor + '|' + getComputedStyle(campos[0]).borderTopWidth,
+            aviso: av && { svg: !!av.querySelector('svg'), txt: av.textContent.trim(), w: Math.round(r(av).width), pw: Math.round(r(document.getElementById('ordens-abas')).width) },
+            metodo: form.getAttribute('method'), role: form.getAttribute('role'), hidden: document.getElementById('ordens-aba-campo').value,
+            ajuda: !!document.getElementById('filtro-numero-ajuda'), contador: document.getElementById('ordens-contador').textContent.trim(),
+        };
+    });
+    const esperados = aba === 'baixas' ? ['filtro-baixas-mostrar', 'filtro-criada-de', 'filtro-criada-ate'] : ['filtro-cliente', 'filtro-numero', 'filtro-criada-de', 'filtro-criada-ate'].concat(aba === 'inativas' ? ['filtro-inativada-de', 'filtro-inativada-ate'] : []);
+    ok(JSON.stringify(f.ids) === JSON.stringify(esperados), rot + ': campos de filtro da aba ' + aba + ' (' + f.ids.join(',') + ')');
+    ok(f.alturas.every(x => x >= 44) && f.rotulos.every(Boolean), rot + ': ' + f.ids.length + ' campos com label visivel e altura >= 44px (' + f.alturas.join(',') + ')');
+    ok(f.btnsAlt.length === 2 && f.btnsAlt.every(x => x >= 44) && f.dentro, rot + ': botoes Aplicar/Limpar >= 44px e dentro da barra de filtros');
+    ok(f.borda === 'rgb(135, 135, 137)|2px' && f.metodo === 'get' && f.role === 'search' && f.hidden !== '', rot + ': formulario GET com a borda de campo existente e aba nos hidden (' + f.hidden + ')');
+    if (aba === 'baixas') { ok(!f.aviso, rot + ': aviso de retencao do PDF NAO aparece na aba Baixas'); }
+    else { ok(f.aviso && f.aviso.svg && f.aviso.txt === 'Depois que uma ordem é inativada, o PDF dela é apagado em 15 dias.' && f.aviso.w >= f.aviso.pw - 2, rot + ': aviso fixo de 15 dias com icone, na largura toda'); }
+    if (aba !== 'baixas') { ok(f.ajuda, rot + ': ajuda do campo numero presente'); }
+}
+
+/** Paginacao: pagina atual `pag` de `paginas`. */
+async function verificarPaginacaoOrdens(page, rot, pag, paginas) {
+    const p = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const nav = document.getElementById('ordens-paginacao'), ant = document.getElementById('pag-anterior'), prox = document.getElementById('pag-proxima'), pos = document.getElementById('pag-posicao');
+        const est = el => { const c = getComputedStyle(el); return [c.borderTopStyle, c.borderTopColor, c.backgroundColor, c.color, c.cursor].join('|'); };
+        const nr = r(nav);
+        return {
+            ant: { tag: ant.tagName, dis: ant.getAttribute('aria-disabled'), href: ant.getAttribute('href'), rel: ant.getAttribute('rel'), est: est(ant), h: Math.round(r(ant).height) },
+            prox: { tag: prox.tagName, dis: prox.getAttribute('aria-disabled'), href: prox.getAttribute('href'), rel: prox.getAttribute('rel'), est: est(prox), h: Math.round(r(prox).height) },
+            pos: pos.textContent.trim(), dentro: [ant, prox, pos].every(e => r(e).right <= nr.right + 0.5 && r(e).left >= nr.left - 0.5), aria: nav.getAttribute('aria-label'),
+        };
+    });
+    const dis = 'dashed|rgb(58, 58, 58)|rgb(255, 255, 255)|rgb(58, 58, 58)|default';
+    if (pag === 1) { ok(p.ant.tag === 'SPAN' && p.ant.dis === 'true' && p.ant.href === null && p.ant.est === dis, rot + ': "Anterior" desabilitado e um <span aria-disabled> tracejado (' + p.ant.est + ')'); }
+    else { ok(p.ant.tag === 'A' && p.ant.rel === 'prev' && p.ant.href !== null, rot + ': "Anterior" e link rel=prev'); }
+    if (pag === paginas) { ok(p.prox.tag === 'SPAN' && p.prox.dis === 'true' && p.prox.est === dis, rot + ': "Proxima" desabilitada e um <span aria-disabled> tracejado'); }
+    else { ok(p.prox.tag === 'A' && p.prox.rel === 'next' && p.prox.href !== null && p.prox.est.startsWith('solid|rgb(1, 121, 173)'), rot + ': "Proxima" e link rel=next com borda solida #0179AD (' + p.prox.est + ')'); }
+    ok(p.pos === 'Página ' + pag + ' de ' + paginas && p.ant.h >= 44 && p.prox.h >= 44 && p.dentro && p.aria === 'Paginação', rot + ': "' + p.pos + '", alvos >= 44px e dentro da barra');
+}
+
+/** Cabecalhos, tabela (largura, rolagem, linhas) e acoes de uma lista de ordens (abas Ativas/15d/Inativas). */
+async function verificarTabelaOrdens(page, rot, w, h, opc) {
+    const t = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const tab = document.getElementById('ordens-tabela'), wrap = tab.closest('.gestao-tabela-wrap');
+        const linhas = Array.from(tab.tBodies[0].rows);
+        const ths = Array.from(tab.tHead.rows[0].cells);
+        const col = {}; ths.forEach(t => { col[t.className.replace('col-', '')] = Math.round(r(t).width); });
+        const sort = {}; ths.forEach(t => { sort[t.className.replace('col-', '')] = t.getAttribute('aria-sort'); });
+        const ord = Array.from(tab.querySelectorAll('.gestao-ordenar'));
+        const aft = th => getComputedStyle(th.querySelector('.gestao-ordenar'), '::after').content;
+        return {
+            layout: getComputedStyle(tab).tableLayout, fs: getComputedStyle(tab).fontSize, n: linhas.length, alturas: linhas.map(l => Math.round(r(l).height)),
+            wrapRole: wrap.getAttribute('role'), wrapTab: wrap.getAttribute('tabindex'), wrapLabel: wrap.getAttribute('aria-label'), wrapRolagem: wrap.scrollWidth > wrap.clientWidth + 1, wrapW: Math.round(r(wrap).width),
+            cab: ths.map(t => t.textContent.trim()), scopes: ths.map(t => t.getAttribute('scope')), cortados: ths.filter(t => t.scrollWidth > t.clientWidth + 1).map(t => t.textContent.trim()),
+            col, sort, ordAltura: ord.map(a => Math.round(r(a).height)), ordSeta: ths.filter(t => t.getAttribute('aria-sort') !== 'none' && t.querySelector('.gestao-ordenar')).map(t => aft(t)),
+            transbordo: linhas.flatMap(l => Array.from(l.cells)).filter(c => c.scrollWidth > c.clientWidth + 1).map(c => c.className + ':' + c.scrollWidth + '>' + c.clientWidth).slice(0, 4),
+            pdfTxt: linhas.map(l => l.querySelector('.col-pdf').textContent.trim()),
+            legenda: !!tab.querySelector('caption'),
+        };
+    });
+    ok(t.layout === 'fixed' && t.fs === '14px' && t.n > 0 && t.alturas.every(x => x >= 44 && x <= 150), rot + ': tabela fixed, 14px, ' + t.n + ' linhas de 44 a 150px (min ' + Math.min(...t.alturas) + ', max ' + Math.max(...t.alturas) + ')');
+    ok(t.wrapRole === 'region' && t.wrapTab === '0' && t.wrapLabel === 'Tabela de ordens de coleta' && t.legenda, rot + ': .gestao-tabela-wrap com role=region, tabindex=0, aria-label e a tabela com caption');
+    ok(JSON.stringify(t.cab) === JSON.stringify(['Número', 'Cliente', 'Transportadora', 'Situação', 'Criada em', 'PDF', 'Ações']) && t.scopes.every(s => s === 'col'), rot + ': 7 cabecalhos, todos th scope=col (' + t.cab.join(',') + ')');
+    ok(t.cortados.length === 0, rot + ': nenhum cabecalho cortado' + (t.cortados.length ? ' -> ' + t.cortados.join(',') : ''));
+    ok(Object.entries(LARGURAS_ORDENS).every(([k, v]) => t.col[k] >= v - 2), rot + ': colunas fixas >= 150/162/140/100/130/92/226 (' + JSON.stringify(t.col) + ')');
+    ok(t.sort.numero === (opc.sortNumero || 'none') && t.sort.cliente === 'none' && t.sort.criada === opc.sortCriada && t.sort.acoes === null && t.sort.situacao === null, rot + ': aria-sort so nas 3 colunas ordenaveis (criada=' + t.sort.criada + ')');
+    ok(t.ordAltura.length === 3 && t.ordAltura.every(x => x >= 44) && t.ordSeta.length === 1 && /[▲▼]/.test(t.ordSeta[0]), rot + ': links de ordenacao >= 44px (' + t.ordAltura.join(',') + ') e seta na coluna ativa (' + t.ordSeta.join(',') + ')');
+    ok(t.transbordo.length === 0, rot + ': nenhum texto estoura a coluna (numero longo, razao social, transportadora)' + (t.transbordo.length ? ' -> ' + t.transbordo.join(' | ') : ''));
+    ok(t.pdfTxt.every(x => x === 'Disponível' || x === 'Não disponível'), rot + ': coluna PDF com texto (' + Array.from(new Set(t.pdfTxt)).join('/') + ')');
+    if (w >= 1366) { ok(!t.wrapRolagem, rot + ': a >= 1366px a tabela cabe sem rolagem horizontal (wrap ' + t.wrapW + 'px)'); }
+    if (w < 1100) { ok(t.wrapRolagem, rot + ': < 1100px a rolagem horizontal fica SO no .gestao-tabela-wrap'); }
+
+    const l = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const linhas = Array.from(document.querySelectorAll('#ordens-tabela tbody tr'));
+        const out = { attrs: true, atencaoSoAtiva: true, acoes: [], atencao: [], normais: [], inativas: [], duasLinhas: true, sinais: [], semAtencaoComIcone: true, ids: [] };
+        for (const tr of linhas) {
+            const id = tr.getAttribute('data-id-ordem'), st = tr.getAttribute('data-status'), idd = tr.getAttribute('data-idade');
+            if (!/^\d+$/.test(id) || !['ativa', 'inativa'].includes(st) || !['atencao', 'normal'].includes(idd)) { out.attrs = false; }
+            if (idd === 'atencao' && st !== 'ativa') { out.atencaoSoAtiva = false; }
+            const td = tr.querySelector('.col-acoes'), abrir = td.querySelector('a[id="btn-ordem-abrir-' + id + '"]');
+            const form = td.querySelector('form[id="form-ordem-' + (st === 'ativa' ? 'inativar' : 'ativar') + '-' + id + '"]');
+            const btn = form && form.querySelector('button[id="btn-ordem-' + (st === 'ativa' ? 'inativar' : 'ativar') + '-' + id + '"]');
+            if (!abrir || !btn) { out.ids.push(id); continue; }
+            const a = r(abrir), b = r(btn), c = r(td), btns = Array.from(td.querySelectorAll('.gestao-botao'));
+            const numTxt = tr.querySelector('.col-numero').childNodes[0].textContent.trim(), razTxt = tr.querySelector('.col-cliente .gestao-celula-principal').textContent;
+            const cs = getComputedStyle(btn);
+            out.acoes.push({
+                st, mesmaLinha: Math.abs(a.top - b.top) < 4, gap: Math.round(b.left - a.right), ultimo: btns[btns.length - 1] === btn, hA: Math.round(a.height), hB: Math.round(b.height),
+                dentro: b.right <= c.right + 0.5 && a.left >= c.left - 0.5, svg: !!btn.querySelector('svg'), borda: cs.borderTopWidth + '|' + cs.borderTopStyle + '|' + cs.borderTopColor,
+                ariaAbrir: abrir.getAttribute('aria-label') === 'Abrir a ordem ' + numTxt + ' do cliente ' + razTxt && abrir.textContent.trim() === 'Abrir',
+                ariaBtn: btn.getAttribute('aria-label') === (st === 'ativa' ? 'Inativar' : 'Ativar') + ' a ordem ' + numTxt + ' do cliente ' + razTxt && btn.textContent.trim() === (st === 'ativa' ? 'Inativar' : 'Ativar'),
+                csrf: !!form.querySelector('input[name="csrf_token"]') || !!form.querySelector('input[type="hidden"][name*="csrf"]'), metodo: form.getAttribute('method'), destrutivo: btn.classList.contains('gestao-botao--destrutivo'),
+            });
+            const cr = tr.querySelector('.col-criada'), pr = cr.querySelector('.gestao-celula-principal'), se = cr.querySelector('.gestao-celula-sec');
+            if (!(r(se).top >= r(pr).bottom - 1)) { out.duasLinhas = false; }
+            const ident = cr.querySelector('.gestao-idade'), first = getComputedStyle(tr.cells[0]);
+            const sit = tr.querySelector('.col-situacao .gestao-situacao'), cssit = getComputedStyle(sit);
+            const info = { txt: ident.textContent.trim(), svg: !!ident.querySelector('svg'), peso: getComputedStyle(ident).fontWeight, borda: getComputedStyle(ident).borderTopWidth + '|' + getComputedStyle(ident).borderTopStyle + '|' + getComputedStyle(ident).borderTopColor, barra: first.borderLeftWidth + '|' + first.borderLeftStyle + '|' + first.borderLeftColor, sit: [sit.textContent.trim(), cssit.color, cssit.fontWeight, cssit.fontStyle, !!sit.querySelector('svg')].join('|'), numEst: getComputedStyle(tr.querySelector('.col-numero')).fontStyle, sec: cr.querySelector('.gestao-celula-sec').textContent.trim(), srAtencao: (ident.querySelector('.gestao-sr') || { textContent: null }).textContent };
+            if (idd === 'atencao') { out.atencao.push(info); } else if (st === 'ativa') { out.normais.push(info); } else { out.inativas.push(info); }
+            const sn = tr.querySelector('.gestao-sinal');
+            if (sn) { const cn = getComputedStyle(sn); const vis = sn.querySelector('span[aria-hidden="true"]'), srs = sn.querySelector('.gestao-sr'); out.sinais.push({ txt: vis && vis.textContent.trim(), sr: srs && srs.textContent.trim(), svg: !!sn.querySelector('svg'), borda: cn.borderTopStyle, dentro: r(sn).right <= r(tr.querySelector('.col-numero')).right + 0.5 }); }
+        }
+        return out;
+    });
+    ok(l.attrs && l.atencaoSoAtiva && l.ids.length === 0, rot + ': toda linha com data-id-ordem/data-status/data-idade validos e botoes Abrir + Ativar/Inativar com os ids do contrato' + (l.ids.length ? ' -> sem ids em ' + l.ids.join(',') : ''));
+    ok(l.acoes.length > 0 && l.acoes.every(x => x.mesmaLinha && x.dentro && x.hA >= 44 && x.hB >= 44 && x.metodo === 'post'), rot + ': Abrir e Ativar/Inativar lado a lado, sem quebra, dentro da celula, alvos >= 44px (' + l.acoes.length + ' linhas)');
+    const ina = l.acoes.filter(x => x.st === 'ativa'), ati = l.acoes.filter(x => x.st === 'inativa');
+    ok(ina.every(x => x.destrutivo && x.ultimo && x.svg && x.borda === '3px|solid|rgb(58, 58, 58)' && x.gap >= 23), rot + ': Inativar e o ULTIMO botao, destrutivo (borda 3px #3A3A3A + icone) e a >= 24px do Abrir (' + ina.map(x => x.gap).slice(0, 3).join(',') + ')');
+    ok(ati.every(x => !x.destrutivo && x.gap >= 11 && x.borda.startsWith('2px|solid|rgb(1, 121, 173)')), rot + ': Ativar e secundario (borda 2px #0179AD) a >= 12px do Abrir');
+    ok(l.duasLinhas, rot + ': coluna Criada em duas linhas (idade acima, data abaixo)');
+    ok(l.acoes.every(x => x.ariaAbrir && x.ariaBtn), rot + ': aria-label de Abrir/Ativar/Inativar = texto visivel + " a ordem <numero> do cliente <razao social>" (' + l.acoes.length + ' linhas)');
+    ok([].concat(l.atencao, l.normais, l.inativas).every(x => /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(x.sec)), rot + ': coluna Criada: linha secundaria so com data e hora (sem o prefixo "Criada em")');
+    ok(l.atencao.every(x => x.srAtencao === 'Atenção: ativa há mais de 15 dias. ' && !/Atenção/.test(x.sec)) && l.normais.every(x => x.srAtencao === null), rot + ': so a idade de atencao leva o texto para leitor de tela "Atenção: ativa há mais de 15 dias."');
+    ok(l.atencao.every(x => x.svg && /^Atenção: ativa há mais de 15 dias\. Há \d+ dias$/.test(x.txt) && x.peso === '700' && x.borda === '3px|solid|rgb(58, 58, 58)' && x.barra === '6px|dashed|rgb(58, 58, 58)' && x.sit.startsWith('Ativa|rgb(1, 121, 173)|700|normal|true')), rot + ': ' + l.atencao.length + ' linhas data-idade=atencao: etiqueta com icone + texto "Há N dias", borda 3px #3A3A3A, 700 e barra esquerda 6px tracejada' + (l.atencao[0] ? ' (' + JSON.stringify(l.atencao[0]) + ')' : ''));
+    ok(l.normais.every(x => !x.svg && /^(Hoje|Há \d+ dias?)$/.test(x.txt) && x.peso === '500' && x.borda.startsWith('0px') && !x.barra.includes('dashed') && x.sit.startsWith('Ativa|rgb(1, 121, 173)|700|normal|true')), rot + ': ' + l.normais.length + ' ativas normais: so texto peso 500, sem etiqueta nem barra, situacao Ativa azul 700 com icone');
+    ok(l.inativas.every(x => /^Inativada em \d{2}\/\d{2}\/\d{4}$/.test(x.txt) && x.sit === 'Inativa|rgb(58, 58, 58)|500|italic|true' && x.numEst === 'normal' && !x.svg), rot + ': ' + l.inativas.length + ' inativas: italico SO no rotulo da situacao (#3A3A3A 500 com icone); o resto da linha em fonte normal');
+    ok(opc.atencaoEsperada === undefined || l.atencao.length === opc.atencaoEsperada, rot + ': linhas com atencao = ' + l.atencao.length + (opc.atencaoEsperada !== undefined ? ' (esperado ' + opc.atencaoEsperada + ')' : ''));
+    ok(l.sinais.every(s => s.svg && s.txt === 'Repetido em outro cliente' && s.sr === 'Mesmo número em outros clientes' && s.borda === 'dashed' && s.dentro), rot + ': sinal "Repetido em outro cliente" (texto completo so para leitor de tela) com icone + borda tracejada, dentro da celula (' + l.sinais.length + ')');
+
+    // botao de acao visivel e clicavel SEM rolar a tabela na horizontal (1000x700 e 680): Abrir e Ativar/Inativar da 1a linha
+    const cl = await page.evaluate(() => {
+        const tr = document.querySelector('#ordens-tabela tbody tr'), wrap = document.querySelector('.gestao-tabela-wrap');
+        wrap.scrollLeft = 0; tr.scrollIntoView({ block: 'center' });
+        const alvos = Array.from(tr.querySelectorAll('.col-acoes .gestao-botao'));
+        return alvos.map(b => { const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { t: b.textContent.trim(), noVp: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, hit: el === b || b.contains(el) }; });
+    });
+    ok(cl.length === 2 && cl.every(x => x.noVp && x.hit), rot + ': botoes de acao da 1a linha visiveis e clicaveis SEM rolar a tabela (' + cl.map(x => x.t + ':' + x.noVp + '/' + x.hit).join(' ') + ')');
+    if (w < 1100) {
+        const fim = await page.evaluate(() => {
+            const wrap = document.querySelector('.gestao-tabela-wrap'); wrap.scrollLeft = wrap.scrollWidth;
+            const b = document.querySelector('#ordens-tabela tbody tr .col-acoes .gestao-botao'); const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            wrap.scrollLeft = 0; return r.right <= innerWidth + 0.5 && (el === b || b.contains(el));
+        });
+        ok(fim, rot + ': com a tabela rolada ate o fim a coluna Acoes continua clicavel');
+    }
+}
+
+/** Tabela de baixas pendentes (aba Baixas). `todas` = inclui a resolvida. */
+async function verificarTabelaBaixas(page, rot, w, todas) {
+    const t = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const tab = document.getElementById('baixas-tabela'), wrap = tab.closest('.gestao-tabela-wrap');
+        const linhas = Array.from(tab.tBodies[0].rows), ths = Array.from(tab.tHead.rows[0].cells);
+        const col = {}; ths.forEach(x => { col[x.className.replace('col-', '')] = Math.round(r(x).width); });
+        const sit = { pendente: null, resolvida: null };
+        const info = el => { const c = getComputedStyle(el); return [el.textContent.trim().slice(0, 40), c.color, c.fontWeight, c.fontStyle, !!el.querySelector('svg')].join('|'); };
+        const p = tab.querySelector('.gestao-situacao--pendente'), v = tab.querySelector('.gestao-situacao--resolvida');
+        sit.pendente = p && info(p); sit.resolvida = v && info(v);
+        const ac = linhas.map(l => {
+            const id = l.getAttribute('data-id-baixa'), td = l.querySelector('.col-acoes'), c = r(td), bs = Array.from(td.querySelectorAll('.gestao-botao'));
+            return { id, res: l.getAttribute('data-resolvida'), abrir: !!td.querySelector('#btn-baixa-abrir-' + id), estado: td.querySelector('#baixa-oc-estado-' + id) && td.querySelector('#baixa-oc-estado-' + id).textContent.trim(), estadoVis: td.querySelector('#baixa-oc-estado-' + id) && { svg: !!td.querySelector('#baixa-oc-estado-' + id + ' svg'), peso: getComputedStyle(td.querySelector('#baixa-oc-estado-' + id)).fontWeight, dentro: r(td.querySelector('#baixa-oc-estado-' + id)).right <= c.right + 0.5 }, form: !!td.querySelector('#form-baixa-resolver-' + id) && !!td.querySelector('#btn-baixa-resolver-' + id), alt: bs.map(b => Math.round(r(b).height)), dentro: bs.every(b => r(b).right <= c.right + 0.5), linha: bs.every(b => Math.abs(r(b).top - r(bs[0]).top) < 4), tr: Math.round(r(l).height) };
+        });
+        return {
+            layout: getComputedStyle(tab).tableLayout, n: linhas.length, role: wrap.getAttribute('role'), tabindex: wrap.getAttribute('tabindex'), rolagem: wrap.scrollWidth > wrap.clientWidth + 1,
+            cab: ths.map(x => x.textContent.trim()), scopes: ths.map(x => x.getAttribute('scope')), cortados: ths.filter(x => x.scrollWidth > x.clientWidth + 1).length, col, sit, ac,
+            transbordo: linhas.flatMap(l => Array.from(l.cells)).filter(c => c.scrollWidth > c.clientWidth + 1).length,
+        };
+    });
+    ok(t.layout === 'fixed' && t.n > 0 && t.role === 'region' && t.tabindex === '0', rot + ': tabela de baixas fixed (' + t.n + ' linhas), wrap com role=region e tabindex=0');
+    ok(JSON.stringify(t.cab) === JSON.stringify(['Atendimento', 'Número da ordem', 'Criada em', 'Situação da baixa', 'Ações']) && t.scopes.every(s => s === 'col') && t.cortados === 0, rot + ': 5 cabecalhos th scope=col, nenhum cortado');
+    ok(Object.entries(LARGURAS_BAIXAS).every(([k, v]) => t.col[k] >= v - 2), rot + ': colunas fixas >= 110/210/140/190/350 (' + JSON.stringify(t.col) + ')');
+    ok(t.transbordo === 0, rot + ': nenhum texto estoura a coluna');
+    ok(t.sit.pendente === 'Pendente|rgb(58, 58, 58)|700|normal|true', rot + ': "Pendente" com icone, #3A3A3A, 700 (' + t.sit.pendente + ')');
+    if (todas) { ok(/^Resolvida em .*\|rgb\(58, 58, 58\)\|500\|normal\|true$/.test(t.sit.resolvida || ''), rot + ': "Resolvida em ..." com icone, #3A3A3A, 500 (' + t.sit.resolvida + ')'); }
+    ok(t.ac.every(a => a.alt.every(h => h >= 44) && a.dentro && a.linha && a.tr >= 44 && a.tr <= 150), rot + ': botoes das baixas >= 44px, dentro da celula e na mesma linha');
+    ok(t.ac.every(a => (a.res === '0' ? a.form : !a.form) && (a.abrir || (a.estado === 'Mais de uma ordem com este número' || a.estado === 'Ordem não localizada'))), rot + ': cada baixa pendente com "Marcar como resolvida"; sem Abrir, texto "Ordem nao localizada"/"Mais de uma ordem com este numero"');
+    ok(t.ac.filter(a => a.estadoVis).every(a => a.estadoVis.svg && a.estadoVis.peso === '600' && a.estadoVis.dentro), rot + ': estado da ordem na baixa com icone de alerta, peso 600 e dentro da celula');
+    ok(t.ac.some(a => a.estado === 'Mais de uma ordem com este número') && t.ac.some(a => a.estado === 'Ordem não localizada') && t.ac.some(a => a.abrir), rot + ': os 3 estados da OC aparecem (localizada, ambigua, nao localizada)');
+    if (w >= 1366) { ok(!t.rolagem, rot + ': a >= 1366px a tabela de baixas cabe sem rolagem horizontal'); }
+    if (w < 1100) { ok(t.rolagem, rot + ': < 1100px a rolagem fica SO no wrap'); }
+    const cl = await page.evaluate(() => {
+        const tr = document.querySelector('#baixas-tabela tbody tr'), wrap = document.querySelector('.gestao-tabela-wrap');
+        wrap.scrollLeft = 0; tr.scrollIntoView({ block: 'center' });
+        return Array.from(tr.querySelectorAll('.col-acoes .gestao-botao')).map(b => { const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return r.left >= 0 && r.right <= innerWidth && (el === b || b.contains(el)); });
+    });
+    ok(cl.length > 0 && cl.every(Boolean), rot + ': botoes de acao da 1a baixa visiveis e clicaveis SEM rolar a tabela');
+}
+
+/** Uma lista completa (aba) em um viewport. */
+async function listaOrdens(page, srv, rot, w, h, query, opc, contadores) {
+    await irPara(page, srv.base, '/gestao/ordens.php' + query);
+    await checagemGeral(page, rot, contadores);
+    await semInlineOrdens(page, rot);
+    const faltam = await page.evaluate(lista => lista.filter(i => !document.getElementById(i)), IDS_ORDENS.concat(opc.baixas ? ['filtro-baixas-mostrar', 'baixas-tabela'] : ['ordens-aviso-retencao'], opc.baixas ? [] : ['filtro-cliente', 'filtro-numero', 'filtro-criada-de', 'filtro-criada-ate', 'ordens-tabela'], ['ordens-paginacao', 'pag-anterior', 'pag-posicao', 'pag-proxima']));
+    ok(faltam.length === 0, rot + ': ids do contrato presentes' + (faltam.length ? ' -> ' + faltam.join(',') : ''));
+    await verificarAbasOrdens(page, rot, opc.idAba);
+    await verificarFiltrosOrdens(page, rot, opc.aba);
+    const cont = await page.evaluate(() => document.getElementById('ordens-contador').textContent.trim());
+    ok(opc.contador.test(cont), rot + ': contador "' + cont + '"');
+    ok(await page.evaluate(d => document.getElementById('ordens-descricao').textContent.trim().startsWith(d), opc.descricao), rot + ': descricao da aba');
+    if (opc.baixas) { await verificarTabelaBaixas(page, rot, w, opc.todas); } else { await verificarTabelaOrdens(page, rot, w, h, opc); }
+    await verificarPaginacaoOrdens(page, rot, opc.pag, opc.paginas);
+    await botoesSolidos(page, rot);
+}
+
+/** Detalhe de uma ordem em um viewport. */
+async function detalheOrdem(page, srv, rot, w, id, exp, contadores) {
+    await irPara(page, srv.base, '/gestao/ordem.php?id=' + id + (exp.conf ? '&confirmar=' + exp.conf : ''));
+    await checagemGeral(page, rot, contadores);
+    await semInlineOrdens(page, rot);
+    const faltam = await page.evaluate(lista => lista.filter(i => !document.getElementById(i)), IDS_ORDEM_DETALHE.concat(exp.status === 'ativa' ? ['btn-ordem-inativar'] : ['btn-ordem-ativar'], exp.pdf === 'disponivel' ? ['ordem-pdf-form', 'btn-ordem-pdf'] : ['ordem-pdf-texto'], exp.aviso ? ['ordem-pdf-aviso'] : [], exp.sinal ? ['ordem-outros-clientes'] : [], exp.conf ? ['ordem-confirmacao', 'ordem-confirmacao-cancelar'] : []));
+    ok(faltam.length === 0, rot + ': ids do contrato presentes' + (faltam.length ? ' -> ' + faltam.join(',') : ''));
+    const d = await page.evaluate(exp => {
+        const r = el => el.getBoundingClientRect(), q = id => document.getElementById(id);
+        const det = q('ordem-detalhe'), dr = r(det);
+        const cart = ['ordem-cartao-ordem', 'ordem-cliente', 'ordem-transportadora', 'ordem-motorista', 'ordem-pdf'].map(id => ({ id, r: r(q(id)) }));
+        const c = Object.fromEntries(cart.map(x => [x.id, x.r]));
+        const sit = q('ordem-situacao').querySelector('.gestao-situacao'), cs = getComputedStyle(sit);
+        const idd = q('ordem-idade'), ide = idd.querySelector('.gestao-idade') || idd, ci = getComputedStyle(ide);
+        const btns = Array.from(document.querySelectorAll('#ordem-detalhe .gestao-botao, #ordem-voltar'));
+        const out = {
+            dentro: cart.every(x => x.r.right <= dr.right + 1 && x.r.left >= dr.left - 1), cols: new Set(cart.map(x => Math.round(x.r.left))).size,
+            ordemLargura: Math.round(c['ordem-cartao-ordem'].width) >= Math.round(dr.width) - 2, lado: Math.abs(c['ordem-cliente'].top - c['ordem-transportadora'].top) < 4 && c['ordem-cliente'].left < c['ordem-transportadora'].left, lado2: Math.abs(c['ordem-motorista'].top - c['ordem-pdf'].top) < 4 && c['ordem-motorista'].left < c['ordem-pdf'].left,
+            empilhado: c['ordem-cliente'].top < c['ordem-transportadora'].top && c['ordem-transportadora'].top < c['ordem-motorista'].top && c['ordem-motorista'].top < c['ordem-pdf'].top && Math.abs(c['ordem-cliente'].left - c['ordem-pdf'].left) < 2,
+            sit: [sit.textContent.trim(), cs.color, cs.fontWeight, cs.fontStyle, !!sit.querySelector('svg')].join('|'), situacaoAttr: q('ordem-situacao').getAttribute('data-situacao'),
+            idade: { txt: ide.textContent.trim(), attr: idd.getAttribute('data-idade'), svg: !!ide.querySelector('svg'), peso: ci.fontWeight, borda: ci.borderTopWidth + '|' + ci.borderTopStyle + '|' + ci.borderTopColor },
+            alturas: btns.map(b => Math.round(r(b).height)), tituloTransbordo: q('ordem-titulo-ordem').scrollWidth > q('ordem-titulo-ordem').clientWidth + 1,
+            ddTransbordo: Array.from(document.querySelectorAll('#ordem-detalhe dd')).filter(x => x.scrollWidth > x.clientWidth + 1).length, texto: det.textContent, imgs: det.querySelectorAll('img').length,
+            numero: q('ordem-numero').textContent, status: det.getAttribute('data-status'), idAttr: det.getAttribute('data-id-ordem'),
+            voltar: { h: Math.round(r(q('ordem-voltar')).height), href: q('ordem-voltar').getAttribute('href') },
+            dl: Array.from(document.querySelectorAll('#ordem-detalhe dt')).map(x => x.textContent.trim()),
+        };
+        const sn = q('ordem-outros-clientes');
+        out.sinal = sn && { txt: sn.textContent.trim(), svg: !!sn.querySelector('svg'), borda: getComputedStyle(sn).borderTopStyle, tag: sn.tagName };
+        const cf = q('ordem-confirmacao');
+        if (cf) {
+            const cc = getComputedStyle(cf), rc = r(cf), ba = q(exp.status === 'ativa' ? 'btn-ordem-inativar' : 'btn-ordem-ativar'), cb = getComputedStyle(ba), can = q('ordem-confirmacao-cancelar');
+            const el = document.elementFromPoint(rc.left + 8, rc.top + rc.height / 2);
+            out.conf = { acao: cf.getAttribute('data-acao'), role: cf.getAttribute('role'), svg: !!cf.querySelector('svg'), txt: cf.textContent.trim(), borda: cc.borderTopWidth + '|' + cc.borderTopStyle + '|' + cc.borderTopColor, visivel: rc.width > 0 && rc.height > 0 && rc.left >= 0 && rc.right <= innerWidth, hit: el === cf || cf.contains(el), peso: cc.fontWeight, btn: [ba.textContent.trim(), cb.backgroundColor, cb.color, cb.borderTopWidth].join('|'), cancelar: Math.round(r(can).height), cancelarHref: can.getAttribute('href'), cancelarAntes: !!(can.compareDocumentPosition(ba) & Node.DOCUMENT_POSITION_FOLLOWING) && (r(can).left < r(ba).left || r(can).bottom <= r(ba).top + 1), alertas: document.querySelectorAll('[role="alert"]').length, confirmarHidden: !!q('ordem-acao-form').querySelector('input[name="confirmar"][value="1"]') };
+        } else { out.conf = null; out.confHidden = !!q('ordem-acao-form').querySelector('input[name="confirmar"]'); }
+        const pdf = q('ordem-pdf');
+        out.pdf = { attr: pdf.getAttribute('data-pdf'), form: !!q('ordem-pdf-form') && { target: q('ordem-pdf-form').getAttribute('target'), metodo: q('ordem-pdf-form').getAttribute('method') }, btn: q('btn-ordem-pdf') && { h: Math.round(r(q('btn-ordem-pdf')).height), svg: !!q('btn-ordem-pdf').querySelector('svg'), est: [getComputedStyle(q('btn-ordem-pdf')).backgroundColor, getComputedStyle(q('btn-ordem-pdf')).color].join('|'), sr: q('btn-ordem-pdf').querySelector('.gestao-sr').textContent.trim(), vis: Array.from(q('btn-ordem-pdf').querySelectorAll('span:not(.gestao-sr)')).map(x => x.textContent.trim()).join('') }, texto: q('ordem-pdf-texto') && q('ordem-pdf-texto').textContent.trim(), aviso: q('ordem-pdf-aviso') && { txt: q('ordem-pdf-aviso').textContent.trim(), icone: getComputedStyle(q('ordem-pdf-aviso').querySelector('svg')).color, svg: !!q('ordem-pdf-aviso').querySelector('svg'), borda: getComputedStyle(q('ordem-pdf-aviso')).borderLeftWidth } };
+        const bt = q(exp.status === 'ativa' ? 'btn-ordem-inativar' : 'btn-ordem-ativar'), bc = getComputedStyle(bt);
+        out.acao = { txt: bt.textContent.trim(), borda: bc.borderTopWidth + '|' + bc.borderTopStyle + '|' + bc.borderTopColor, svg: !!bt.querySelector('svg'), cls: bt.className, aria: bt.getAttribute('aria-label') };
+        return out;
+    }, exp);
+    ok(d.dentro && String(d.idAttr) === String(id) && d.status === exp.status, rot + ': cartoes dentro do bloco (data-id-ordem=' + d.idAttr + ' data-status=' + d.status + ')');
+    if (w >= 1100) { ok(d.ordemLargura && d.lado && d.lado2 && d.cols === 2, rot + ': >= 1100px: cartao da ordem na largura toda e os demais em 2 colunas (colunas ' + d.cols + ')'); }
+    else { ok(d.empilhado && d.cols === 1, rot + ': < 1100px: cartoes empilhados em 1 coluna'); }
+    ok(d.sit.startsWith(exp.status === 'ativa' ? 'Ativa|rgb(1, 121, 173)|700|normal|true' : 'Inativa|rgb(58, 58, 58)|500|italic|true') && d.situacaoAttr === exp.status, rot + ': situacao ' + exp.status + ' com icone (' + d.sit + ')');
+    ok(d.idade.attr === (exp.atencao ? 'atencao' : 'normal') && (exp.atencao ? d.idade.svg && d.idade.peso === '700' && d.idade.borda === '3px|solid|rgb(58, 58, 58)' && /^Atenção: ativa há mais de 15 dias\. Há \d+ dias$/.test(d.idade.txt) : !d.idade.svg && d.idade.peso === '500'), rot + ': idade "' + d.idade.txt + '" ' + (exp.atencao ? 'em etiqueta com icone, borda 3px #3A3A3A e 700' : 'so texto 500'));
+    ok(d.alturas.every(x => x >= 44), rot + ': botoes/links do detalhe >= 44px (' + d.alturas.join(',') + ')');
+    ok(!d.tituloTransbordo && d.ddTransbordo === 0, rot + ': numero e valores longos sem estourar (titulo e dd)');
+    ok(d.voltar.h >= 44 && d.voltar.href.startsWith('/gestao/ordens.php?aba='), rot + ': "Voltar para a lista" >= 44px mantem a aba (' + d.voltar.href + ')');
+    ok(JSON.stringify(d.dl).includes('Razão social') && JSON.stringify(d.dl).includes('Motorista') && JSON.stringify(d.dl).includes('CNH') && JSON.stringify(d.dl).includes('Placa'), rot + ': cartoes com Razao social, Motorista, CNH e Placa');
+    ok((exp.textos || []).every(t => d.texto.includes(t)) && d.imgs === 0, rot + ': dados em claro (sem mascara) e nenhum <img> injetado (' + (exp.textos || []).length + ' textos)');
+    if (exp.sinal) { ok(d.sinal && d.sinal.svg && d.sinal.txt.startsWith('Mesmo número em outros clientes') && d.sinal.borda === 'dashed', rot + ': sinal "Mesmo numero em outros clientes" com icone + texto + borda tracejada'); }
+    else { ok(d.sinal === null, rot + ': sem sinal de outros clientes'); }
+    if (exp.conf) {
+        ok(d.conf && d.conf.acao === exp.conf && d.conf.role === 'alert' && d.conf.svg && d.conf.borda === '3px|solid|rgb(58, 58, 58)' && d.conf.peso === '700' && d.conf.visivel && d.conf.hit && d.conf.confirmarHidden, rot + ': #ordem-confirmacao visivel (role=alert, icone, borda 3px #3A3A3A, 700) e confirmar=1 no formulario (' + (d.conf && d.conf.txt) + ')');
+        ok(d.conf && d.conf.btn.startsWith((exp.conf === 'inativar' ? 'Inativar' : 'Ativar') + ' mesmo assim|') && (exp.conf === 'inativar' ? d.conf.btn.endsWith('rgb(58, 58, 58)|rgb(255, 255, 255)|3px') : d.conf.btn === 'Ativar mesmo assim|rgb(1, 121, 173)|rgb(255, 255, 255)|2px') && d.conf.cancelar >= 44 && d.conf.cancelarHref.startsWith('/gestao/ordem.php?id=' + id), rot + ': botao "mesmo assim" (' + d.conf.btn + ') e Cancelar >= 44px sem confirmar');
+        ok(d.conf && d.conf.cancelarAntes && d.conf.alertas === 1, rot + ': "Cancelar" vem ANTES do botao destrutivo/de confirmacao (DOM e visual) e #ordem-confirmacao e o unico role=alert (' + (d.conf && d.conf.alertas) + ')');
+    } else {
+        ok(d.conf === null && !d.confHidden && (exp.status === 'ativa' ? d.acao.cls.includes('--destrutivo') && d.acao.borda === '3px|solid|rgb(58, 58, 58)' && d.acao.svg : d.acao.borda.startsWith('2px|solid|rgb(1, 121, 173)')), rot + ': sem confirmacao; ' + (exp.status === 'ativa' ? 'Inativar destrutivo (borda 3px #3A3A3A + icone)' : 'Ativar secundario'));
+    }
+    ok(d.pdf.attr === exp.pdf, rot + ': #ordem-pdf data-pdf=' + d.pdf.attr + ' (esperado ' + exp.pdf + ')');
+    if (exp.pdf === 'disponivel') { ok(d.pdf.form && d.pdf.form.target === '_blank' && d.pdf.form.metodo === 'post' && d.pdf.btn.h >= 44 && d.pdf.btn.svg && d.pdf.btn.est === 'rgb(1, 121, 173)|rgb(255, 255, 255)' && d.pdf.btn.sr === '(abre em uma nova aba)' && d.pdf.btn.vis === 'Baixar PDF' && d.pdf.texto === null, rot + ': "Baixar PDF" primario com icone externo, 44px, POST em nova aba (" (abre em uma nova aba)" so para leitor de tela)'); }
+    else { ok(d.pdf.btn === null && d.pdf.form === false && !!d.pdf.texto && (exp.pdfTexto === undefined || d.pdf.texto === exp.pdfTexto), rot + ': sem botao de PDF, com texto "' + d.pdf.texto + '"'); }
+    if (exp.aviso) { ok(d.pdf.aviso && d.pdf.aviso.svg && d.pdf.aviso.borda === '6px' && d.pdf.aviso.icone === 'rgb(58, 58, 58)', rot + ': aviso do PDF como nota permanente com icone #3A3A3A ("' + (d.pdf.aviso && d.pdf.aviso.txt) + '")'); }
+    else { ok(d.pdf.aviso === null, rot + ': sem aviso do PDF'); }
+    await botoesSolidos(page, rot);
+    return d;
+}
+
+const DET = { // casos do detalhe (id vem de info.ordens)
+    ativa: { status: 'ativa', atencao: false, pdf: 'disponivel', aviso: true, sinal: false, textos: ['LAY-1001', 'JOAO DA SILVA', '12345678901', 'ABC1D23', 'TRANSPORTADORA RAPIDA LTDA', '11.111.111/0001-11', '55.555.555/0001-55'] },
+    ativa15: { status: 'ativa', atencao: true, pdf: 'disponivel', aviso: true, sinal: false, textos: ['LAY-1002', 'MARIA SOUZA'] },
+    ausente: { status: 'ativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, pdfTexto: 'Esta ordem não tem PDF anexado.', textos: ['LAY-1003', 'Não informado'] },
+    inativa: { status: 'inativa', atencao: false, pdf: 'disponivel', aviso: true, sinal: false, textos: ['LAY-2001', 'PEDRO LIMA'] },
+    apagado: { status: 'inativa', atencao: false, pdf: 'apagado', aviso: false, sinal: false, pdfTexto: 'O PDF foi apagado automaticamente, 15 dias depois da inativação.', textos: ['LAY-2002'] },
+    inativaSemPdf: { status: 'inativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, pdfTexto: 'Esta ordem não tem PDF anexado.', textos: ['LAY-2003'] },
+    dupA: { status: 'ativa', atencao: false, pdf: 'ausente', aviso: false, sinal: true, textos: ['LAY-DUP'] },
+    conf: { status: 'ativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, conf: 'inativar', textos: ['LAY-CONF'] },
+    confA: { status: 'inativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, conf: 'ativar', textos: ['LAY-CONFA'] },
+    hostil: { status: 'ativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, textos: ['<img src=x onerror=window.__xss=33>', '"><script>window.__xss=34</script>', '<i>1</i>', '"><b>X</b>'] },
+    longo: { status: 'ativa', atencao: true, pdf: 'disponivel', aviso: true, sinal: false, textos: ['N' + '1234567890'.repeat(4) + '123456789', 'MOTORISTAMOTORISTA', '12345678901234567890', 'ABCDEFGHIJ'] },
+};
+
+async function cenarioOrdensViewport(browser, srv, w, h, contadores) {
+    const rot = w + 'x' + h + ' ordens';
+    const page = await paginaOrdens(browser, srv, w, h, rot, contadores, false);
+    const O = srv.info.ordens;
+    const base = { ativas: { aba: 'ativas', idAba: 'aba-ativas', contador: /^Exibindo 1 a 25 de 73 ordens\.$/, descricao: 'Ordens de coleta ativas', pag: 1, paginas: 3, sortCriada: 'descending' } };
+    // ---- Ativas (pagina 1 de 3)
+    await listaOrdens(page, srv, rot + ' ativas', w, h, '', base.ativas, contadores);
+    ok(await page.evaluate(() => document.querySelectorAll('#ordens-tabela tbody tr').length === 25 && document.getElementById('aba-ativas').textContent.includes('73')), rot + ' ativas: 25 linhas na pagina e 73 na contagem da aba');
+    await page.screenshot({ path: path.join(CAPTURAS, 'ordens-ativas-' + w + '.png') });
+    await page.focus('#btn-aplicar-filtros');
+    await focoVisivel(page, rot + ' ativas', 8);
+    // ---- Ativas, pagina 3 (ultima, 23 linhas) e ordenacao por numero
+    await listaOrdens(page, srv, rot + ' ativas p3', w, h, '?aba=ativas&pagina=3', { ...base.ativas, contador: /^Exibindo 51 a 73 de 73 ordens\.$/, pag: 3 }, contadores);
+    await listaOrdens(page, srv, rot + ' ativas por numero', w, h, '?aba=ativas&ordem=numero&dir=asc', { ...base.ativas, sortCriada: 'none', sortNumero: 'ascending', atencaoEsperada: 7, contador: /^Exibindo 1 a 25 de 73 ordens\.$/ }, contadores);
+    ok(await page.evaluate(() => document.querySelector('th.col-numero').getAttribute('aria-sort') === 'ascending'), rot + ' ativas por numero: aria-sort=ascending na coluna Numero');
+    // ---- Ativas ha mais de 15 dias (todas com atencao)
+    await listaOrdens(page, srv, rot + ' 15d', w, h, '?aba=ativas_15d', { aba: 'ativas_15d', idAba: 'aba-ativas-15d', contador: /^Exibindo 1 a 7 de 7 ordens\.$/, descricao: 'Ordens ainda ativas criadas há mais de 15 dias', pag: 1, paginas: 1, sortCriada: 'ascending', atencaoEsperada: 7 }, contadores);
+    ok(await page.evaluate(() => Array.from(document.querySelectorAll('#ordens-tabela tbody tr')).every(tr => tr.getAttribute('data-idade') === 'atencao')), rot + ' 15d: todas as linhas data-idade=atencao');
+    await page.screenshot({ path: path.join(CAPTURAS, 'ordens-15d-' + w + '.png') });
+    // ---- Inativas
+    await listaOrdens(page, srv, rot + ' inativas', w, h, '?aba=inativas', { aba: 'inativas', idAba: 'aba-inativas', contador: /^Exibindo 1 a 6 de 6 ordens\.$/, descricao: 'Ordens de coleta inativas', pag: 1, paginas: 1, sortCriada: 'descending', atencaoEsperada: 0 }, contadores);
+    ok(await page.evaluate(() => document.querySelectorAll('#ordens-tabela tbody tr[data-status="inativa"]').length === 6 && !document.querySelector('#ordens-tabela tbody tr[data-status="ativa"]')), rot + ' inativas: 6 linhas, todas inativas');
+    await page.screenshot({ path: path.join(CAPTURAS, 'ordens-inativas-' + w + '.png') });
+    // ---- Baixas pendentes (pagina 1 de 2) e todas
+    await listaOrdens(page, srv, rot + ' baixas', w, h, '?aba=baixas', { aba: 'baixas', baixas: true, idAba: 'aba-baixas', contador: /^Exibindo 1 a 25 de 35 baixas\.$/, descricao: 'Check-ins aceitos pelo Talent', pag: 1, paginas: 2 }, contadores);
+    await page.screenshot({ path: path.join(CAPTURAS, 'ordens-baixas-' + w + '.png') });
+    await listaOrdens(page, srv, rot + ' baixas todas', w, h, '?aba=baixas&mostrar=todas', { aba: 'baixas', baixas: true, todas: true, idAba: 'aba-baixas', contador: /^Exibindo 1 a 25 de 36 baixas\.$/, descricao: 'Check-ins aceitos pelo Talent', pag: 1, paginas: 2 }, contadores);
+    ok(await page.evaluate(() => document.getElementById('filtro-baixas-mostrar').value === 'todas' && document.querySelectorAll('#baixas-tabela .gestao-situacao--resolvida').length === 1), rot + ' baixas todas: filtro "Todas" selecionado e a baixa resolvida aparece (Resolvida em ... com icone)');
+    ok(await page.evaluate(() => { const r = document.querySelector('#baixas-tabela tr[data-resolvida="1"] .gestao-situacao--resolvida'); const c = getComputedStyle(r); return /^Resolvida em \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(r.textContent.trim()) && c.fontWeight === '500' && c.color === 'rgb(58, 58, 58)' && !!r.querySelector('svg') && !document.querySelector('tr[data-resolvida="1"] [id^="btn-baixa-resolver-"]'); }), rot + ' baixas todas: "Resolvida" com icone, 500, sem botao de resolver');
+    // ---- Filtros: cliente hostil e cliente de razao social longa
+    await irPara(page, srv.base, '/gestao/ordens.php');
+    const idHostil = await page.evaluate(() => { const o = Array.from(document.querySelectorAll('#filtro-cliente option')).find(x => x.textContent.includes('onerror')); return o && o.value; });
+    const idLongo = await page.evaluate(() => { const o = Array.from(document.querySelectorAll('#filtro-cliente option')).find(x => x.textContent.includes('COMERCIO E DISTRIBUICAO')); return o && o.value; });
+    ok(!!idHostil && !!idLongo, rot + ' filtro cliente: opcoes do cliente hostil e do de razao social longa existem (escapadas)');
+    await listaOrdens(page, srv, rot + ' cliente hostil', w, h, '?aba=ativas&cliente=' + idHostil, { ...base.ativas, contador: /^Exibindo 1 a 1 de 1 ordem\.$/, paginas: 1 }, contadores);
+    const hz = await page.evaluate(() => ({ num: document.querySelector('#ordens-tabela tbody .col-numero').textContent, imgs: document.querySelectorAll('#ordens-tabela img').length, sel: document.getElementById('filtro-cliente').selectedOptions[0].textContent, cli: document.querySelector('#ordens-tabela tbody .col-cliente').textContent, tr: document.querySelector('#ordens-tabela tbody .col-transportadora').textContent }));
+    ok(hz.num.includes('<img src=x onerror=window.__xss=33>') && hz.imgs === 0 && hz.sel.includes('onerror') && hz.cli.includes('<script>') && hz.tr.includes('<img src=x'), rot + ' cliente hostil: numero, razao e transportadora aparecem como TEXTO, sem <img> injetado (' + JSON.stringify(hz).slice(0, 300) + ')');
+    await listaOrdens(page, srv, rot + ' cliente longo', w, h, '?aba=ativas&cliente=' + idLongo, { ...base.ativas, contador: /^Exibindo 1 a 1 de 1 ordem\.$/, paginas: 1, atencaoEsperada: 1 }, contadores);
+    const nl = await page.evaluate(() => { const td = document.querySelector('#ordens-tabela tbody .col-numero'); return { t: td.textContent, sw: td.scrollWidth, cw: td.clientWidth, h: Math.round(td.getBoundingClientRect().height) }; });
+    ok(nl.t.includes('N' + '1234567890'.repeat(4) + '123456789') && nl.sw <= nl.cw + 1, rot + ' numero de 50 caracteres: quebra dentro da coluna (sem estourar) ' + JSON.stringify(nl));
+    await page.screenshot({ path: path.join(CAPTURAS, 'ordens-longo-' + w + '.png') });
+    // ---- Mesmo numero em outros clientes (LAY-DUP)
+    await irPara(page, srv.base, '/gestao/ordens.php?aba=ativas&numero=LAY-DUP');
+    ok(await page.evaluate(() => document.querySelectorAll('#ordens-tabela tbody tr').length === 2 && document.querySelectorAll('#ordens-tabela .gestao-sinal--outros-clientes').length === 2), rot + ' LAY-DUP: 2 linhas, ambas com o sinal de outros clientes');
+    await verificarTabelaOrdens(page, rot + ' LAY-DUP', w, h, { sortCriada: 'descending', atencaoEsperada: 0 });
+    // ---- Vazio por filtro e erro de numero
+    await irPara(page, srv.base, '/gestao/ordens.php?aba=ativas&numero=ZZZZ-NAO-EXISTE');
+    await checagemGeral(page, rot + ' vazio-filtro', contadores);
+    const v = await page.evaluate(() => { const e = document.getElementById('ordens-vazio'), l = document.getElementById('ordens-vazio-limpar'); return { txt: e && e.textContent.replace(/\s+/g, ' ').trim(), svg: !!(e && e.querySelector('svg')), limpar: l && { h: Math.round(l.getBoundingClientRect().height), href: l.getAttribute('href') }, tabela: !!document.getElementById('ordens-tabela'), pag: !!document.getElementById('ordens-paginacao'), contador: document.getElementById('ordens-contador').textContent.trim(), borda: e && getComputedStyle(e).borderTopStyle, w: e && Math.round(e.getBoundingClientRect().width) }; });
+    ok(v.txt === 'Nenhuma ordem encontrada com estes filtros. Limpar filtros' && v.svg && v.limpar && v.limpar.h >= 44 && v.limpar.href === '/gestao/ordens.php?aba=ativas' && !v.tabela && !v.pag && v.contador === 'Nenhuma ordem.' && v.borda === 'dashed', rot + ' vazio-filtro: icone + texto, "Limpar filtros" >= 44px, sem tabela/paginacao (' + v.txt + ')');
+    await irPara(page, srv.base, '/gestao/ordens.php?aba=ativas&numero=' + encodeURIComponent('<script>window.__xss=40</script>'));
+    await checagemGeral(page, rot + ' numero-invalido', contadores);
+    ok(await page.evaluate(() => { const e = document.getElementById('erro-numero'), i = document.getElementById('filtro-numero'); return e && e.getAttribute('role') === 'alert' && !!e.querySelector('svg') && e.textContent.includes('O número é inválido') && i.getAttribute('aria-invalid') === 'true' && i.getAttribute('aria-describedby').includes('erro-numero') && getComputedStyle(i).borderTopWidth === '3px' && getComputedStyle(i).borderTopColor === 'rgb(58, 58, 58)'; }), rot + ' numero-invalido: erro com icone + texto, aria-invalid e borda 3px #3A3A3A no campo');
+    // ---- cliente invalido/inexistente: mensagem no campo e lista VAZIA (nunca alarga)
+    await irPara(page, srv.base, '/gestao/ordens.php?aba=ativas&cliente=99999999');
+    await checagemGeral(page, rot + ' cliente-invalido', contadores);
+    ok(await page.evaluate(() => { const e = document.getElementById('erro-cliente'), i = document.getElementById('filtro-cliente'), v = document.getElementById('ordens-vazio'); return !!e && e.getAttribute('role') === 'alert' && !!e.querySelector('svg') && e.textContent.includes('O cliente é inválido ou não existe mais') && i.getAttribute('aria-invalid') === 'true' && i.getAttribute('aria-describedby') === 'erro-cliente' && getComputedStyle(i).borderTopWidth === '3px' && getComputedStyle(i).borderTopColor === 'rgb(58, 58, 58)' && !!v && v.textContent.includes('Nenhuma ordem encontrada com estes filtros.') && !document.getElementById('ordens-tabela') && !document.getElementById('ordens-paginacao') && i.value === ''; }), rot + ' cliente-invalido: erro com icone + texto no campo (aria-invalid, borda 3px), lista vazia e sem tabela (nao alarga)');
+    // ---- descricao da aba Ativas explica o alerta de 15 dias
+    await irPara(page, srv.base, '/gestao/ordens.php?aba=ativas');
+    ok(await page.evaluate(() => document.getElementById('ordens-descricao').textContent.includes('Ordens com o alerta têm mais de 15 dias e talvez precisem ser inativadas.')), rot + ' ativas: descricao explica o alerta ("Ordens com o alerta têm mais de 15 dias...")');
+    // ---- Detalhes
+    for (const [chave, exp] of Object.entries(DET)) {
+        await detalheOrdem(page, srv, rot + ' detalhe-' + chave, w, O[chave], exp, contadores);
+        if (['ativa', 'conf', 'longo', 'hostil', 'inativa', 'apagado'].includes(chave)) { await page.screenshot({ path: path.join(CAPTURAS, 'ordem-' + chave + '-' + w + '.png') }); }
+    }
+    await detalheOrdem(page, srv, rot + ' detalhe-ativa', w, O.ativa, DET.ativa, contadores);
+    await page.focus('#ordem-voltar');
+    await focoVisivel(page, rot + ' detalhe', 4);
+    await page.close();
+}
+
+async function cenarioOrdensEstreito(browser, srv, contadores) {
+    const rot = '680x900 ordens';
+    const page = await paginaOrdens(browser, srv, 680, 900, rot, contadores, false);
+    const O = srv.info.ordens;
+    await listaOrdens(page, srv, rot + ' ativas', 680, 900, '', { aba: 'ativas', idAba: 'aba-ativas', contador: /^Exibindo 1 a 25 de 73 ordens\.$/, descricao: 'Ordens de coleta ativas', pag: 1, paginas: 3, sortCriada: 'descending' }, contadores);
+    ok(await page.evaluate(() => { const f = document.getElementById('ordens-filtros'); return getComputedStyle(f).flexDirection === 'column' && Array.from(f.querySelectorAll('.gestao-campo')).every(c => Math.round(c.getBoundingClientRect().width) >= f.getBoundingClientRect().width - 40); }), rot + ' ativas: filtros empilhados em 1 coluna na largura toda');
+    ok(await page.evaluate(() => { const p = document.getElementById('ordens-paginacao').getBoundingClientRect(); return p.right <= innerWidth + 0.5; }), rot + ' ativas: paginacao dentro da tela');
+    await page.screenshot({ path: path.join(CAPTURAS, 'ordens-680.png') });
+    await listaOrdens(page, srv, rot + ' baixas', 680, 900, '?aba=baixas', { aba: 'baixas', baixas: true, idAba: 'aba-baixas', contador: /^Exibindo 1 a 25 de 35 baixas\.$/, descricao: 'Check-ins aceitos pelo Talent', pag: 1, paginas: 2 }, contadores);
+    await detalheOrdem(page, srv, rot + ' detalhe-conf', 680, O.conf, DET.conf, contadores);
+    await detalheOrdem(page, srv, rot + ' detalhe-longo', 680, O.longo, DET.longo, contadores);
+    await page.screenshot({ path: path.join(CAPTURAS, 'ordem-680.png') });
+    await page.close();
+}
+
+/** Sem JS: abas, filtros, ordenacao, paginacao, Abrir, Inativar com confirmacao e baixas funcionam por link/formulario. */
+async function cenarioOrdensSemJs(browser, srv, contadores) {
+    const rot = 'sem JS ordens';
+    const page = await paginaOrdens(browser, srv, 1366, 768, rot, contadores, true);
+    const O = srv.info.ordens;
+    const nav = (acao) => Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), acao()]);
+    ok(page.url().endsWith('/gestao/ordens.php'), rot + ': usuario entra em /gestao/ordens.php');
+    await checagemGeral(page, rot, contadores);
+    ok(await page.evaluate(() => document.querySelector('.gestao-sidebar').getBoundingClientRect().width === 248 && document.querySelectorAll('#ordens-abas [aria-current]').length === 1), rot + ': pagina completa sem JS, 1 aba atual');
+    await nav(() => page.click('#pag-proxima'));
+    ok(await page.evaluate(() => document.getElementById('pag-posicao').textContent.trim() === 'Página 2 de 3' && document.getElementById('pag-anterior').tagName === 'A'), rot + ': "Proxima" (link) leva a pagina 2');
+    await nav(() => page.click('th.col-numero .gestao-ordenar'));
+    ok(await page.evaluate(() => document.querySelector('th.col-numero').getAttribute('aria-sort') === 'ascending' && document.getElementById('pag-posicao').textContent.trim() === 'Página 1 de 3'), rot + ': clicar no cabecalho Numero ordena (aria-sort=ascending) e volta a pagina 1');
+    await nav(() => page.click('#aba-inativas'));
+    ok(await page.evaluate(() => document.getElementById('aba-inativas').hasAttribute('aria-current') && document.querySelectorAll('#ordens-abas [aria-current]').length === 1 && document.getElementById('filtro-inativada-de') !== null), rot + ': clicar em "Inativas" troca a aba (1 aria-current) e mostra os filtros de inativacao');
+    await page.type('#filtro-numero', 'LAY-2001');
+    await nav(() => page.click('#btn-aplicar-filtros'));
+    ok(await page.evaluate(() => document.querySelectorAll('#ordens-tabela tbody tr').length === 1 && document.getElementById('filtro-numero').value === 'LAY-2001'), rot + ': formulario GET filtra por numero sem JS');
+    await nav(() => page.click('#btn-limpar-filtros'));
+    ok(await page.evaluate(() => document.getElementById('filtro-numero').value === '' && document.querySelectorAll('#ordens-tabela tbody tr').length === 6), rot + ': "Limpar filtros" volta a lista da aba');
+    await nav(() => page.click('#btn-ordem-abrir-' + O.inativa));
+    ok(page.url().includes('/gestao/ordem.php?id=' + O.inativa) && await page.evaluate(() => !!document.getElementById('ordem-detalhe') && document.getElementById('ordem-voltar').getAttribute('href').includes('aba=inativas')), rot + ': "Abrir" leva ao detalhe e "Voltar" leva de volta a aba');
+    await nav(() => page.click('#ordem-voltar'));
+    ok(page.url().includes('/gestao/ordens.php?aba=inativas'), rot + ': "Voltar para a lista" retorna a aba de origem');
+    // inativar com confirmacao (LAY-CONF tem atendimento em andamento): lista -> detalhe com #ordem-confirmacao -> "mesmo assim"
+    await irPara(page, srv.base, '/gestao/ordens.php?aba=ativas&numero=LAY-CONF');
+    await nav(() => page.click('#btn-ordem-inativar-' + O.conf));
+    const c1 = await page.evaluate(() => { const c = document.getElementById('ordem-confirmacao'); const r = c && c.getBoundingClientRect(); return c && { acao: c.getAttribute('data-acao'), vis: r.width > 0 && r.right <= innerWidth, btn: document.getElementById('btn-ordem-inativar').textContent.trim(), flashRole: (document.getElementById('gestao-flash') || { getAttribute: () => null }).getAttribute('role'), alertas: document.querySelectorAll('[role="alert"]').length }; });
+    ok(c1 && c1.flashRole === 'status' && c1.alertas === 1, rot + ': o aviso "confirmacao necessaria" (flash) e role=status e a caixa #ordem-confirmacao e o UNICO role=alert (' + (c1 && c1.flashRole) + '/' + (c1 && c1.alertas) + ')');
+    ok(page.url().includes('/gestao/ordem.php?id=' + O.conf) && c1 && c1.acao === 'inativar' && c1.vis && c1.btn === 'Inativar mesmo assim', rot + ': Inativar na lista (atendimento em andamento) leva ao detalhe com #ordem-confirmacao visivel e "Inativar mesmo assim"');
+    await checagemGeral(page, rot + ' confirmacao', contadores);
+    await page.screenshot({ path: path.join(CAPTURAS, 'ordem-confirmacao-sem-js.png') });
+    await nav(() => page.click('#btn-ordem-inativar'));
+    ok(await page.evaluate(() => document.getElementById('ordem-detalhe').getAttribute('data-status') === 'inativa' && !document.getElementById('ordem-confirmacao') && !!document.getElementById('gestao-flash')), rot + ': "Inativar mesmo assim" inativa a ordem (data-status=inativa) e mostra o aviso (flash)');
+    await checagemGeral(page, rot + ' apos-inativar', contadores);
+    // inativar direto na lista (sem atendimento): LAY-1003
+    await irPara(page, srv.base, '/gestao/ordens.php?aba=ativas&numero=LAY-1003');
+    await nav(() => page.click('#btn-ordem-inativar-' + O.ausente));
+    ok(page.url().includes('/gestao/ordens.php') && await page.evaluate(() => !!document.getElementById('gestao-flash') && document.querySelectorAll('#ordens-tabela tbody tr').length === 0 && !!document.getElementById('ordens-vazio')), rot + ': Inativar na lista inativa e volta com o aviso (a ordem sai da aba Ativas)');
+    // baixas: marcar como resolvida
+    await irPara(page, srv.base, '/gestao/ordens.php?aba=baixas');
+    const antes = await page.evaluate(() => document.querySelector('#aba-baixas .gestao-aba__contagem').textContent.trim());
+    const idBaixa = await page.evaluate(() => { const tr = Array.from(document.querySelectorAll('#baixas-tabela tbody tr')).find(t => t.querySelector('.col-numero-oc').textContent.trim() === 'LAY-2001' && t.querySelector('[id^="btn-baixa-resolver-"]')); return tr && tr.getAttribute('data-id-baixa'); });
+    await nav(() => page.click('#btn-baixa-resolver-' + idBaixa));
+    ok(page.url().includes('/gestao/ordens.php?aba=baixas') && await page.evaluate(() => !!document.getElementById('gestao-flash')), rot + ': "Marcar como resolvida" (formulario POST com CSRF) volta a aba Baixas com o aviso (' + antes + ' pendentes antes)');
+    ok(await page.evaluate(() => document.querySelector('#aba-baixas .gestao-aba__contagem').textContent.trim()) === String(Number(antes) - 1), rot + ': a baixa resolvida sai da contagem de pendentes (' + antes + ' -> ' + (Number(antes) - 1) + ')');
+    await checagemGeral(page, rot + ' baixas', contadores);
+    // detalhe inexistente
+    await irPara(page, srv.base, '/gestao/ordem.php?id=99999999');
+    ok(page.url().includes('/gestao/ordens.php') && await page.evaluate(() => !!document.getElementById('gestao-flash')), rot + ': detalhe de id inexistente volta para a lista com aviso');
+    await page.close();
+}
+
+/** Estado vazio (esvazia so as tabelas de OC/baixas dos bancos QA, por stdin). */
+async function cenarioOrdensVazio(browser, srv, contadores) {
+    const rot = '1366x768 ordens-vazio';
+    const pronto = new Promise((res, rej) => {
+        const t = setTimeout(() => rej(new Error('servidor nao confirmou o esvaziamento das ordens')), 30000);
+        const h = d => { if (d.toString().includes('ORDENS-ESVAZIADAS')) { clearTimeout(t); srv.proc.stdout.off('data', h); res(); } };
+        srv.proc.stdout.on('data', h);
+    });
+    srv.proc.stdin.write('esvaziar-ordens\n');
+    await pronto;
+    const page = await paginaOrdens(browser, srv, 1366, 768, rot, contadores, false);
+    for (const [aba, idVazio, texto] of [['ativas', 'ordens-vazio', 'Nenhuma ordem nesta aba.'], ['ativas_15d', 'ordens-vazio', 'Nenhuma ordem ativa há mais de 15 dias.'], ['inativas', 'ordens-vazio', 'Nenhuma ordem nesta aba.'], ['baixas', 'baixas-vazio', 'Nenhuma baixa pendente.']]) {
+        await irPara(page, srv.base, '/gestao/ordens.php?aba=' + aba);
+        await checagemGeral(page, rot + ' ' + aba, contadores);
+        const v = await page.evaluate(id => { const e = document.getElementById(id); return { txt: e && e.textContent.replace(/\s+/g, ' ').trim(), svg: !!(e && e.querySelector('svg')), limpar: !!document.getElementById('ordens-vazio-limpar'), tab: !!document.getElementById('ordens-tabela') || !!document.getElementById('baixas-tabela'), pag: !!document.getElementById('ordens-paginacao'), abas: Array.from(document.querySelectorAll('.gestao-aba__contagem')).map(c => c.textContent.trim()).join(','), atual: document.querySelectorAll('#ordens-abas [aria-current]').length, ret: !!document.getElementById('ordens-aviso-retencao'), borda: e && getComputedStyle(e).borderTopStyle }; }, idVazio);
+        ok(v.txt === texto && v.svg && !v.limpar && !v.tab && !v.pag && v.abas === '0,0,0,0' && v.atual === 1 && v.ret === (aba !== 'baixas') && v.borda === 'dashed', rot + ' ' + aba + ': estado vazio "' + texto + '" com icone, abas zeradas, 1 aba atual, aviso de retencao ' + (aba === 'baixas' ? 'AUSENTE (Baixas)' : 'presente') + ', sem tabela/paginacao');
+        await botoesSolidos(page, rot + ' ' + aba);
+    }
+    await page.screenshot({ path: path.join(CAPTURAS, 'ordens-vazio.png') });
+    await page.close();
+}
+
 (async () => {
     const contadores = { csp: [], erros: [], externos: [], semCsp: [], secundarios: [] };
     let srv = null, browser = null;
@@ -1482,8 +1999,9 @@ async function cenarioTotensVazio(browser, srv, contadores) {
         srv = await subirServidor();
         console.log('servidor QA em ' + srv.base + ' (banco ' + srv.info.banco + ')');
         browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
-        // GESTAO_SO=logs roda so os cenarios da F3c (atalho de desenvolvimento; a rodada oficial roda tudo)
-        if (process.env.GESTAO_SO !== 'logs') {
+        // GESTAO_SO=logs|ordens roda so os cenarios da F3c|F4 (atalho de desenvolvimento; a rodada oficial roda tudo)
+        const SO = process.env.GESTAO_SO || '';
+        if (SO === '') {
             await cenarioViewport(browser, srv, 1366, 768, true, contadores);
             await cenarioViewport(browser, srv, 1920, 1080, false, contadores);
             await cenarioCompleto(browser, srv, contadores);
@@ -1491,14 +2009,25 @@ async function cenarioTotensVazio(browser, srv, contadores) {
             await cenarioSemJs(browser, srv, contadores);
         }
         // F3c (logs): 3 viewports + estreito, sem JS e vazio (o vazio apaga so tb_log_sistema do banco QA)
+        if (SO === '' || SO === 'logs') {
         await cenarioLogsViewport(browser, srv, 1366, 768, contadores);
         await cenarioLogsViewport(browser, srv, 1920, 1080, contadores);
         await cenarioLogsViewport(browser, srv, 1000, 700, contadores);
         await cenarioLogsEstreito(browser, srv, contadores);
         await cenarioLogsSemJs(browser, srv, contadores);
         await cenarioLogsVazio(browser, srv, contadores);
+        }
+        // F4 (ordens de coleta): lista (4 abas) e detalhe em 3 viewports + estreito; sem JS (muda o estado das OCs) e vazio (ultimos)
+        if (SO === '' || SO === 'ordens') {
+            await cenarioOrdensViewport(browser, srv, 1366, 768, contadores);
+            await cenarioOrdensViewport(browser, srv, 1920, 1080, contadores);
+            await cenarioOrdensViewport(browser, srv, 1000, 700, contadores);
+            await cenarioOrdensEstreito(browser, srv, contadores);
+            await cenarioOrdensSemJs(browser, srv, contadores);
+            await cenarioOrdensVazio(browser, srv, contadores);
+        }
         // F2 (totens): lista, novo totem e URL em 3 viewports; fluxos com JS; sem JS; estado vazio (ultimo: esvazia o banco QA)
-        if (process.env.GESTAO_SO !== 'logs') {
+        if (SO === '') {
             await cenarioTotensViewport(browser, srv, 1366, 768, contadores);
             await cenarioTotensViewport(browser, srv, 1920, 1080, contadores);
             await cenarioTotensViewport(browser, srv, 1000, 700, contadores);

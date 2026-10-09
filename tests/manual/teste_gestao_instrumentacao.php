@@ -599,9 +599,12 @@ try {
     $r = inCron('limpar-notas-quarentena.php', ['STORAGE_PATH' => $storage . DIRECTORY_SEPARATOR . 'nao_existe_qa']);
     afirmar('cron limpar-notas-quarentena (storage inacessivel): exit 1, cron_falhou motivo=config_ausente', $r['codigo'] === 1 && ($l = inLinha($pdo, 'cron_falhou', 'classe=RuntimeException;job=limpar_notas_quarentena;motivo=config_ausente')) !== null && $l['origem'] === 'CRON');
 
-    $r = inCron('limpar-anexos-ordem-coleta.php', ['GESTAO_COLETAS_DB_NAME' => $banco]);
+    putenv('QA_QR_FORCE_EXT_DB_NAME=' . $banco); // o prepend F4a recusa GESTAO_COLETAS_DB_NAME no JSON; o banco externo QA vem desta variavel
+    $r = inCron('limpar-anexos-ordem-coleta.php');
     afirmar('cron limpar-anexos-ordem-coleta: exit 0, error_log mantido, cron_resumo job=limpar_anexos_oc', $r['codigo'] === 0 && str_contains($r['log'], 'limpar-anexos-ordem-coleta: 0 elegivel(is)') && inLinha($pdo, 'cron_resumo', 'job=limpar_anexos_oc;itens=0;falhas=0') !== null);
-    $r = inCron('limpar-anexos-ordem-coleta.php', ['GESTAO_COLETAS_DB_NAME' => 'inexistente_qa_zzz']);
+    putenv('QA_QR_FORCE_EXT_DB_NAME=qa_qr_exclusivo_00000000'); // nome QA valido que NAO existe => banco externo indisponivel
+    $r = inCron('limpar-anexos-ordem-coleta.php');
+    putenv('QA_QR_FORCE_EXT_DB_NAME=');
     afirmar('cron limpar-anexos-ordem-coleta (banco externo indisponivel): exit 1, cron_falhou motivo=indisponivel e banco_coletas_indisponivel', $r['codigo'] === 1 && inLinha($pdo, 'cron_falhou', 'classe=RuntimeException;job=limpar_anexos_oc;motivo=indisponivel') !== null && str_contains($r['log'], 'ConexaoGestaoColetas: falha na conexao com o banco de ordens de coleta'));
     // falha por atendimento DENTRO da transacao do abandono: rollback mantido e log sobrevive
     $idAband = $atDao->criar($idTotem, 'expedicao', 'ABN1A11');

@@ -1041,7 +1041,11 @@ class AtendimentoController
                 // de auditoria (tb_ordem_coleta_pendente_baixa), idempotente,
                 // sem cron de reconciliacao automatica nesta demanda.
                 if ($atendimento['tipo'] === 'expedicao') {
-                    $this->tentarMarcarOrdemConcluida($idAtendimento, (string) $atendimento['ordem_coleta']);
+                    $this->tentarMarcarOrdemConcluida(
+                        $idAtendimento,
+                        (string) $atendimento['ordem_coleta'],
+                        (string) ($atendimento['cliente_cnpj'] ?? '')
+                    );
                 }
                 Resposta::sucesso(['senha' => $resultado['senha'], 'protocolo' => $resultado['protocolo']]);
                 return;
@@ -1218,29 +1222,45 @@ class AtendimentoController
      * pendencia, sem segunda tentativa de UPDATE) de uma falha real (ordem
      * ainda ATIVA, inexistente, ou status desconhecido por excecao na
      * propria consulta de status — tratado como falha real por seguranca).
+     *
+     * F4a (2026-10-08): a ordem e identificada por CLIENTE + numero, nunca so
+     * por numero (o mesmo numero pode existir em outro cliente). O CNPJ vem de
+     * tb_atendimento.cliente_cnpj, gravado em AtendimentoDao::preencherDadosOrdem
+     * a partir de tb_clientes.cnpj da ordem escolhida (Expedicao). Se o CNPJ
+     * estiver ausente/so sem digitos, NAO se tenta inativar (numero ambiguo):
+     * registra-se a pendencia de baixa (resolucao manual na gestao) e
+     * LogSistema oc_baixa_falhou motivo=baixa_pendente.
      */
-    private function tentarMarcarOrdemConcluida(int $idAtendimento, string $numeroOrdemColeta): void
+    private function tentarMarcarOrdemConcluida(int $idAtendimento, string $numeroOrdemColeta, string $cnpjCliente = ''): void
     {
+        $cnpjCliente = \App\Dao\OrdemColetaDao::normalizarCnpj($cnpjCliente);
+
         if ($this->ordemColetaClient === null || $this->ordemColetaPendenteBaixaDao === null) {
             error_log("finalizar: OrdemColetaClient/OrdemColetaPendenteBaixaDao nao injetados — pendencia de baixa nao registrada para id_atendimento={$idAtendimento}");
             LogSistema::registrar('oc_baixa_falhou', ['id_atendimento' => $idAtendimento, 'motivo' => 'config_ausente']);
             return;
         }
 
-        try {
-            $ok = $this->ordemColetaClient->marcarConcluida($numeroOrdemColeta);
-        } catch (\Throwable $e) {
-            $ok = false;
-        }
+        $statusAtual = null;
+        if ($cnpjCliente === '') {
+            // Cliente ausente: numero ambiguo, nao inativa (ver docblock).
+            error_log("finalizar: atendimento sem CNPJ do cliente, baixa da ordem de coleta NAO tentada (id_atendimento={$idAtendimento})");
+        } else {
+            try {
+                $ok = $this->ordemColetaClient->marcarConcluida($cnpjCliente, $numeroOrdemColeta);
+            } catch (\Throwable $e) {
+                $ok = false;
+            }
 
-        if ($ok === true) {
-            return;
-        }
+            if ($ok === true) {
+                return;
+            }
 
-        try {
-            $statusAtual = $this->ordemColetaClient->statusAtual($numeroOrdemColeta);
-        } catch (\Throwable $e) {
-            $statusAtual = null;
+            try {
+                $statusAtual = $this->ordemColetaClient->statusAtual($cnpjCliente, $numeroOrdemColeta);
+            } catch (\Throwable $e) {
+                $statusAtual = null;
+            }
         }
 
         if ($statusAtual === 'INATIVA') {

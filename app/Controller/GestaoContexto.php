@@ -25,6 +25,8 @@ final class GestaoContexto
 
     public const CAMINHO_TOTENS = '/gestao/totens.php';
 
+    public const CAMINHO_ORDENS = '/gestao/ordens.php';
+
     /**
      * Itens do menu lateral. `disponivel` false = ainda nao existe (fica oculto
      * ate a fase que o cria). `perfil` = perfil MINIMO para ver o item.
@@ -35,7 +37,7 @@ final class GestaoContexto
         ['id' => 'painel', 'rotulo' => 'Painel', 'href' => '/gestao/painel.php', 'perfil' => 'admin', 'disponivel' => false],
         ['id' => 'totens', 'rotulo' => 'Totens', 'href' => '/gestao/totens.php', 'perfil' => 'admin', 'disponivel' => true],
         ['id' => 'atendimentos', 'rotulo' => 'Atendimentos', 'href' => '/gestao/atendimentos.php', 'perfil' => 'admin', 'disponivel' => false],
-        ['id' => 'ordens', 'rotulo' => 'Ordens de coleta', 'href' => '/gestao/ordens.php', 'perfil' => 'usuario', 'disponivel' => false],
+        ['id' => 'ordens', 'rotulo' => 'Ordens de coleta', 'href' => '/gestao/ordens.php', 'perfil' => 'usuario', 'disponivel' => true],
         ['id' => 'anexos', 'rotulo' => 'Anexos órfãos', 'href' => '/gestao/anexos.php', 'perfil' => 'admin', 'disponivel' => false],
         ['id' => 'logs', 'rotulo' => 'Logs', 'href' => '/gestao/logs.php', 'perfil' => 'admin', 'disponivel' => true],
         ['id' => 'usuarios', 'rotulo' => 'Usuários', 'href' => '/gestao/usuarios.php', 'perfil' => 'admin', 'disponivel' => true],
@@ -72,6 +74,23 @@ final class GestaoContexto
         'totem_nome_confirmacao' => ['erro', 'O nome digitado não confere com o nome do totem. A URL não foi regerada. Digite o nome exatamente como aparece na lista.'],
         'totem_legado_invalido' => ['erro', 'Este totem é antigo e o nome ou a empresa dele não permitem montar uma URL no padrão novo. A URL não foi alterada. Avise quem administra o sistema.'],
         'totem_colisao' => ['erro', 'Não foi possível gerar um código único agora. Nada foi alterado. Tente novamente.'],
+        'oc_ativada' => ['sucesso', 'Ordem ativada. Ela já pode ser usada em um check-in.'],
+        'oc_inativada' => ['sucesso', 'Ordem inativada. Ela não pode mais ser usada em um check-in.'],
+        'oc_sem_efeito_ja_ativa' => ['info', 'Nada foi alterado. A ordem já estava ativa.'],
+        'oc_sem_efeito_ja_inativa' => ['info', 'Nada foi alterado. A ordem já estava inativa.'],
+        'oc_estado_mudou' => ['erro', 'A ordem mudou de situação desde que você abriu a tela. Confira e tente de novo.'],
+        'oc_nao_encontrada' => ['erro', 'Ordem de coleta não encontrada. Nada foi alterado. Atualize a lista e tente de novo.'],
+        'oc_banco_indisponivel' => ['erro', 'Não foi possível consultar as ordens de coleta agora. Tente novamente em instantes.'],
+        'oc_confirmacao_necessaria' => ['info', 'Esta ordem precisa de confirmação antes da alteração. Leia o aviso abaixo. Nada foi alterado ainda.'],
+        'oc_pdf_indisponivel' => ['info', 'O PDF desta ordem não está disponível. Ele é apagado 15 dias depois que a ordem é inativada.'],
+        'oc_baixa_resolvida' => ['sucesso', 'Baixa marcada como resolvida.'],
+        'oc_baixa_ja_resolvida' => ['info', 'Nada foi alterado. Esta baixa já estava resolvida.'],
+        'oc_baixa_nao_encontrada' => ['erro', 'Baixa pendente não encontrada. Nada foi alterado. Atualize a lista e tente de novo.'],
+        'oc_baixa_recusada_cliente_ausente' => ['erro', 'A baixa não foi resolvida: o atendimento não tem o cliente informado, então a ordem não pode ser identificada. Nada foi alterado.'],
+        'oc_baixa_recusada_oc_inexistente' => ['erro', 'A baixa não foi resolvida: a ordem não foi localizada. Nada foi alterado.'],
+        'oc_baixa_recusada_oc_ambigua' => ['erro', 'A baixa não foi resolvida: há mais de uma ordem com este cliente e número. Nada foi alterado.'],
+        'oc_baixa_recusada_oc_ativa' => ['erro', 'A baixa não foi resolvida: a ordem ainda está ativa. Inative a ordem antes, se for o caso. Nada foi alterado.'],
+        'oc_baixa_recusada_externo_indisponivel' => ['erro', 'Não foi possível consultar as ordens de coleta agora. A baixa não foi resolvida. Tente novamente em instantes.'],
         'log_nao_encontrado' => ['erro', 'Registro não encontrado. Ele pode ter sido apagado pela retenção de 90 dias.'],
         'sessao_expirada' => ['info', 'Sua sessão terminou. Digite o login e a senha para entrar de novo.'],
         'saiu' => ['sucesso', 'Você saiu da gestão. Para voltar, digite o login e a senha.'],
@@ -171,7 +190,7 @@ final class GestaoContexto
 
     public static function paginaInicial(string $perfil): string
     {
-        return $perfil === 'admin' ? self::CAMINHO_USUARIOS : self::CAMINHO_CONTA;
+        return $perfil === 'admin' ? self::CAMINHO_USUARIOS : self::CAMINHO_ORDENS;
     }
 
     public function idUsuario(): int

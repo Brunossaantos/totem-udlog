@@ -42,21 +42,22 @@ class OrdemColetaClient
     }
 
     /**
-     * Wrapper fino sobre OrdemColetaDao::marcarInativaPorNumero() — usado
-     * por App\Controller\AtendimentoController::finalizar() apos check-in
-     * confirmado no Talent (ENVIADO/JA_ENVIADO), somente para Expedicao.
-     * Qualquer excecao de conexao/banco (ConexaoGestaoColetas) se propaga —
-     * o chamador e responsavel por capturar e tratar como "pendente de
-     * baixa manual" (nunca bloqueia a resposta de sucesso ja dada ao
-     * motorista).
+     * Wrapper fino sobre OrdemColetaDao::marcarInativaPorClienteNumero() —
+     * usado por App\Controller\AtendimentoController::finalizar() apos
+     * check-in confirmado no Talent (ENVIADO/JA_ENVIADO), somente para
+     * Expedicao. A ordem e identificada por CLIENTE (CNPJ) + numero (o mesmo
+     * numero pode existir em outro cliente). Qualquer excecao de
+     * conexao/banco (ConexaoGestaoColetas) se propaga — o chamador e
+     * responsavel por capturar e tratar como "pendente de baixa manual"
+     * (nunca bloqueia a resposta de sucesso ja dada ao motorista).
      */
-    public function marcarConcluida(string $numero): bool
+    public function marcarConcluida(string $cnpj, string $numero): bool
     {
-        return $this->ordemColetaDao->marcarInativaPorNumero($numero);
+        return $this->ordemColetaDao->marcarInativaPorClienteNumero($cnpj, $numero);
     }
 
     /**
-     * Wrapper fino sobre OrdemColetaDao::statusPorNumero() — usado por
+     * Wrapper fino sobre OrdemColetaDao::statusPorClienteNumero() — usado por
      * App\Controller\AtendimentoController::tentarMarcarOrdemConcluida()
      * SOMENTE quando marcarConcluida() retornou false, para distinguir
      * "ordem ja estava INATIVA" (idempotente, nao e falha) de uma falha real.
@@ -64,9 +65,9 @@ class OrdemColetaClient
      * chamador trata como status desconhecido (assume falha real por
      * seguranca, registra pendencia de reconciliacao manual).
      */
-    public function statusAtual(string $numero): ?string
+    public function statusAtual(string $cnpj, string $numero): ?string
     {
-        return $this->ordemColetaDao->statusPorNumero($numero);
+        return $this->ordemColetaDao->statusPorClienteNumero($cnpj, $numero);
     }
 
     /**

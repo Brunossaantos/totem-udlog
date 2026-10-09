@@ -2,11 +2,9 @@
 
 /**
  * Teste manual real da consulta de ordens de coleta ao banco externo
- * (demanda expedicao-consulta-ordem-coleta-teste, 2026-09-11) — roda contra
- * o banco de dev real (udlog_totem) E o banco externo real configurado em
- * GESTAO_COLETAS_DB_NAME (.env local: udlogo59_db_gestao_coletas, nome real
- * confirmado apos reconciliacao em 2026-09-11). Cria e apaga seus proprios
- * dados em ambos os bancos (nenhum residuo).
+ * (demanda expedicao-consulta-ordem-coleta-teste, 2026-09-11) — rodava contra
+ * o banco de dev real (udlog_totem) E o banco externo real; desde 2026-10-08 (F4a)
+ * roda SO em banco QA descartavel (ver o bloco de require abaixo).
  *
  * Cada cenario roda em subprocesso PHP separado (Resposta::erro()/
  * sucesso() chamam exit()).
@@ -19,17 +17,32 @@
  * Uso: php tests/manual/teste_consulta_ordem_coleta.php
  */
 
-require_once __DIR__ . '/../../vendor/autoload.php';
+// F4a (2026-10-08): portado para banco QA descartavel `qa_qr_exclusivo_<hex>` que faz o
+// papel dos DOIS bancos (totem + externo, schema da infra do anexo da OC), com as MESMAS
+// fixtures logicas do banco real de dev (cliente_id=8 AKRO-PLASTIC, OC-TESTE-005/TST0A01 e
+// 3 ordens da placa ABC1D23). Nunca toca em udlog_totem nem no banco externo real.
+require_once __DIR__ . '/qa_oc_anexo_infra.php';
 
-use Dotenv\Dotenv;
 use Util\Conexao;
 use Util\ConexaoGestaoColetas;
 
-$dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
-$dotenv->load();
-
+[$pdoQaAdm, $bancoQa, $storageQa] = ocQaCriarAmbiente();
+register_shutdown_function(static function () use ($bancoQa, $storageQa): void {
+    ocQaLimpar($bancoQa, $storageQa); // idempotente: nunca deixa banco QA residual
+});
 $pdo = Conexao::obter();
 $pdoExterno = ConexaoGestaoColetas::obter();
+if ($pdo->query('SELECT DATABASE()')->fetchColumn() !== $bancoQa || $pdoExterno->query('SELECT DATABASE()')->fetchColumn() !== $bancoQa) {
+    fwrite(STDERR, "banco nao e o QA\n");
+    exit(3);
+}
+$pdoExterno->exec('ALTER TABLE tb_ordens_coleta ADD COLUMN email_recebido_id BIGINT UNSIGNED NOT NULL DEFAULT 1');
+$pdoExterno->exec("INSERT INTO tb_clientes (id, razao_social, cnpj, status) VALUES (8, 'AKRO-PLASTIC', '08888888000188', 'ATIVO')");
+$pdoExterno->exec("INSERT INTO tb_ordens_coleta (numero_ordem_coleta, cliente_id, placa_prevista, status) VALUES
+    ('OC-TESTE-005', 8, 'TST0A01', 'ATIVA'),
+    ('OC-TESTE-001', 8, 'ABC1D23', 'ATIVA'),
+    ('OC-TESTE-002', 8, 'ABC1D23', 'ATIVA'),
+    ('OC-TESTE-NOVA-003', 8, 'ABC1D23', 'ATIVA')");
 
 $pdo->exec("INSERT INTO tb_totem (codigo, nome, token_api, ativo) VALUES ('TESTE_ORDEM_COLETA', 'Totem Teste Ordem Coleta', 'token_" . bin2hex(random_bytes(8)) . "', 1)");
 $idTotem = (int) $pdo->lastInsertId();
@@ -51,7 +64,8 @@ function afirmar(string $descricao, bool $condicao): void
 function rodar(string $script, array $args): array
 {
     $php = PHP_BINARY;
-    $cmd = escapeshellarg($php) . ' ' . escapeshellarg(__DIR__ . '/' . $script);
+    // subprocessos apontados para o banco QA (DB_NAME e GESTAO_COLETAS_DB_NAME) pelo prepend
+    $cmd = escapeshellarg($php) . ' -d auto_prepend_file=' . escapeshellarg(__DIR__ . '/qa_oc_anexo_prepend.php') . ' ' . escapeshellarg(__DIR__ . '/' . $script);
     foreach ($args as $a) {
         $cmd .= ' ' . escapeshellarg($a);
     }
@@ -147,7 +161,10 @@ $pdoExterno->exec("DELETE FROM tb_ordens_coleta WHERE numero_ordem_coleta = 'OC-
 // ---------------------------------------------------------------
 $r9 = rodar('_caso_indisponibilidade_banco_externo.php', [(string) $idTotem, 'TST0A01']);
 afirmar('banco externo indisponivel: retorna erro generico (nao trava/nao vaza detalhe)', str_contains($r9['saida'], 'Nao foi possivel consultar as ordens de coleta agora'));
-afirmar('banco externo indisponivel: NUNCA vaza host/porta/credencial na resposta', !str_contains($r9['saida'], '127.0.0.1') && !str_contains($r9['saida'], 'DB_PASS') && !str_contains($r9['saida'], _ENV_DB_PASS_VALOR()));
+$chegouAoBancoExterno = str_contains($r9['saida'], 'Nao foi possivel consultar as ordens de coleta agora')
+    && !str_contains(strtolower($r9['saida']), 'lgpd') && !str_contains(strtolower($r9['saida']), 'aceite');
+afirmar('banco externo indisponivel: a chamada PASSOU pelo gate LGPD (aceite valido) e chegou ao banco externo (nao foi barrada antes)', $chegouAoBancoExterno);
+afirmar('banco externo indisponivel: NUNCA vaza host/porta/credencial na resposta (e so vale porque a chamada chegou ao ponto)', $chegouAoBancoExterno && !str_contains($r9['saida'], '127.0.0.1') && !str_contains($r9['saida'], 'DB_PASS') && !str_contains($r9['saida'], _ENV_DB_PASS_VALOR()) && !str_contains($r9['saida'], 'inexistente_para_teste'));
 
 function _ENV_DB_PASS_VALOR(): string
 {
