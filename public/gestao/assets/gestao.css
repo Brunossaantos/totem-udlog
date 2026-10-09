@@ -716,3 +716,66 @@ th[aria-sort="descending"] .gestao-ordenar::after { content: "\25BC"; content: "
     .gestao-ordem { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     #ordem-cartao-ordem { grid-column: 1 / -1; }
 }
+
+/* ==========================================================================
+   Cadastros (F6): /gestao/clientes.php, cliente-form.php, empresas.php e empresa-form.php
+   (so admin). Reaproveita tabela, filtros, campos, botoes, paginacao, nota permanente,
+   situacao e a confirmacao em dois passos da F4. Estado NUNCA so por cor: Ativo/Inativo =
+   texto + icone + peso (inativo = italico 500 no nome e no rotulo); excluir = borda 3px
+   #3A3A3A + icone; CNPJ somente leitura = borda tracejada #3A3A3A + peso 700.
+   ========================================================================== */
+
+/* ---------- avisos fixos e filtros ---------- */
+#clientes-aviso, #empresas-aviso { width: 100%; }
+@media (min-width: 1100px) {
+    .gestao-filtros .gestao-campo:has(#filtro-busca) { flex-basis: 320px; max-width: 420px; }
+}
+
+/* ---------- tabelas (colunas fixas; rolagem horizontal so no .gestao-tabela-wrap abaixo de ~1100px) ---------- */
+.gestao-tabela--clientes, .gestao-tabela--empresas { table-layout: fixed; }
+.gestao-tabela--clientes { min-width: 930px; }
+.gestao-tabela--empresas { min-width: 1000px; }
+.gestao-tabela--clientes th, .gestao-tabela--empresas th { padding: 0 6px; height: 48px; white-space: normal; }
+.gestao-tabela--clientes td, .gestao-tabela--empresas td { padding: 6px; height: 56px; }
+.gestao-tabela--clientes .gestao-col-cnpj, .gestao-tabela--empresas .gestao-col-cnpj { width: 160px; }
+.gestao-tabela--clientes .gestao-col-situacao { width: 104px; }
+.gestao-tabela--empresas .gestao-col-situacao { width: 100px; }
+.gestao-tabela--clientes .gestao-col-criado, .gestao-tabela--empresas .gestao-col-criada { width: 126px; }
+.gestao-tabela--empresas .gestao-col-totens { width: 124px; }
+.gestao-tabela--clientes .gestao-col-acoes, .gestao-tabela--empresas .gestao-col-acoes { width: 352px; }
+.gestao-tabela--clientes .col-nome, .gestao-tabela--empresas .col-nome { min-width: 0; overflow-wrap: anywhere; }
+.gestao-tabela--clientes .col-acoes, .gestao-tabela--empresas .col-acoes { min-width: 0; }
+/* CNPJ formatado em fonte tabular (digitos alinhados), sem quebra */
+.col-cnpj { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gestao-tabela--clientes .col-criado time, .gestao-tabela--empresas .col-criada time { white-space: nowrap; }
+.gestao-tabela--empresas .col-totens { overflow-wrap: anywhere; font-weight: 500; }
+.gestao-tabela--empresas .col-totens[data-totens-total="0"] { font-weight: 400; font-style: italic; }
+.gestao-tabela--clientes .col-situacao, .gestao-tabela--empresas .col-situacao { overflow-wrap: anywhere; }
+.gestao-tabela__vazio td { height: auto; padding: 16px; }
+/* "Acoes" fixa na borda direita: continua visivel e clicavel quando a tabela rola (ex.: 1000x700 e 680) */
+.gestao-tabela--clientes thead th:last-child, .gestao-tabela--clientes td.col-acoes,
+.gestao-tabela--empresas thead th:last-child, .gestao-tabela--empresas td.col-acoes { position: sticky; right: 0; background: var(--branco); box-shadow: -1px 0 0 var(--borda); }
+/* Editar, Inativar/Ativar e Excluir na MESMA linha; Excluir sempre o ultimo, com 24px de afastamento */
+.gestao-tabela--clientes .gestao-acoes-linha, .gestao-tabela--empresas .gestao-acoes-linha { flex-wrap: nowrap; }
+.gestao-tabela--clientes .col-acoes .gestao-botao--pequeno, .gestao-tabela--empresas .col-acoes .gestao-botao--pequeno { padding: 0 10px; }
+/* Ativar e Inativar com a mesma largura: o Excluir fica sempre alinhado na coluna */
+.gestao-tabela--clientes .col-acoes button.gestao-botao--secundario, .gestao-tabela--empresas .col-acoes button.gestao-botao--secundario { min-width: 100px; }
+
+/* ---------- confirmacao em dois passos (inativar/excluir): Cancelar ANTES do destrutivo ---------- */
+.gestao-estado__corpo { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.gestao-estado__corpo p { max-width: 100%; overflow-wrap: anywhere; }
+.gestao-estado__corpo p:not(:first-child) { font-weight: 600; }
+.gestao-estado__corpo .gestao-form-acao { margin-top: 4px; }
+/* o icone dentro do botao herda a cor do botao (sem isso o #3A3A3A da caixa some no fundo #3A3A3A) e mede 18px como nos demais botoes */
+.gestao-estado__corpo .gestao-botao .gestao-icone { width: 18px; height: 18px; color: inherit; }
+@media (min-width: 721px) {
+    .gestao-estado__corpo .gestao-botao--destrutivo-cheio { margin-inline-start: 12px; } /* 12px do gap + 12px = 24px do Cancelar */
+}
+
+/* ---------- formularios ---------- */
+.gestao-cartao > .gestao-nota-permanente { align-self: stretch; max-width: 480px; }
+/* CNPJ somente leitura: distinto SEM cor nova (borda tracejada #3A3A3A + peso 700 + digitos tabulares) */
+#cliente-cnpj[readonly], #empresa-cnpj[readonly] {
+    border: 2px dashed var(--texto); font-weight: 700; font-variant-numeric: tabular-nums; cursor: default;
+}
+#cliente-cnpj[readonly]:focus-visible, #empresa-cnpj[readonly]:focus-visible { border-color: var(--texto); }

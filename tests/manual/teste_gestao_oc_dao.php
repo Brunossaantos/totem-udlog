@@ -634,12 +634,12 @@ try {
     // F. Auditoria: novas acoes/alvos/detalhe
     // =====================================================================
     $aud = new AuditoriaDao($totem);
-    afirmar('auditoria: 17 acoes, OC_ATIVAR/OC_INATIVAR/OC_VER_PDF/OC_BAIXA_RESOLVER presentes, alvos ordem_coleta e oc_baixa',
-        count(AuditoriaDao::ACOES) === 17 && !array_diff(['OC_ATIVAR', 'OC_INATIVAR', 'OC_VER_PDF', 'OC_BAIXA_RESOLVER'], AuditoriaDao::ACOES)
-        && in_array('ordem_coleta', AuditoriaDao::ALVO_TIPOS, true) && in_array('oc_baixa', AuditoriaDao::ALVO_TIPOS, true) && count(AuditoriaDao::ALVO_TIPOS) === 5);
+    afirmar('auditoria: 25 acoes, OC_ATIVAR/OC_INATIVAR/OC_VER_PDF/OC_BAIXA_RESOLVER presentes, alvos ordem_coleta e oc_baixa',
+        count(AuditoriaDao::ACOES) === 25 && !array_diff(['OC_ATIVAR', 'OC_INATIVAR', 'OC_VER_PDF', 'OC_BAIXA_RESOLVER'], AuditoriaDao::ACOES)
+        && in_array('ordem_coleta', AuditoriaDao::ALVO_TIPOS, true) && in_array('oc_baixa', AuditoriaDao::ALVO_TIPOS, true) && count(AuditoriaDao::ALVO_TIPOS) === 7);
     $chaves = array_keys(AuditoriaDao::DETALHE_CAMPOS);
-    $esperadasChaves = ['origem', 'motivo', 'perfil_de', 'perfil_para', 'ativo_para', 'sessoes_revogadas', 'empresa', 'logs_apagados', 'auditoria_apagados', 'lotes', 'status_de', 'status_para', 'motivo_oc'];
-    afirmar('DETALHE_CAMPOS: conjunto EXATO de chaves (so status_de/status_para/motivo_oc novos) e nenhuma chave de dado pessoal',
+    $esperadasChaves = ['origem', 'motivo', 'perfil_de', 'perfil_para', 'ativo_para', 'sessoes_revogadas', 'empresa', 'logs_apagados', 'auditoria_apagados', 'lotes', 'status_de', 'status_para', 'motivo_oc', 'motivo_cad'];
+    afirmar('DETALHE_CAMPOS: conjunto EXATO de chaves (status_de/status_para/motivo_oc da F4 e motivo_cad da F6) e nenhuma chave de dado pessoal',
         count(array_diff($chaves, $esperadasChaves)) === 0 && count(array_diff($esperadasChaves, $chaves)) === 0 && !preg_grep('/numero|cnpj|nome|placa|cnh|cpf|motorista|cliente/i', $chaves));
     afirmar('status_de/status_para = {ATIVA, INATIVA}; motivo_oc = 11 valores fechados (inclui confirmado_cliente_inativo)',
         AuditoriaDao::DETALHE_CAMPOS['status_de'] === ['ATIVA', 'INATIVA'] && AuditoriaDao::DETALHE_CAMPOS['status_para'] === ['ATIVA', 'INATIVA']

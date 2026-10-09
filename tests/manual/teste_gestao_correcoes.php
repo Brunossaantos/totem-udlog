@@ -111,7 +111,7 @@ try {
     // =====================================================================
     afirmar('scanner: detecta formas sem acento (controle positivo)', achadosSemAcento('Voce nao pode alterar a pagina de usuarios') === ['voce', 'nao', 'pagina', 'usuarios']);
     afirmar('scanner: nao dispara em texto acentuado nem em logins/caminhos (controle negativo)', achadosSemAcento('Você não pode alterar a página de usuários. carla.usuario /gestao/usuarios.php $usuario') === []);
-    $menuEsperado = ['Painel', 'Totens', 'Atendimentos', 'Ordens de coleta', 'Anexos órfãos', 'Logs', 'Usuários', 'Minha conta'];
+    $menuEsperado = ['Painel', 'Totens', 'Atendimentos', 'Ordens de coleta', 'Clientes', 'Empresas', 'Anexos órfãos', 'Logs', 'Usuários', 'Minha conta'];
     afirmar('menu: rotulos acentuados e na ordem do plano', array_column(GestaoContexto::MENU, 'rotulo') === $menuEsperado);
     $textosFixos = array_column(GestaoContexto::MENU, 'rotulo');
     foreach (GestaoContexto::MENSAGENS as $codigo => [$tipo, $texto]) {
@@ -323,7 +323,7 @@ try {
     // =====================================================================
     // E. M2: desbloquear (Rn)
     // =====================================================================
-    afirmar('desbloquear: AuditoriaDao::ACOES inclui USUARIO_DESBLOQUEAR (catalogo fechado)', in_array('USUARIO_DESBLOQUEAR', AuditoriaDao::ACOES, true) && count(AuditoriaDao::ACOES) === 17 && in_array('RETENCAO_EXECUTAR', AuditoriaDao::ACOES, true) && in_array('TOTEM_CRIAR', AuditoriaDao::ACOES, true) && in_array('TOTEM_ATIVO', AuditoriaDao::ACOES, true) && in_array('TOTEM_URL_REGERAR', AuditoriaDao::ACOES, true));
+    afirmar('desbloquear: AuditoriaDao::ACOES inclui USUARIO_DESBLOQUEAR (catalogo fechado, 25 acoes)', in_array('USUARIO_DESBLOQUEAR', AuditoriaDao::ACOES, true) && count(AuditoriaDao::ACOES) === 25 && in_array('RETENCAO_EXECUTAR', AuditoriaDao::ACOES, true) && in_array('TOTEM_CRIAR', AuditoriaDao::ACOES, true) && in_array('TOTEM_ATIVO', AuditoriaDao::ACOES, true) && in_array('TOTEM_URL_REGERAR', AuditoriaDao::ACOES, true));
     $bloquear($idCarla);
     $dao->registrarFalhaSenha($idDavi, 5, 15);
     afirmar('desbloquear: pre-condicao (carla bloqueada; davi com 1 falha)', $dao->estaBloqueada($idCarla) && (int) $dao->buscarPorId($idDavi)['tentativas_falhas'] === 1);

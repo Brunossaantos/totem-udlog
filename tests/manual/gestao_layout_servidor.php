@@ -220,6 +220,31 @@ try {
     $mkBaixa($cnpjD, 'AMB-1');
     $idsOrdens = ['ativa' => $oAt, 'ativa15' => $oAt15, 'ausente' => $oAus, 'inativa' => $oIn, 'apagado' => $oInApag, 'inativaSemPdf' => $oInSem, 'dupA' => $oDupA, 'dupB' => $oDupB, 'conf' => $oConf, 'confA' => $oConfA, 'cliInativo' => $oCliInat, 'cliInativoConf' => $oCliInat, 'hostil' => $oHostil, 'longo' => $oLongo, 'numLongo' => $numLongo];
 
+    // F6 (cadastros): clientes do totem (tb_cliente). 67 linhas = 3 paginas de 25: ativos (um com atendimento em andamento), 2 inativos,
+    // acentuacao, nome hostil e nome de 150 caracteres com palavra de 60 sem espaco, mais 60 de preenchimento para paginar.
+    $pdo->exec('DELETE FROM tb_cliente');
+    $cli = static function (string $nome, string $cnpj, int $ativo = 1) use ($pdo): int {
+        $pdo->prepare('INSERT INTO tb_cliente (nome, razao_social_normalizada, cnpj, ativo) VALUES (:n, :r, :c, :a)')->execute(['n' => $nome, 'r' => strtoupper(preg_replace('/[^A-Za-z0-9]+/', ' ', $nome)), 'c' => $cnpj, 'a' => $ativo]);
+
+        return (int) $pdo->lastInsertId();
+    };
+    $nomeLongoCli = substr('LONGO ' . str_repeat('ABCDEFGHIJ', 6) . ' DISTRIBUIDORA DE PRODUTOS ALIMENTICIOS E BEBIDAS NACIONAIS E IMPORTADOS DO SUL DO BRASIL LTDA', 0, 150);
+    $idsCli = [
+        'acme' => $cli('ACME LOGISTICA SA', '11111111000111'),
+        'beta' => $cli('BETA TRANSPORTES LTDA', '22222222000122'),
+        'gama' => $cli('GAMA COMERCIO SA', '33333333000133', 0),
+        'delta' => $cli('DELTA CLIENTE INATIVO SA', '88888888000188', 0),
+        'acucar' => $cli('AÇÚCAR UNIÃO SA', '12345678000195'),
+        'hostil' => $cli('<img src=x onerror=window.__xss=51>"><script>window.__xss=52</script>', '99999999000199'),
+        'longo' => $cli($nomeLongoCli, '77777777000177'),
+    ];
+    $pdo->exec('START TRANSACTION');
+    for ($i = 1; $i <= 60; $i++) {
+        $idsCli['p' . $i] = $cli(sprintf('CLIENTE PAGINA %02d LTDA', $i), sprintf('90000000%06d', $i));
+    }
+    $pdo->exec('COMMIT');
+    $mkAt(null, '11111111000111', 'em_andamento'); // ACME: atendimento em andamento (confirmacao de inativar/excluir)
+
     $env = array_merge(gtEnvPadrao(), ['GESTAO_PERMITIR_HTTP' => 'true', 'TOTEM_URL_BASE' => $urlBase]);
     putenv('QA_GESTAO_ENV_JSON=' . json_encode($env));
     $raiz = dirname(__DIR__, 2);
@@ -242,7 +267,7 @@ try {
     if (!$pronto) {
         throw new RuntimeException('servidor nao respondeu');
     }
-    echo json_encode(['pronto' => true, 'porta' => $porta, 'banco' => $banco, 'senha' => GT_SENHA_BOA, 'logs' => $idsLog, 'ordens' => $idsOrdens]) . "\n";
+    echo json_encode(['pronto' => true, 'porta' => $porta, 'banco' => $banco, 'senha' => GT_SENHA_BOA, 'logs' => $idsLog, 'ordens' => $idsOrdens, 'clientes' => $idsCli]) . "\n";
     fflush(STDOUT);
     // bloqueia ate o node mandar "fim" ou fechar o stdin
     while (($linha = fgets(STDIN)) !== false) {
@@ -253,6 +278,42 @@ try {
             $pdo->exec('DELETE FROM tb_log_sistema');
             echo "LOGS-ESVAZIADOS
 ";
+            fflush(STDOUT);
+        }
+        if (trim($linha) === 'semear-cadastros') { // F6: empresas extras (so para os cenarios de cadastros; removidas por 'limpar-cadastros')
+            $ids = [];
+            foreach (['sem' => ['Sem Totem', '10101010000110'], 'longa' => [substr('EmpresaComNomeLongoSemEspacoNenhum' . str_repeat('ABCDEFGHIJ', 10), 0, 100), '20202020000120'], 'com' => ['Com Totem Extra', '30303030000130']] as $k => [$nome, $cnpj]) {
+                $pdo->prepare('INSERT INTO tb_empresa (nome, cnpj, ativo) VALUES (:n, :c, 1)')->execute(['n' => $nome, 'c' => $cnpj]);
+                $ids[$k] = (int) $pdo->lastInsertId();
+            }
+            $rnTotem->criar($idAdmin, $ids['com'], 'Extra 01', '203.0.113.5');
+            echo 'CADASTROS-SEMEADOS ' . json_encode($ids) . "\n";
+            fflush(STDOUT);
+        }
+        if (trim($linha) === 'limpar-cadastros') {
+            $pdo->exec("DELETE FROM tb_totem WHERE id_empresa IN (SELECT id_empresa FROM tb_empresa WHERE cnpj IN ('10101010000110','20202020000120','30303030000130'))");
+            $pdo->exec("DELETE FROM tb_empresa WHERE cnpj IN ('10101010000110','20202020000120','30303030000130')");
+            echo "CADASTROS-LIMPOS\n";
+            fflush(STDOUT);
+        }
+        if (trim($linha) === 'semear-ambiguidade') { // F6: cliente INATIVO cujo nome faz o OCR deixar o ACME ambiguo ao ser ATIVADO (removido por 'limpar-ambiguidade')
+            $nomeAmb = 'ACME LOGISTICA SUL';
+            $pdo->prepare('INSERT INTO tb_cliente (nome, razao_social_normalizada, cnpj, ativo) VALUES (:n, :r, :c, 0)')->execute(['n' => $nomeAmb, 'r' => \Util\RazaoSocialMatcher::normalizar($nomeAmb), 'c' => '66666666000166']);
+            echo 'AMBIGUIDADE-SEMEADA ' . json_encode(['id' => (int) $pdo->lastInsertId()]) . "\n";
+            fflush(STDOUT);
+        }
+        if (trim($linha) === 'limpar-ambiguidade') {
+            $pdo->exec("DELETE FROM tb_cliente WHERE cnpj IN ('66666666000166', '55555555000155')");
+            echo "AMBIGUIDADE-LIMPA\n";
+            fflush(STDOUT);
+        }
+        if (trim($linha) === 'esvaziar-cadastros') { // estado vazio de clientes e empresas (so o banco QA)
+            $pdo->exec('DELETE FROM tb_ordem_coleta_pendente_baixa');
+            $pdo->exec('DELETE FROM tb_atendimento');
+            $pdo->exec('DELETE FROM tb_totem');
+            $pdo->exec('DELETE FROM tb_empresa');
+            $pdo->exec('DELETE FROM tb_cliente');
+            echo "CADASTROS-ESVAZIADOS\n";
             fflush(STDOUT);
         }
         if (trim($linha) === 'esvaziar-ordens') { // estado vazio da tela de ordens (so os bancos QA)

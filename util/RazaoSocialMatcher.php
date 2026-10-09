@@ -112,7 +112,13 @@ class RazaoSocialMatcher
         return $melhorScore;
     }
 
-    private static function normalizar(string $razaoSocial): string
+    /**
+     * Publica desde a F6 (cadastro de clientes da gestao: a razao normalizada
+     * gravada em tb_cliente tem de sair DESTE algoritmo, o mesmo que o OCR aplica
+     * ao comparar). Comportamento INALTERADO: nao mudar a logica nem o locale, pois
+     * o OCR compara contra valores ja gravados.
+     */
+    public static function normalizar(string $razaoSocial): string
     {
         $normalizada = strtoupper($razaoSocial);
         $transliterada = @iconv('UTF-8', 'ASCII//TRANSLIT', $normalizada);

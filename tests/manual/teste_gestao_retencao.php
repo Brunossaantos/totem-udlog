@@ -179,7 +179,7 @@ try {
     // 4. Auditoria: RETENCAO_EXECUTAR, sistema, allowlist ampliada
     // =====================================================================
     $audDao = new AuditoriaDao($pdo);
-    afirmar('AuditoriaDao: RETENCAO_EXECUTAR no catalogo (17 acoes) e alvo sistema permitido', in_array('RETENCAO_EXECUTAR', AuditoriaDao::ACOES, true) && count(AuditoriaDao::ACOES) === 17 && in_array('sistema', AuditoriaDao::ALVO_TIPOS, true));
+    afirmar('AuditoriaDao: RETENCAO_EXECUTAR no catalogo (25 acoes) e alvo sistema permitido', in_array('RETENCAO_EXECUTAR', AuditoriaDao::ACOES, true) && count(AuditoriaDao::ACOES) === 25 && in_array('sistema', AuditoriaDao::ALVO_TIPOS, true));
     $id = $audDao->abrir(null, 'RETENCAO_EXECUTAR', 'sistema', null, ['origem' => 'cron']);
     $linha = gtLinhas($pdo, 'SELECT * FROM tb_gestao_auditoria WHERE id_auditoria = :i', ['i' => $id])[0];
     afirmar('AuditoriaDao: abre PENDENTE sem usuario, alvo sistema, origem=cron e sem IP', $linha['resultado'] === 'PENDENTE' && $linha['id_usuario'] === null && $linha['alvo_tipo'] === 'sistema' && $linha['alvo_id'] === null && $linha['detalhe'] === 'origem=cron' && $linha['ip'] === null && $linha['acao'] === 'RETENCAO_EXECUTAR');

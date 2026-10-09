@@ -50,9 +50,17 @@ class AuditoriaDao
         'OC_INATIVAR',
         'OC_VER_PDF',
         'OC_BAIXA_RESOLVER',
+        'CLIENTE_CRIAR',
+        'CLIENTE_EDITAR',
+        'CLIENTE_ATIVO',
+        'CLIENTE_EXCLUIR',
+        'EMPRESA_CRIAR',
+        'EMPRESA_EDITAR',
+        'EMPRESA_ATIVO',
+        'EMPRESA_EXCLUIR',
     ];
 
-    public const ALVO_TIPOS = ['usuario', 'totem', 'sistema', 'ordem_coleta', 'oc_baixa'];
+    public const ALVO_TIPOS = ['usuario', 'totem', 'sistema', 'ordem_coleta', 'oc_baixa', 'cliente', 'empresa'];
 
     public const RESULTADOS_FINAIS = ['OK', 'SEM_EFEITO', 'ERRO'];
 
@@ -75,6 +83,8 @@ class AuditoriaDao
         'status_de' => ['ATIVA', 'INATIVA'],
         'status_para' => ['ATIVA', 'INATIVA'],
         'motivo_oc' => ['ja_no_estado', 'estado_mudou', 'oc_inexistente', 'externo_indisponivel', 'arquivo_ausente', 'confirmado_andamento', 'confirmado_ja_baixada', 'confirmado_cliente_inativo', 'cliente_ausente', 'oc_ambigua', 'oc_ativa'],
+        // F6 (cadastro de clientes e empresas): motivo da recusa ou da confirmacao; conjunto fechado, nunca nome/CNPJ.
+        'motivo_cad' => ['andamento_confirmado', 'totens_ativos_confirmado', 'totens_vinculados', 'ja_no_estado', 'duplicado', 'nao_encontrado', 'confirmado_ambiguidade_ocr'],
     ];
 
     public function __construct(private PDO $pdo)
@@ -82,8 +92,14 @@ class AuditoriaDao
     }
 
     /**
-     * Abre uma linha PENDENTE (autocommit, fora de qualquer transacao do chamador
-     * para sobreviver a um rollback) e devolve o id para o fechamento.
+     * Abre uma linha PENDENTE e devolve o id para o fechamento. Usa a MESMA conexao do
+     * chamador: se ha transacao aberta, o INSERT participa dela (commit e rollback valem
+     * tambem para o PENDENTE). Uso real: (a) nas Rn de usuario, totem e cadastros (F6) a
+     * abertura ocorre DENTRO da transacao da mutacao; se a gravacao falha, o rollback
+     * desfaz o PENDENTE junto, e quem chama grava depois uma linha ERRO com `registrar`
+     * (ex.: CadastroGestaoBase::registrarErro); `fechar('OK')` so roda depois do COMMIT;
+     * (b) nas acoes de OC (GestaoOrdemController) a abertura ocorre FORA de transacao
+     * (autocommit), antes do UPDATE externo, e por isso sobrevive a uma falha posterior.
      *
      * @param array<string,string|int> $detalhe
      */

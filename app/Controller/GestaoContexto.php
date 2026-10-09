@@ -27,6 +27,10 @@ final class GestaoContexto
 
     public const CAMINHO_ORDENS = '/gestao/ordens.php';
 
+    public const CAMINHO_CLIENTES = '/gestao/clientes.php';
+
+    public const CAMINHO_EMPRESAS = '/gestao/empresas.php';
+
     /**
      * Itens do menu lateral. `disponivel` false = ainda nao existe (fica oculto
      * ate a fase que o cria). `perfil` = perfil MINIMO para ver o item.
@@ -38,6 +42,8 @@ final class GestaoContexto
         ['id' => 'totens', 'rotulo' => 'Totens', 'href' => '/gestao/totens.php', 'perfil' => 'admin', 'disponivel' => true],
         ['id' => 'atendimentos', 'rotulo' => 'Atendimentos', 'href' => '/gestao/atendimentos.php', 'perfil' => 'admin', 'disponivel' => false],
         ['id' => 'ordens', 'rotulo' => 'Ordens de coleta', 'href' => '/gestao/ordens.php', 'perfil' => 'usuario', 'disponivel' => true],
+        ['id' => 'clientes', 'rotulo' => 'Clientes', 'href' => '/gestao/clientes.php', 'perfil' => 'admin', 'disponivel' => true],
+        ['id' => 'empresas', 'rotulo' => 'Empresas', 'href' => '/gestao/empresas.php', 'perfil' => 'admin', 'disponivel' => true],
         ['id' => 'anexos', 'rotulo' => 'Anexos órfãos', 'href' => '/gestao/anexos.php', 'perfil' => 'admin', 'disponivel' => false],
         ['id' => 'logs', 'rotulo' => 'Logs', 'href' => '/gestao/logs.php', 'perfil' => 'admin', 'disponivel' => true],
         ['id' => 'usuarios', 'rotulo' => 'Usuários', 'href' => '/gestao/usuarios.php', 'perfil' => 'admin', 'disponivel' => true],
@@ -91,6 +97,23 @@ final class GestaoContexto
         'oc_baixa_recusada_oc_ambigua' => ['erro', 'A baixa não foi resolvida: há mais de uma ordem com este cliente e número. Nada foi alterado.'],
         'oc_baixa_recusada_oc_ativa' => ['erro', 'A baixa não foi resolvida: a ordem ainda está ativa. Inative a ordem antes, se for o caso. Nada foi alterado.'],
         'oc_baixa_recusada_externo_indisponivel' => ['erro', 'Não foi possível consultar as ordens de coleta agora. A baixa não foi resolvida. Tente novamente em instantes.'],
+        'cliente_criado' => ['sucesso', 'Cliente cadastrado. O OCR e o autocomplete já o reconhecem.'],
+        'cliente_editado' => ['sucesso', 'Cliente atualizado. O novo nome já vale no OCR e no autocomplete.'],
+        'cliente_ativado' => ['sucesso', 'Cliente ativado. O OCR e o autocomplete voltaram a reconhecê-lo.'],
+        'cliente_inativado' => ['sucesso', 'Cliente inativado. O OCR e o autocomplete deixaram de reconhecê-lo. Para voltar, ative o cliente de novo.'],
+        'cliente_excluido' => ['sucesso', 'Cliente excluído de forma definitiva. O OCR e o autocomplete deixaram de reconhecê-lo.'],
+        'cliente_sem_mudanca' => ['info', 'Nada foi alterado. O cliente já estava nesse estado.'],
+        'cliente_nao_encontrado' => ['erro', 'Cliente não encontrado. Ele pode já ter sido excluído. Nada foi alterado. Atualize a lista e tente de novo.'],
+        'cliente_confirmacao_necessaria' => ['info', 'Esta ação precisa de confirmação. Leia o aviso abaixo. Nada foi alterado ainda.'],
+        'empresa_criada' => ['sucesso', 'Empresa cadastrada. Já pode receber totens.'],
+        'empresa_editada' => ['sucesso', 'Empresa atualizada. As URLs dos totens já criados continuam com o nome anterior até serem regeradas.'],
+        'empresa_ativada' => ['sucesso', 'Empresa ativada. Os totens dela voltam a concluir o check-in no Talent.'],
+        'empresa_inativada' => ['sucesso', 'Empresa inativada. Os totens dela deixam de concluir o check-in no Talent enquanto ela estiver inativa.'],
+        'empresa_excluida' => ['sucesso', 'Empresa excluída de forma definitiva.'],
+        'empresa_sem_mudanca' => ['info', 'Nada foi alterado. A empresa já estava nesse estado.'],
+        'empresa_nao_encontrada' => ['erro', 'Empresa não encontrada. Ela pode já ter sido excluída. Nada foi alterado. Atualize a lista e tente de novo.'],
+        'empresa_confirmacao_necessaria' => ['info', 'Esta ação precisa de confirmação. Leia o aviso abaixo. Nada foi alterado ainda.'],
+        'empresa_com_totens' => ['erro', 'Remova ou mova os totens desta empresa antes de excluir. Nada foi alterado.'],
         'log_nao_encontrado' => ['erro', 'Registro não encontrado. Ele pode ter sido apagado pela retenção de 90 dias.'],
         'sessao_expirada' => ['info', 'Sua sessão terminou. Digite o login e a senha para entrar de novo.'],
         'saiu' => ['sucesso', 'Você saiu da gestão. Para voltar, digite o login e a senha.'],

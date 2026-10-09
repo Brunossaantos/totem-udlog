@@ -14,6 +14,8 @@
 // (ERRO/AVISO/INFO, mensagem longa, repeticoes, 122 linhas na API para paginar), Cron/Gestao sem coluna Totem, filtros, vazio, detalhe e sem JS.
 // F4 (ordens de coleta, 2026-10-09): /gestao/ordens.php (4 abas: Ativas, Ativas ha mais de 15 dias, Inativas, Baixas pendentes) e /gestao/ordem.php
 // em 1366x768, 1920x1080, 1000x700 e 680x900, sem JS e vazio; usa o banco QA do totem + um banco QA EXTERNO de coletas (qa_gestao_oc_infra.php).
+// F6 (cadastros, 2026-10-09): /gestao/clientes.php, cliente-form.php, empresas.php e empresa-form.php (so admin) em 1366x768, 1920x1080, 1000x700 e 680x900,
+// perfil usuario (403), sem JS e vazio; clientes semeados (67) e 3 empresas extras por stdin (comandoServidor).
 // Rodada de correcao de UX (2026-10-06): alvos de 44px, erro antes do toggle, requisitos
 // neutros, flash persistente, info, dialogo destrutivo cheio, troca obrigatoria em foco unico.
 const fs = require('fs');
@@ -1571,10 +1573,10 @@ async function verificarFiltrosOrdens(page, rot, aba) {
 }
 
 /** Paginacao: pagina atual `pag` de `paginas`. */
-async function verificarPaginacaoOrdens(page, rot, pag, paginas) {
-    const p = await page.evaluate(() => {
+async function verificarPaginacaoOrdens(page, rot, pag, paginas, navId) {
+    const p = await page.evaluate(idNav => {
         const r = el => el.getBoundingClientRect();
-        const nav = document.getElementById('ordens-paginacao'), ant = document.getElementById('pag-anterior'), prox = document.getElementById('pag-proxima'), pos = document.getElementById('pag-posicao');
+        const nav = document.getElementById(idNav), ant = document.getElementById('pag-anterior'), prox = document.getElementById('pag-proxima'), pos = document.getElementById('pag-posicao');
         const est = el => { const c = getComputedStyle(el); return [c.borderTopStyle, c.borderTopColor, c.backgroundColor, c.color, c.cursor].join('|'); };
         const nr = r(nav);
         return {
@@ -1582,7 +1584,7 @@ async function verificarPaginacaoOrdens(page, rot, pag, paginas) {
             prox: { tag: prox.tagName, dis: prox.getAttribute('aria-disabled'), href: prox.getAttribute('href'), rel: prox.getAttribute('rel'), est: est(prox), h: Math.round(r(prox).height) },
             pos: pos.textContent.trim(), dentro: [ant, prox, pos].every(e => r(e).right <= nr.right + 0.5 && r(e).left >= nr.left - 0.5), aria: nav.getAttribute('aria-label'),
         };
-    });
+    }, navId || 'ordens-paginacao');
     const dis = 'dashed|rgb(58, 58, 58)|rgb(255, 255, 255)|rgb(58, 58, 58)|default';
     if (pag === 1) { ok(p.ant.tag === 'SPAN' && p.ant.dis === 'true' && p.ant.href === null && p.ant.est === dis, rot + ': "Anterior" desabilitado e um <span aria-disabled> tracejado (' + p.ant.est + ')'); }
     else { ok(p.ant.tag === 'A' && p.ant.rel === 'prev' && p.ant.href !== null, rot + ': "Anterior" e link rel=prev'); }
@@ -2017,6 +2019,766 @@ async function cenarioOrdensVazio(browser, srv, contadores) {
     await page.close();
 }
 
+/* ============================================================================================
+ * F6 (cadastros, 2026-10-09): /gestao/clientes.php, cliente-form.php, empresas.php e empresa-form.php (so admin) em
+ * 1366x768, 1920x1080, 1000x700 e 680x900, sem JS e vazio. Banco QA do totem (67 clientes semeados; empresas semeadas
+ * pelo F2 + 3 extras criadas por stdin so durante estes cenarios). Nunca udlog_totem.
+ * ============================================================================================ */
+const IDS_CLIENTES = ['clientes-aviso', 'clientes-filtros', 'filtro-situacao', 'filtro-busca', 'btn-aplicar-filtros', 'btn-limpar-filtros', 'btn-novo-cliente', 'clientes-contador', 'tabela-clientes', 'clientes-paginacao', 'pag-anterior', 'pag-posicao', 'pag-proxima'];
+const IDS_EMPRESAS = ['empresas-aviso', 'btn-nova-empresa', 'tabela-empresas'];
+const CAD = {
+    cliente: { tabela: 'tabela-clientes', attr: 'data-id-cliente', art: 'o cliente', rotAtivo: 'Ativo', rotInativo: 'Inativo', wrapLabel: 'Tabela de clientes', f: 'cliente', cab: ['Nome', 'CNPJ', 'Situação', 'Criado em', 'Ações'], classe: 'gestao-tabela--clientes', minW: 930 },
+    empresa: { tabela: 'tabela-empresas', attr: 'data-id-empresa', art: 'a empresa', rotAtivo: 'Ativa', rotInativo: 'Inativa', wrapLabel: 'Tabela de empresas', f: 'empresa', cab: ['Nome', 'CNPJ', 'Situação', 'Totens vinculados', 'Criada em', 'Ações'], classe: 'gestao-tabela--empresas', minW: 1000 },
+};
+
+/** CNPJ valido (DV calculado) a partir de 12 digitos. */
+function cnpjComDv(base12) {
+    const dv = b => { const pesos = b.length === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]; let soma = 0; for (let i = 0; i < b.length; i++) { soma += Number(b[i]) * pesos[i]; } const r = soma % 11; return r < 2 ? 0 : 11 - r; };
+    const d1 = dv(base12);
+    return base12 + d1 + dv(base12 + d1);
+}
+
+function comandoServidor(srv, comando, resposta) {
+    const pronto = new Promise((res, rej) => {
+        const t = setTimeout(() => rej(new Error('servidor nao confirmou ' + comando)), 30000);
+        let buf = '';
+        const h = d => { buf += d.toString(); const i = buf.indexOf(resposta); if (i >= 0 && buf.indexOf('\n', i) >= 0) { clearTimeout(t); srv.proc.stdout.off('data', h); res(buf.slice(i).split('\n')[0]); } };
+        srv.proc.stdout.on('data', h);
+    });
+    srv.proc.stdin.write(comando + '\n');
+    return pronto;
+}
+
+async function paginaCad(browser, srv, w, h, rot, contadores, semJs, login) {
+    const page = await novaPagina(browser, w, h, rot, contadores);
+    await limparEstado(page, srv.base);
+    if (semJs) { await page.setJavaScriptEnabled(false); }
+    await entrar(page, srv.base, login || 'ana.admin', srv.info.senha);
+    return page;
+}
+
+/** Menu do admin: Clientes e Empresas com icone, 44px e item atual correto. */
+async function verificarMenuAdmin(page, rot, atual) {
+    const m = await page.evaluate(() => {
+        const ls = Array.from(document.querySelectorAll('.gestao-menu__link'));
+        const at = document.querySelector('.gestao-menu__link[aria-current="page"]');
+        return { rot: ls.map(l => l.textContent.trim()), alt: ls.map(l => Math.round(l.getBoundingClientRect().height)), svg: ls.map(l => l.querySelector('use') && l.querySelector('use').getAttribute('href')), atual: at && at.textContent.trim(), cs: at && [getComputedStyle(at).backgroundColor, getComputedStyle(at).color].join('|'), sidebarFim: Math.round(document.querySelector('.gestao-sidebar').scrollHeight - document.querySelector('.gestao-sidebar').clientHeight) };
+    });
+    const iC = m.rot.indexOf('Clientes'), iE = m.rot.indexOf('Empresas');
+    ok(iC >= 0 && iE === iC + 1 && m.svg[iC] === '#i-clientes' && m.svg[iE] === '#i-empresas', rot + ': menu admin com "Clientes" e "Empresas" (icones i-clientes/i-empresas) (' + m.rot.join(',') + ')');
+    ok(m.alt.every(a => a >= 44) && m.atual === atual && m.cs === 'rgb(1, 121, 173)|rgb(255, 255, 255)', rot + ': itens do menu >= 44px e item atual "' + atual + '" (fundo #0179AD, texto branco)');
+    ok(m.sidebarFim <= 0, rot + ': sidebar sem rolagem propria com os itens novos (' + m.sidebarFim + ')');
+}
+
+/** Aviso permanente (nota neutra), na largura toda: icone + texto, borda esquerda 6px #B0B0B1, sem role=alert. */
+async function verificarNotaCad(page, rot, id, trecho) {
+    const n = await page.evaluate(id => {
+        const e = document.getElementById(id), c = getComputedStyle(e), p = document.getElementById('gestao-titulo');
+        return e && { svg: !!e.querySelector('svg'), txt: e.textContent.trim(), role: e.getAttribute('role'), bl: c.borderLeftWidth + '|' + c.borderLeftStyle + '|' + c.borderLeftColor, w: Math.round(e.getBoundingClientRect().width), cw: Math.round(e.parentElement.clientWidth - parseFloat(getComputedStyle(e.parentElement).paddingLeft) - parseFloat(getComputedStyle(e.parentElement).paddingRight)), tit: !!p };
+    }, id);
+    ok(n && n.svg && n.txt.includes(trecho) && n.role === null && n.bl === '6px|solid|rgb(176, 176, 177)' && n.w >= n.cw - 2, rot + ': #' + id + ' = nota permanente neutra (icone + texto, barra 6px #B0B0B1, sem role=alert, largura toda)');
+}
+
+/** Filtros da lista de clientes. */
+async function verificarFiltrosClientes(page, rot, w) {
+    const f = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const form = document.getElementById('clientes-filtros'), fr = r(form);
+        const campos = Array.from(form.querySelectorAll('select, input:not([type=hidden])'));
+        const sel = document.getElementById('filtro-situacao'), q = document.getElementById('filtro-busca');
+        const ap = document.getElementById('btn-aplicar-filtros'), li = document.getElementById('btn-limpar-filtros'), novo = document.getElementById('btn-novo-cliente');
+        const est = b => { const c = getComputedStyle(b); return [c.backgroundColor, c.color, c.borderTopWidth, c.borderTopStyle, c.borderTopColor].join('|'); };
+        return {
+            ids: campos.map(c => c.id), alturas: campos.map(c => Math.round(r(c).height)), rotulos: campos.map(c => { const l = document.querySelector('label[for="' + c.id + '"]'); return !!l && l.getClientRects().length > 0 && l.textContent.trim() !== ''; }),
+            dentro: Array.from(form.querySelectorAll('select, input, a, button')).filter(e => e.getClientRects().length).every(e => r(e).right <= fr.right + 0.5 && r(e).left >= fr.left - 0.5),
+            opcoes: Array.from(sel.options).map(o => o.value + ':' + o.textContent.trim()).join('|'), metodo: form.getAttribute('method'), role: form.getAttribute('role'), tipoQ: q.type, desc: q.getAttribute('aria-describedby'),
+            ap: ap.tagName + '|' + est(ap) + '|' + Math.round(r(ap).height), li: li.tagName + '|' + est(li) + '|' + li.getAttribute('href') + '|' + Math.round(r(li).height), novo: novo.tagName + '|' + est(novo) + '|' + Math.round(r(novo).height) + '|' + !!novo.querySelector('svg'),
+            borda: getComputedStyle(campos[0]).borderTopColor + '|' + getComputedStyle(campos[0]).borderTopWidth, wBusca: Math.round(r(q).width),
+        };
+    });
+    ok(JSON.stringify(f.ids) === JSON.stringify(['filtro-situacao', 'filtro-busca']) && f.metodo === 'get' && f.role === 'search' && f.tipoQ === 'search' && f.opcoes === 'todos:Todos|ativos:Ativos|inativos:Inativos', rot + ': filtros GET role=search com situacao (Todos/Ativos/Inativos) e busca');
+    ok(f.alturas.every(x => x >= 44) && f.rotulos.every(Boolean) && f.dentro && f.borda === 'rgb(135, 135, 137)|2px', rot + ': campos de filtro >= 44px, com label visivel, dentro do bloco, borda 2px #878789 (' + f.alturas.join(',') + ')');
+    ok(f.ap === 'BUTTON|rgb(1, 121, 173)|rgb(255, 255, 255)|2px|solid|rgb(1, 121, 173)|' + f.ap.split('|').pop() && Number(f.ap.split('|').pop()) >= 44 && f.li.startsWith('A|rgb(255, 255, 255)|rgb(1, 121, 173)|2px|solid|rgb(1, 121, 173)|/gestao/clientes.php|') && Number(f.li.split('|').pop()) >= 44, rot + ': "Aplicar filtros" primario e "Limpar filtros" secundario (link para /gestao/clientes.php), >= 44px');
+    ok(f.novo.startsWith('A|rgb(1, 121, 173)|rgb(255, 255, 255)|2px|solid|rgb(1, 121, 173)|') && f.novo.endsWith('|true') && Number(f.novo.split('|')[6]) >= 44, rot + ': "Novo cliente" primario, >= 44px, com icone');
+    if (w >= 1100) { ok(f.wBusca >= 280, rot + ': campo de busca com largura confortavel (' + f.wBusca + 'px)'); }
+}
+
+/** Tabela de clientes/empresas: contrato, colunas fixas, situacao, CNPJ, acoes e textos longos. */
+async function verificarTabelaCad(page, rot, w, tipo, opc) {
+    opc = opc || {};
+    const E = CAD[tipo];
+    const t = await page.evaluate(E => {
+        const r = el => el.getBoundingClientRect();
+        const tab = document.getElementById(E.tabela), wrap = tab.closest('.gestao-tabela-wrap');
+        const ths = Array.from(tab.tHead.rows[0].cells), linhas = Array.from(tab.tBodies[0].rows).filter(l => l.hasAttribute(E.attr));
+        const ids = [];
+        const rows = linhas.map(tr => {
+            const id = tr.getAttribute(E.attr), ativo = tr.getAttribute('data-ativo') === '1', td = tr.querySelector('.col-acoes'), c = r(td), f = E.f;
+            const aEd = td.querySelector('a[id="btn-' + f + '-editar-' + id + '"]');
+            const tog = ativo ? 'inativar' : 'ativar';
+            const bTog = td.querySelector('button[id="btn-' + f + '-' + tog + '-' + id + '"]'), fTog = td.querySelector('form[id="form-' + f + '-' + tog + '-' + id + '"]');
+            const bExc = td.querySelector('button[id="btn-' + f + '-excluir-' + id + '"]'), fExc = td.querySelector('form[id="form-' + f + '-excluir-' + id + '"]');
+            if (!aEd || !bTog || !fTog || !bExc || !fExc) { ids.push(id); return null; }
+            const bs = Array.from(td.querySelectorAll('.gestao-botao')), rs = bs.map(r);
+            const grupoDestr = bExc.closest('.gestao-acoes-grupo--destrutivo');
+            const cs = x => { const k = getComputedStyle(x); return k.borderTopWidth + '|' + k.borderTopStyle + '|' + k.borderTopColor; };
+            const sit = tr.querySelector('.col-situacao .gestao-situacao'), ss = getComputedStyle(sit);
+            const nome = tr.querySelector('.col-nome'), cn = tr.querySelector('.col-cnpj'), cnc = getComputedStyle(cn);
+            const nm = nome.textContent;
+            return {
+                id, ativo, linha: bs.length === 3 && rs.every(x => Math.abs(x.top - rs[0].top) < 4), ordemDom: bs[0] === aEd && bs[1] === bTog && bs[2] === bExc, ordemX: rs[0].left < rs[1].left && rs[1].left < rs[2].left,
+                gapEd: Math.round(rs[1].left - rs[0].right), gapExc: Math.round(rs[2].left - rs[1].right), alt: rs.map(x => Math.round(x.height)), dentro: rs.every(x => x.right <= c.right + 0.5 && x.left >= c.left - 0.5),
+                grupoDestr: !!grupoDestr && grupoDestr.querySelectorAll('.gestao-botao').length === 1, excEst: cs(bExc) + '|' + bExc.classList.contains('gestao-botao--destrutivo') + '|' + !!bExc.querySelector('svg') + '|' + bExc.textContent.trim(),
+                togEst: cs(bTog) + '|' + bTog.classList.contains('gestao-botao--secundario') + '|' + !!bTog.querySelector('svg') + '|' + bTog.textContent.trim(), edEst: cs(aEd) + '|' + aEd.textContent.trim() + '|' + !!aEd.querySelector('svg'),
+                aria: aEd.getAttribute('aria-label') === 'Editar ' + E.art + ' ' + nm && bTog.getAttribute('aria-label') === (ativo ? 'Inativar ' : 'Ativar ') + E.art + ' ' + nm && bExc.getAttribute('aria-label').startsWith('Excluir ' + E.art + ' ' + nm),
+                forms: [fTog, fExc].every(fm => fm.getAttribute('method') === 'post' && !!fm.querySelector('input[name="csrf_token"]') && !!fm.querySelector('input[name="acao"]') && !!fm.querySelector('input[name^="id_"]')) && fTog.querySelector('input[name="acao"]').value === tog && fExc.querySelector('input[name="acao"]').value === 'excluir',
+                sit: [sit.textContent.trim(), ss.color, ss.fontWeight, ss.fontStyle, !!sit.querySelector('svg')].join('|'), nomeEstilo: getComputedStyle(nome).fontStyle, nomeFw: getComputedStyle(nome).fontWeight,
+                cnpj: cn.textContent.trim(), cnpjFmt: cnc.fontVariantNumeric + '|' + cnc.whiteSpace, criado: tr.querySelector('.col-criado, .col-criada').textContent.trim(), temTime: !!tr.querySelector('.col-criado time[datetime], .col-criada time[datetime]'), h: Math.round(r(tr).height),
+                totens: E.f === 'empresa' ? { txt: tr.querySelector('.col-totens').textContent.trim(), a: tr.querySelector('.col-totens').getAttribute('data-totens-ativos'), t: tr.querySelector('.col-totens').getAttribute('data-totens-total') } : null,
+                estouro: Array.from(tr.cells).filter(x => x.scrollWidth > x.clientWidth + 1).map(x => x.className + ':' + x.scrollWidth + '>' + x.clientWidth),
+            };
+        });
+        const col = {}; ths.forEach((x, i) => { col[i] = Math.round(r(x).width); });
+        return {
+            layout: getComputedStyle(tab).tableLayout, fs: getComputedStyle(tab).fontSize, classe: tab.classList.contains(E.classe), caption: !!tab.querySelector('caption'), wrapRole: wrap.getAttribute('role'), wrapTab: wrap.getAttribute('tabindex'), wrapLabel: wrap.getAttribute('aria-label'),
+            wrapRolagem: wrap.scrollWidth > wrap.clientWidth + 1, wrapW: Math.round(r(wrap).width), cab: ths.map(x => x.textContent.trim()), scopes: ths.map(x => x.getAttribute('scope')), cortados: ths.filter(x => x.scrollWidth > x.clientWidth + 1).map(x => x.textContent.trim()),
+            tabelaW: Math.round(r(tab).width), n: rows.length, ids, rows: rows.filter(Boolean), col,
+        };
+    }, E);
+    const R = t.rows;
+    ok(t.layout === 'fixed' && t.fs === '14px' && t.classe && t.caption && t.n > 0, rot + ': tabela ' + E.tabela + ' com a classe ' + E.classe + ', table-layout fixed, 14px, caption e ' + t.n + ' linhas');
+    ok(t.ids.length === 0, rot + ': toda linha com tr[' + E.attr + '][data-ativo] e os ids de botoes/formularios do contrato' + (t.ids.length ? ' -> faltam em ' + t.ids.join(',') : ''));
+    ok(t.wrapRole === 'region' && t.wrapTab === '0' && t.wrapLabel === E.wrapLabel, rot + ': .gestao-tabela-wrap com role=region, tabindex=0 e aria-label "' + E.wrapLabel + '"');
+    ok(JSON.stringify(t.cab) === JSON.stringify(E.cab) && t.scopes.every(x => x === 'col') && t.cortados.length === 0, rot + ': cabecalhos ' + E.cab.join('/') + ', todos th scope=col, nenhum cortado' + (t.cortados.length ? ' -> ' + t.cortados.join(',') : ''));
+    ok(R.every(x => x.h >= 44 && x.h <= 260), rot + ': linhas de 44 a 260px (min ' + Math.min(...R.map(x => x.h)) + ', max ' + Math.max(...R.map(x => x.h)) + ')');
+    ok(R.every(x => x.estouro.length === 0), rot + ': nenhum texto estoura a coluna (nome longo/hostil, CNPJ, situacao)' + (R.some(x => x.estouro.length) ? ' -> ' + R.filter(x => x.estouro.length).map(x => x.id + ' ' + x.estouro.join(';')).slice(0, 3).join(' | ') : ''));
+    ok(R.every(x => /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/.test(x.cnpj) && x.cnpjFmt === 'tabular-nums|nowrap'), rot + ': CNPJ formatado 00.000.000/0000-00 em fonte tabular e sem quebra (' + (R[0] ? R[0].cnpj : '') + ')');
+    ok(R.every(x => /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(x.criado) && x.temTime), rot + ': data de criacao dd/mm/aaaa hh:mm em <time datetime>');
+    const sitAtivo = E.rotAtivo + '|rgb(1, 121, 173)|700|normal|true', sitInativo = E.rotInativo + '|rgb(58, 58, 58)|500|italic|true';
+    ok(R.every(x => x.sit === (x.ativo ? sitAtivo : sitInativo)), rot + ': situacao = texto + icone + peso: "' + E.rotAtivo + '" azul 700; "' + E.rotInativo + '" #3A3A3A 500 italico (' + R.filter(x => x.ativo).length + '/' + R.filter(x => !x.ativo).length + ')');
+    ok(R.every(x => x.ativo ? (x.nomeEstilo === 'normal' && x.nomeFw === '600') : x.nomeEstilo === 'italic'), rot + ': nome ativo em 600 normal e nome de inativo em italico');
+    ok(R.every(x => x.linha && x.ordemDom && x.ordemX && x.dentro && x.alt.every(a => a >= 44)), rot + ': Editar, Ativar/Inativar e Excluir na MESMA linha, nessa ordem, dentro da celula, alvos >= 44px (' + R.length + ' linhas)');
+    ok(R.every(x => x.grupoDestr && x.excEst === '3px|solid|rgb(58, 58, 58)|true|true|Excluir' && x.gapExc >= 23), rot + ': Excluir e o ULTIMO, em grupo --destrutivo proprio, borda 3px #3A3A3A + icone, a >= 24px do vizinho (' + R.slice(0, 3).map(x => x.gapExc).join(',') + ')');
+    ok(R.every(x => x.togEst === '2px|solid|rgb(1, 121, 173)|true|true|' + (x.ativo ? 'Inativar' : 'Ativar') && x.edEst === '2px|solid|rgb(1, 121, 173)|Editar|true' && x.gapEd >= 11), rot + ': Editar e Ativar/Inativar secundarios (borda 2px #0179AD, icone), >= 12px entre si');
+    ok(R.every(x => x.aria && x.forms), rot + ': aria-label = acao + ' + E.art + ' + nome; formularios POST com csrf_token, acao e id');
+    if (tipo === 'empresa') {
+        ok(R.every(x => x.totens.txt === (x.totens.t === '0' ? 'Nenhum totem' : x.totens.a + ' ativo(s) de ' + x.totens.t) && /^\d+$/.test(x.totens.a) && /^\d+$/.test(x.totens.t) && Number(x.totens.a) <= Number(x.totens.t)), rot + ': coluna Totens vinculados com texto e data-totens-ativos/total coerentes (' + Array.from(new Set(R.map(x => x.totens.txt))).join(' / ') + ')');
+        ok(R.every(x => x.excEst.endsWith('Excluir')) && R.filter(x => x.totens.t !== '0').length > 0, rot + ': "Excluir" continua presente (habilitado) mesmo na empresa COM totens (o servidor recusa)');
+    }
+    if (w >= 1366) { ok(!t.wrapRolagem, rot + ': a >= 1366px a tabela cabe sem rolagem horizontal (wrap ' + t.wrapW + 'px, tabela ' + t.tabelaW + 'px)'); }
+    if (w < 1100) { ok(t.wrapRolagem && t.tabelaW >= E.minW, rot + ': < 1100px a rolagem horizontal fica SO no .gestao-tabela-wrap (tabela ' + t.tabelaW + 'px)'); }
+    // acoes clicaveis SEM rolar a tabela (a coluna Acoes e fixa a direita)
+    const cl = await page.evaluate(E => {
+        const tr = Array.from(document.querySelectorAll('#' + E.tabela + ' tbody tr[' + E.attr + ']'))[0], wrap = document.querySelector('.gestao-tabela-wrap');
+        wrap.scrollLeft = 0; tr.scrollIntoView({ block: 'center' });
+        return Array.from(tr.querySelectorAll('.col-acoes .gestao-botao')).map(b => { const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { t: b.textContent.trim(), noVp: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, hit: el === b || b.contains(el) }; });
+    }, E);
+    ok(cl.length === 3 && cl.every(x => x.noVp && x.hit), rot + ': botoes de acao da 1a linha visiveis e clicaveis SEM rolar a tabela (' + cl.map(x => x.t + ':' + x.noVp + '/' + x.hit).join(' ') + ')');
+    if (w < 1100) {
+        const fim = await page.evaluate(E => {
+            const wrap = document.querySelector('.gestao-tabela-wrap'); wrap.scrollLeft = wrap.scrollWidth;
+            const bs = Array.from(document.querySelectorAll('#' + E.tabela + ' tbody tr[' + E.attr + '] .col-acoes .gestao-botao')).slice(0, 3);
+            const out = bs.map(b => { const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return r.right <= innerWidth + 0.5 && (el === b || b.contains(el)); });
+            wrap.scrollLeft = 0; return out;
+        }, E);
+        ok(fim.length === 3 && fim.every(Boolean), rot + ': com a tabela rolada ate o fim a coluna Acoes continua clicavel');
+    }
+    return t;
+}
+
+/** Confirmacao em dois passos (cliente-confirmacao / empresa-confirmacao): Cancelar ANTES do destrutivo. */
+async function verificarConfirmacaoCad(page, rot, w, pfx, acao, rotulo, opc) {
+    opc = opc || {};
+    const c = await page.evaluate(pfx => {
+        const r = el => el.getBoundingClientRect();
+        const box = document.getElementById(pfx + '-confirmacao');
+        if (!box) { return null; }
+        const canc = document.getElementById(pfx + '-confirmacao-cancelar'), conf = document.getElementById('btn-' + pfx + '-confirmar'), txt = document.getElementById(pfx + '-confirmacao-texto');
+        const corpo = box.querySelector('.gestao-estado__corpo'), form = box.querySelector('form.gestao-form-acao');
+        const cs = getComputedStyle(box), cc = getComputedStyle(conf), ck = getComputedStyle(canc);
+        const e = x => { const k = getComputedStyle(x); return [k.backgroundColor, k.color, k.borderTopWidth, k.borderTopStyle, k.borderTopColor].join('|'); };
+        const b = r(box), rc = r(canc), rf = r(conf);
+        return {
+            tag: box.tagName, role: box.getAttribute('role'), acao: box.getAttribute('data-acao'), cls: box.className, borda: cs.borderTopWidth + '|' + cs.borderTopStyle + '|' + cs.borderTopColor, svg: !!box.querySelector(':scope > svg'), corpo: !!corpo && corpo.parentElement === box, form: !!form,
+            nome: box.querySelector('strong') && box.querySelector('strong').textContent, txt: txt.textContent.trim(), txtDentro: !!corpo && corpo.contains(txt),
+            ordemDom: !!(canc.compareDocumentPosition(conf) & Node.DOCUMENT_POSITION_FOLLOWING), antes: rc.top < rf.top - 4 || rc.right <= rf.left, mesmaLinha: Math.abs(rc.top - rf.top) < 4, gap: Math.round(rf.left - rc.right),
+            hC: Math.round(rc.height), hF: Math.round(rf.height), conf: e(conf), confSvg: !!conf.querySelector('svg'), confIcone: getComputedStyle(conf.querySelector('svg')).color + '|' + getComputedStyle(conf.querySelector('svg')).width, confTxt: conf.textContent.trim(), confAria: conf.getAttribute('aria-label'), canc: e(canc), cancTag: canc.tagName, cancTxt: canc.textContent.trim(), cancHref: canc.getAttribute('href'),
+            dentro: b.right <= innerWidth + 0.5 && b.left >= 0 && rf.right <= b.right + 0.5 && rc.left >= b.left - 0.5, alertas: document.querySelectorAll('[role="alert"]').length, bw: Math.round(b.width), cw: Math.round(box.parentElement.clientWidth - parseFloat(getComputedStyle(box.parentElement).paddingLeft) - parseFloat(getComputedStyle(box.parentElement).paddingRight)),
+            csrf: !!form.querySelector('input[name="csrf_token"]'), hid: Array.from(form.querySelectorAll('input[type="hidden"]')).map(i => i.name + '=' + (i.name === 'csrf_token' ? '*' : i.value)).join('&'), estouro: Array.from(box.querySelectorAll('p, strong')).filter(x => x.scrollWidth > x.clientWidth + 1).length,
+        };
+    }, pfx);
+    ok(c !== null, rot + ': #' + pfx + '-confirmacao presente');
+    if (c === null) { return; }
+    ok(c.tag === 'SECTION' && c.role === 'alert' && c.acao === acao && c.cls.includes('gestao-estado--aviso') && c.borda === '3px|solid|rgb(58, 58, 58)' && c.svg && c.corpo && c.form && c.alertas === 1, rot + ': confirmacao de ' + acao + ' = caixa de aviso (3px #3A3A3A, icone, role=alert unico, data-acao=' + acao + ', .gestao-estado__corpo)');
+    ok(c.nome !== null && c.nome.length > 0 && c.txtDentro && (!opc.texto || c.txt.includes(opc.texto)), rot + ': nome do cadastro em <strong> e texto no corpo' + (opc.texto ? ' ("' + opc.texto + '")' : '') + ' (' + c.txt.slice(0, 70) + ')');
+    ok(c.ordemDom && c.antes && c.cancTag === 'A' && c.cancTxt === 'Cancelar' && c.cancHref !== null, rot + ': Cancelar vem ANTES do destrutivo no DOM e na posicao (' + (c.mesmaLinha ? 'mesma linha, gap ' + c.gap : 'empilhados') + ')');
+    ok(c.confTxt === rotulo && c.confSvg && c.conf === 'rgb(58, 58, 58)|rgb(255, 255, 255)|3px|solid|rgb(58, 58, 58)' && c.confIcone === 'rgb(255, 255, 255)|18px' && c.confAria.startsWith(rotulo + ': '), rot + ': "' + rotulo + '" = destrutivo cheio (fundo #3A3A3A, texto e ICONE brancos de 18px, borda 3px) com aria-label');
+    ok(c.canc === 'rgb(255, 255, 255)|rgb(1, 121, 173)|2px|solid|rgb(1, 121, 173)' && c.hC >= 44 && c.hF >= 44, rot + ': Cancelar secundario (borda 2px #0179AD) e os dois alvos >= 44px (' + c.hC + '/' + c.hF + ')');
+    if (w > 720 && c.mesmaLinha) { ok(c.gap >= 23, rot + ': a >= 24px entre Cancelar e o destrutivo (' + c.gap + ')'); }
+    ok(c.dentro && c.estouro === 0 && c.bw >= c.cw - 2, rot + ': caixa na largura toda, botoes dentro dela e dentro da tela, textos sem estourar (' + JSON.stringify({ dentro: c.dentro, estouro: c.estouro, bw: c.bw, cw: c.cw }) + ')');
+    ok(c.csrf && /acao=/.test(c.hid) && /confirmar=1/.test(c.hid), rot + ': formulario de confirmacao POST com csrf_token, acao e confirmar=1 (' + c.hid + ')');
+}
+
+/** Foco visivel (3px #0179AD) a partir de um seletor. */
+async function focoAPartir(page, rot, seletor, n) { await page.focus(seletor); await focoVisivel(page, rot, n); }
+
+/** Formulario de cliente (novo/editar). */
+async function verificarFormCliente(page, rot, w, editando) {
+    const f = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const form = document.getElementById('form-cliente'), nome = document.getElementById('cliente-nome'), cnpj = document.getElementById('cliente-cnpj');
+        const sal = document.getElementById('btn-salvar-cliente'), can = document.getElementById('btn-cancelar-cliente'), cs = getComputedStyle(cnpj), sit = document.getElementById('cliente-situacao'), ativo = document.getElementById('cliente-ativo');
+        const lab = id => { const l = document.querySelector('label[for="' + id + '"]'); return !!l && l.textContent.trim() !== ''; };
+        const est = b => { const c = getComputedStyle(b); return [c.backgroundColor, c.color, c.borderTopWidth, c.borderTopColor].join('|'); };
+        return {
+            titulo: document.getElementById('gestao-titulo').textContent, cartao: document.querySelector('.gestao-cartao__titulo').textContent, metodo: form.getAttribute('method'), csrf: !!form.querySelector('input[name="csrf_token"]'), nomeAlt: Math.round(r(nome).height), nomeLabel: lab('cliente-nome'), cnpjLabel: lab('cliente-cnpj'), cnpjAlt: Math.round(r(cnpj).height),
+            cnpjRo: cnpj.readOnly, cnpjName: cnpj.getAttribute('name'), cnpjVal: cnpj.value, cnpjEst: [cs.borderTopWidth, cs.borderTopStyle, cs.borderTopColor, cs.fontWeight, cs.fontVariantNumeric].join('|'), cnpjDesc: cnpj.getAttribute('aria-describedby'), nomeDesc: nome.getAttribute('aria-describedby'),
+            sit: sit && { txt: sit.textContent.trim(), svg: !!sit.querySelector('svg') }, ativo: ativo && { alt: Math.round(r(ativo).height), op: Array.from(ativo.options).map(o => o.textContent.trim()).join('|') }, nomeHid: !!form.querySelector('input[name="id_cliente"]'), req: nome.required, max: nome.maxLength,
+            sal: est(sal) + '|' + Math.round(r(sal).height), can: est(can) + '|' + Math.round(r(can).height), ordem: !!(sal.compareDocumentPosition(can) & Node.DOCUMENT_POSITION_FOLLOWING), dentro: [nome, cnpj, sal, can].every(e => r(e).right <= r(form).right + 0.5), wForm: Math.round(r(form).width), salTxt: sal.textContent.trim(),
+        };
+    });
+    ok(f.titulo === (editando ? 'Editar cliente' : 'Novo cliente') && f.cartao === (editando ? 'Dados do cadastro' : 'Dados do novo cliente') && f.metodo === 'post' && f.csrf, rot + ': titulo "' + f.titulo + '", cartao "' + f.cartao + '", POST com csrf_token');
+    ok(f.nomeAlt >= 44 && f.cnpjAlt >= 44 && f.nomeLabel && f.cnpjLabel && f.nomeDesc === 'cliente-nome-ajuda' && f.cnpjDesc === 'cliente-cnpj-ajuda' && f.req && f.max === 150, rot + ': campos >= 44px com label e ajuda associada (aria-describedby), nome obrigatorio com maxlength 150');
+    ok(f.sal.startsWith('rgb(1, 121, 173)|rgb(255, 255, 255)|2px|rgb(1, 121, 173)|') && Number(f.sal.split('|').pop()) >= 44 && f.can.startsWith('rgb(255, 255, 255)|rgb(1, 121, 173)|2px|rgb(1, 121, 173)|') && Number(f.can.split('|').pop()) >= 44 && f.ordem && f.dentro, rot + ': "' + f.salTxt + '" primario antes de "Cancelar" secundario, >= 44px, dentro do formulario');
+    if (editando) {
+        ok(f.cnpjRo && f.cnpjName === null && /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/.test(f.cnpjVal) && f.cnpjEst === '2px|dashed|rgb(58, 58, 58)|700|tabular-nums' && f.nomeHid && !f.ativo, rot + ': CNPJ somente leitura, sem name (nao enviado), formatado, borda tracejada #3A3A3A + peso 700 + digitos tabulares (' + f.cnpjEst + ')');
+        ok(f.sit && f.sit.svg && /^Situação atual: (Ativo|Inativo)\. Para mudar, use Ativar ou Inativar na lista de clientes\.$/.test(f.sit.txt), rot + ': #cliente-situacao com icone e texto (' + (f.sit && f.sit.txt) + ')');
+        ok(f.salTxt === 'Salvar', rot + ': botao "Salvar"');
+    } else {
+        ok(!f.cnpjRo && f.cnpjName === 'cnpj' && f.cnpjEst.startsWith('2px|solid|rgb(135, 135, 137)') && !f.sit && f.ativo && f.ativo.alt >= 44 && f.ativo.op === 'Ativo|Inativo' && !f.nomeHid, rot + ': CNPJ editavel (borda solida #878789), select Situacao Ativo/Inativo >= 44px, sem #cliente-situacao');
+        ok(f.salTxt === 'Criar cliente', rot + ': botao "Criar cliente"');
+    }
+    ok(f.wForm <= 480 + 1, rot + ': formulario de ate 480px (' + f.wForm + ')');
+}
+
+/** Formulario de empresa (novo/editar). */
+async function verificarFormEmpresa(page, rot, w, editando, resumo) {
+    const f = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const form = document.getElementById('form-empresa'), nome = document.getElementById('empresa-nome'), cnpj = document.getElementById('empresa-cnpj');
+        const sal = document.getElementById('btn-salvar-empresa'), can = document.getElementById('btn-cancelar-empresa'), cs = getComputedStyle(cnpj);
+        const nota = document.getElementById('empresa-aviso-urls'), res = document.getElementById('empresa-totens-resumo'), nc = nota && getComputedStyle(nota);
+        const lab = id => { const l = document.querySelector('label[for="' + id + '"]'); return !!l && l.textContent.trim() !== ''; };
+        const est = b => { const c = getComputedStyle(b); return [c.backgroundColor, c.color, c.borderTopWidth, c.borderTopColor].join('|'); };
+        return {
+            titulo: document.getElementById('gestao-titulo').textContent, cartao: document.querySelector('.gestao-cartao__titulo').textContent, metodo: form.getAttribute('method'), csrf: !!form.querySelector('input[name="csrf_token"]'), nomeAlt: Math.round(r(nome).height), cnpjAlt: Math.round(r(cnpj).height), nomeLabel: lab('empresa-nome'), cnpjLabel: lab('empresa-cnpj'),
+            cnpjRo: cnpj.readOnly, cnpjName: cnpj.getAttribute('name'), cnpjVal: cnpj.value, cnpjEst: [cs.borderTopWidth, cs.borderTopStyle, cs.borderTopColor, cs.fontWeight, cs.fontVariantNumeric].join('|'), nomeDesc: nome.getAttribute('aria-describedby'), cnpjDesc: cnpj.getAttribute('aria-describedby'), max: nome.maxLength,
+            nota: nota && { svg: !!nota.querySelector('svg'), txt: nota.textContent.trim(), role: nota.getAttribute('role'), bl: nc.borderLeftWidth + '|' + nc.borderLeftStyle + '|' + nc.borderLeftColor, antes: !!(nota.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING), dentro: nota.closest('#empresa-form-cartao') !== null, w: Math.round(r(nota).width), fw: Math.round(r(form).width) },
+            res: res && { txt: res.textContent.trim(), svg: !!res.querySelector('svg') }, hid: !!form.querySelector('input[name="id_empresa"]'),
+            sal: est(sal) + '|' + Math.round(r(sal).height), can: est(can) + '|' + Math.round(r(can).height), ordem: !!(sal.compareDocumentPosition(can) & Node.DOCUMENT_POSITION_FOLLOWING), dentro: [nome, cnpj, sal, can].every(e => r(e).right <= r(form).right + 0.5), wForm: Math.round(r(form).width), salTxt: sal.textContent.trim(),
+        };
+    });
+    ok(f.titulo === (editando ? 'Editar empresa' : 'Nova empresa') && f.cartao === (editando ? 'Dados do cadastro' : 'Dados da nova empresa') && f.metodo === 'post' && f.csrf, rot + ': titulo "' + f.titulo + '", cartao "' + f.cartao + '", POST com csrf_token');
+    ok(f.nomeAlt >= 44 && f.cnpjAlt >= 44 && f.nomeLabel && f.cnpjLabel && f.nomeDesc === 'empresa-nome-ajuda' && f.cnpjDesc === 'empresa-cnpj-ajuda' && f.max === 100, rot + ': campos >= 44px com label e ajuda associada, nome com maxlength 100');
+    ok(f.sal.startsWith('rgb(1, 121, 173)|rgb(255, 255, 255)|2px|rgb(1, 121, 173)|') && Number(f.sal.split('|').pop()) >= 44 && f.can.startsWith('rgb(255, 255, 255)|rgb(1, 121, 173)|2px|rgb(1, 121, 173)|') && Number(f.can.split('|').pop()) >= 44 && f.ordem && f.dentro, rot + ': "' + f.salTxt + '" primario antes de "Cancelar" secundario, >= 44px, dentro do formulario');
+    if (editando) {
+        ok(f.cnpjRo && f.cnpjName === null && /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/.test(f.cnpjVal) && f.cnpjEst === '2px|dashed|rgb(58, 58, 58)|700|tabular-nums' && f.hid, rot + ': CNPJ somente leitura, sem name, formatado, borda tracejada #3A3A3A + peso 700 + digitos tabulares (' + f.cnpjEst + ')');
+        ok(f.nota && f.nota.svg && f.nota.txt === 'As URLs dos totens já criados continuam com o nome anterior da empresa até serem regeradas.' && f.nota.role === null && f.nota.bl === '6px|solid|rgb(176, 176, 177)' && f.nota.antes && f.nota.dentro, rot + ': #empresa-aviso-urls = nota permanente neutra (icone, barra 6px #B0B0B1, sem role=alert) dentro do cartao, ANTES do formulario');
+        ok(f.nota && f.nota.w <= 481 && f.nota.w >= 300, rot + ': nota alinhada a coluna do formulario (' + f.nota.w + 'px)');
+        ok(f.res && f.res.svg && f.res.txt === 'Totens desta empresa: ' + resumo + '.', rot + ': #empresa-totens-resumo "' + (f.res && f.res.txt) + '"');
+        ok(f.salTxt === 'Salvar', rot + ': botao "Salvar"');
+    } else {
+        ok(!f.cnpjRo && f.cnpjName === 'cnpj' && f.cnpjEst.startsWith('2px|solid|rgb(135, 135, 137)') && !f.nota && !f.res && !f.hid, rot + ': CNPJ editavel, SEM aviso de URLs nem resumo de totens na criacao');
+        ok(f.salTxt === 'Criar empresa', rot + ': botao "Criar empresa"');
+    }
+    ok(f.wForm <= 481, rot + ': formulario de ate 480px (' + f.wForm + ')');
+}
+
+/** Erros de validacao de um formulario (campo com role=alert + icone, aria-invalid e borda 3px #3A3A3A). */
+async function verificarErrosCad(page, rot, pfx, campos) {
+    const e = await page.evaluate((pfx, campos) => campos.map(c => {
+        const er = document.getElementById('erro-' + pfx + '-' + c), inp = document.getElementById(pfx + '-' + c), cs = getComputedStyle(inp);
+        return { c, ok: !!er && er.getAttribute('role') === 'alert' && !!er.querySelector('svg') && !!er.querySelector('.gestao-sr') && er.textContent.trim().length > 12 && inp.getAttribute('aria-invalid') === 'true' && inp.getAttribute('aria-describedby').includes('erro-' + pfx + '-' + c) && cs.borderTopWidth === '3px' && cs.borderTopColor === 'rgb(58, 58, 58)' && getComputedStyle(er).fontWeight === '700' };
+    }), pfx, campos);
+    ok(e.every(x => x.ok), rot + ': erros de validacao (' + campos.join(',') + ') com icone + texto + role=alert, aria-invalid e borda 3px #3A3A3A (' + e.map(x => x.c + ':' + x.ok).join(' ') + ')');
+}
+
+const idPorNome = (page, tipo, nome) => page.evaluate((attr, nome) => { const tr = Array.from(document.querySelectorAll('tr[' + attr + ']')).find(t => t.querySelector('.col-nome').textContent === nome); return tr ? tr.getAttribute(attr) : null; }, CAD[tipo].attr, nome);
+
+async function cenarioCadastrosViewport(browser, srv, w, h, contadores) {
+    const rot = w + 'x' + h + ' cadastros';
+    const page = await paginaCad(browser, srv, w, h, rot, contadores, false);
+    const C = srv.info.clientes;
+    // ---- clientes: pagina 1 de 3 (25 linhas)
+    let resp = await irPara(page, srv.base, '/gestao/clientes.php');
+    ok(resp.status() === 200 && await page.evaluate(() => { const a = document.querySelector('.gestao-menu__link[aria-current="page"]'); return a && a.textContent.trim() === 'Clientes' && document.getElementById('gestao-titulo').textContent === 'Clientes' && document.title.startsWith('Clientes'); }), rot + ' clientes: 200, menu "Clientes" atual e titulo "Clientes"');
+    await checagemGeral(page, rot + ' clientes', contadores);
+    await semInlineOrdens(page, rot + ' clientes');
+    let faltam = await page.evaluate(l => l.filter(i => !document.getElementById(i)), IDS_CLIENTES);
+    ok(faltam.length === 0, rot + ' clientes: ids do contrato presentes' + (faltam.length ? ' -> ' + faltam.join(',') : ''));
+    await verificarMenuAdmin(page, rot + ' clientes', 'Clientes');
+    await verificarNotaCad(page, rot + ' clientes', 'clientes-aviso', 'O CNPJ não pode ser alterado depois de criado');
+    await verificarFiltrosClientes(page, rot + ' clientes', w);
+    ok(await page.evaluate(() => document.getElementById('clientes-contador').textContent.trim() === '67 clientes (mostrando 1 a 25)' && document.getElementById('clientes-contador').getAttribute('role') === 'status' && document.querySelectorAll('#tabela-clientes tbody tr').length === 25), rot + ' clientes: contador "67 clientes (mostrando 1 a 25)" com role=status e 25 linhas');
+    await verificarTabelaCad(page, rot + ' clientes', w, 'cliente');
+    await verificarPaginacaoOrdens(page, rot + ' clientes', 1, 3, 'clientes-paginacao');
+    await botoesSolidos(page, rot + ' clientes');
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-' + w + '.png') });
+    await focoAPartir(page, rot + ' clientes', '#btn-novo-cliente', 8);
+    // ---- pagina 3 (17 linhas), inativos, busca por nome/CNPJ, busca curta, vazio
+    await irPara(page, srv.base, '/gestao/clientes.php?pagina=3');
+    await checagemGeral(page, rot + ' clientes p3', contadores);
+    ok(await page.evaluate(() => document.querySelectorAll('#tabela-clientes tbody tr').length === 17 && document.getElementById('clientes-contador').textContent.trim() === '67 clientes (mostrando 51 a 67)'), rot + ' clientes p3: 17 linhas e contador "mostrando 51 a 67"');
+    await verificarPaginacaoOrdens(page, rot + ' clientes p3', 3, 3, 'clientes-paginacao');
+    await irPara(page, srv.base, '/gestao/clientes.php?situacao=inativos');
+    await checagemGeral(page, rot + ' clientes inativos', contadores);
+    ok(await page.evaluate(() => document.querySelectorAll('#tabela-clientes tbody tr[data-ativo="0"]').length === 2 && document.querySelectorAll('#tabela-clientes tbody tr[data-ativo="1"]').length === 0 && document.getElementById('clientes-contador').textContent.trim() === '2 clientes' && document.getElementById('filtro-situacao').value === 'inativos' && !!document.getElementById('btn-cliente-ativar-' + document.querySelector('#tabela-clientes tbody tr').getAttribute('data-id-cliente'))), rot + ' clientes inativos: 2 linhas, todas inativas, filtro "Inativos" selecionado e botao Ativar');
+    await verificarTabelaCad(page, rot + ' clientes inativos', w, 'cliente');
+    await verificarPaginacaoOrdens(page, rot + ' clientes inativos', 1, 1, 'clientes-paginacao');
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-inativos-' + w + '.png') });
+    await irPara(page, srv.base, '/gestao/clientes.php?q=ACME');
+    ok(await page.evaluate(() => document.querySelectorAll('#tabela-clientes tbody tr').length === 1 && document.getElementById('filtro-busca').value === 'ACME' && document.getElementById('clientes-contador').textContent.trim() === '1 cliente'), rot + ' clientes q=ACME: 1 linha, campo preenchido, contador "1 cliente"');
+    await irPara(page, srv.base, '/gestao/clientes.php?q=11111111');
+    ok(await page.evaluate(() => document.querySelectorAll('#tabela-clientes tbody tr').length === 1 && document.querySelector('#tabela-clientes .col-cnpj').textContent.trim() === '11.111.111/0001-11'), rot + ' clientes q=11111111: busca por parte do CNPJ acha 1 cliente com o CNPJ formatado');
+    await irPara(page, srv.base, '/gestao/clientes.php?q=' + encodeURIComponent('AÇÚCAR'));
+    ok(await page.evaluate(() => document.querySelectorAll('#tabela-clientes tbody tr').length === 1 && document.querySelector('#tabela-clientes .col-nome').textContent === 'AÇÚCAR UNIÃO SA'), rot + ' clientes: acentuacao preservada ("AÇÚCAR UNIÃO SA")');
+    await irPara(page, srv.base, '/gestao/clientes.php?q=ab');
+    await checagemGeral(page, rot + ' clientes busca-curta', contadores);
+    ok(await page.evaluate(() => { const e = document.getElementById('erro-filtro-busca'), i = document.getElementById('filtro-busca'), c = getComputedStyle(i); return e && e.getAttribute('role') === 'alert' && !!e.querySelector('svg') && e.textContent.includes('Digite pelo menos 3 caracteres') && i.getAttribute('aria-invalid') === 'true' && i.getAttribute('aria-describedby').includes('erro-filtro-busca') && c.borderTopWidth === '3px' && c.borderTopColor === 'rgb(58, 58, 58)' && document.querySelectorAll('#tabela-clientes tbody tr').length === 25; }), rot + ' clientes busca curta: erro com icone + texto, aria-invalid e borda 3px #3A3A3A; a busca e ignorada (25 linhas)');
+    await irPara(page, srv.base, '/gestao/clientes.php?q=' + encodeURIComponent('ZZZZ-NAO-EXISTE'));
+    await checagemGeral(page, rot + ' clientes vazio-filtro', contadores);
+    const v = await page.evaluate(() => { const e = document.getElementById('clientes-vazio'); return { txt: e && e.textContent.replace(/\s+/g, ' ').trim(), svg: !!(e && e.querySelector('svg')), borda: e && getComputedStyle(e).borderTopStyle, tabela: !!document.getElementById('tabela-clientes'), pag: !!document.getElementById('clientes-paginacao'), cont: document.getElementById('clientes-contador').textContent.trim(), w: e && Math.round(e.getBoundingClientRect().width) }; });
+    ok(v.txt === 'Nenhum cliente encontrado com estes filtros.' && v.svg && v.borda === 'dashed' && !v.tabela && !v.pag && v.cont === 'Nenhum cliente encontrado.', rot + ' clientes vazio-filtro: icone + texto, borda tracejada, sem tabela nem paginacao (' + v.txt + ')');
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-vazio-filtro-' + w + '.png') });
+    // ---- nome hostil e nome longo (150 caracteres, palavra de 60 sem espaco)
+    await irPara(page, srv.base, '/gestao/clientes.php?q=' + encodeURIComponent('<img'));
+    await checagemGeral(page, rot + ' clientes hostil', contadores);
+    const hz = await page.evaluate(() => ({ n: document.querySelectorAll('#tabela-clientes tbody tr').length, nome: document.querySelector('#tabela-clientes .col-nome').textContent, imgs: document.querySelectorAll('#tabela-clientes img').length, scripts: document.querySelectorAll('#tabela-clientes script').length, aria: document.querySelector('#tabela-clientes tbody tr .col-acoes a').getAttribute('aria-label'), busca: document.getElementById('filtro-busca').value }));
+    ok(hz.n === 1 && hz.nome.includes('<img src=x onerror=window.__xss=51>') && hz.nome.includes('<script>') && hz.imgs === 0 && hz.scripts === 0 && hz.aria.includes('<script>') && hz.busca === '<img', rot + ' clientes hostil: nome, aria-label e busca aparecem como TEXTO, sem <img>/<script> injetados');
+    await verificarTabelaCad(page, rot + ' clientes hostil', w, 'cliente');
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-hostil-' + w + '.png') });
+    await irPara(page, srv.base, '/gestao/clientes.php?q=LONGO');
+    await checagemGeral(page, rot + ' clientes longo', contadores);
+    const lg = await page.evaluate(() => { const td = document.querySelector('#tabela-clientes .col-nome'); return { t: td.textContent.length, sw: td.scrollWidth, cw: td.clientWidth, h: Math.round(td.closest('tr').getBoundingClientRect().height) }; });
+    ok(lg.t === 150 && lg.sw <= lg.cw + 1 && lg.h <= 260, rot + ' clientes longo: nome de 150 caracteres quebra DENTRO da coluna (sem estourar) ' + JSON.stringify(lg));
+    await verificarTabelaCad(page, rot + ' clientes longo', w, 'cliente');
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-longo-' + w + '.png') });
+
+    // ---- confirmacao: excluir (ACME tem atendimento em andamento) e inativar mesmo assim, pelo clique real (POST -> redirect)
+    await irPara(page, srv.base, '/gestao/clientes.php?q=ACME');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-cliente-excluir-' + C.acme)]);
+    ok(page.url().includes('/gestao/clientes.php') && page.url().includes('confirmar=excluir&id=' + C.acme) && await page.evaluate(() => { const f = document.getElementById('gestao-flash'); return f && f.getAttribute('role') === 'status' && f.getAttribute('data-tipo') === 'info'; }), rot + ' confirmacao excluir: Excluir (clique) leva a ?confirmar=excluir&id=N com o aviso "precisa de confirmacao" (role=status)');
+    await checagemGeral(page, rot + ' clientes confirma-excluir', contadores);
+    await verificarConfirmacaoCad(page, rot + ' clientes excluir', w, 'cliente', 'excluir', 'Excluir definitivamente', { texto: 'atendimento(s) em andamento' });
+    await verificarMenuAdmin(page, rot + ' clientes confirma', 'Clientes');
+    await botoesSolidos(page, rot + ' clientes confirma-excluir');
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-confirma-excluir-' + w + '.png') });
+    await focoAPartir(page, rot + ' clientes confirma', '#cliente-confirmacao-cancelar', 3);
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#cliente-confirmacao-cancelar')]);
+    ok(await page.evaluate(() => !document.getElementById('cliente-confirmacao') && document.querySelectorAll('#tabela-clientes tbody tr').length >= 1), rot + ' confirmacao excluir: "Cancelar" volta a lista sem confirmacao e sem apagar (' + page.url().replace(srv.base, '') + ')');
+    await irPara(page, srv.base, '/gestao/clientes.php?q=ACME');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-cliente-inativar-' + C.acme)]);
+    await checagemGeral(page, rot + ' clientes confirma-inativar', contadores);
+    await verificarConfirmacaoCad(page, rot + ' clientes inativar', w, 'cliente', 'inativar', 'Inativar mesmo assim', { texto: 'Ao inativar, o OCR e o autocomplete deixam de reconhecer o cliente' });
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-confirma-inativar-' + w + '.png') });
+    // BETA (sem atendimento): excluir tambem pede confirmacao (sem o aviso de andamento); inativar nao
+    await irPara(page, srv.base, '/gestao/clientes.php?confirmar=excluir&id=' + C.beta);
+    await verificarConfirmacaoCad(page, rot + ' clientes excluir-sem-andamento', w, 'cliente', 'excluir', 'Excluir definitivamente', {});
+    ok(await page.evaluate(() => !document.getElementById('cliente-confirmacao-texto').textContent.includes('em andamento')), rot + ' confirmacao excluir (BETA): sem o aviso de atendimento em andamento');
+    // nome hostil na confirmacao (so texto)
+    await irPara(page, srv.base, '/gestao/clientes.php?confirmar=excluir&id=' + C.hostil);
+    await checagemGeral(page, rot + ' clientes confirma-hostil', contadores);
+    await verificarConfirmacaoCad(page, rot + ' clientes confirma-hostil', w, 'cliente', 'excluir', 'Excluir definitivamente', {});
+    ok(await page.evaluate(() => document.querySelector('#cliente-confirmacao strong').textContent.includes('<img src=x onerror=window.__xss=51>') && document.querySelectorAll('#cliente-confirmacao img').length === 0), rot + ' confirmacao hostil: o nome aparece como TEXTO (sem <img> injetado)');
+    await irPara(page, srv.base, '/gestao/clientes.php?confirmar=excluir&id=' + C.longo);
+    await verificarConfirmacaoCad(page, rot + ' clientes confirma-longo', w, 'cliente', 'excluir', 'Excluir definitivamente', {});
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-confirma-longo-' + w + '.png') });
+
+    // ---- formulario: novo (com erro de validacao) e editar
+    resp = await irPara(page, srv.base, '/gestao/cliente-form.php');
+    ok(resp.status() === 200 && await page.evaluate(() => document.querySelector('.gestao-menu__link[aria-current="page"]').textContent.trim() === 'Clientes'), rot + ' cliente-form: 200 e menu "Clientes" atual');
+    await checagemGeral(page, rot + ' cliente-form novo', contadores);
+    await semInlineOrdens(page, rot + ' cliente-form novo');
+    ok((await page.evaluate(l => l.filter(i => !document.getElementById(i)), ['form-cliente', 'cliente-nome', 'cliente-cnpj', 'cliente-ativo', 'btn-salvar-cliente', 'btn-cancelar-cliente'])).length === 0, rot + ' cliente-form novo: ids do contrato presentes');
+    await verificarFormCliente(page, rot + ' cliente-form novo', w, false);
+    await botoesSolidos(page, rot + ' cliente-form novo');
+    await page.screenshot({ path: path.join(CAPTURAS, 'cliente-form-novo-' + w + '.png') });
+    await focoAPartir(page, rot + ' cliente-form novo', '#cliente-nome', 5);
+    await page.type('#cliente-nome', 'X');
+    await page.type('#cliente-cnpj', '123');
+    const r422 = await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-salvar-cliente')]);
+    ok(r422[0].status() === 422, rot + ' cliente-form novo: nome/CNPJ invalidos -> 422 (' + r422[0].status() + ')');
+    await checagemGeral(page, rot + ' cliente-form erro', contadores);
+    await verificarErrosCad(page, rot + ' cliente-form erro', 'cliente', ['nome', 'cnpj']);
+    ok(await page.evaluate(() => document.getElementById('cliente-nome').value === 'X' && document.getElementById('cliente-cnpj').value === '123'), rot + ' cliente-form erro: os valores digitados voltam preenchidos');
+    await page.screenshot({ path: path.join(CAPTURAS, 'cliente-form-erro-' + w + '.png') });
+    await irPara(page, srv.base, '/gestao/cliente-form.php?id=' + C.acme);
+    await checagemGeral(page, rot + ' cliente-form editar', contadores);
+    await verificarFormCliente(page, rot + ' cliente-form editar', w, true);
+    ok(await page.evaluate(() => document.getElementById('cliente-nome').value === 'ACME LOGISTICA SA' && document.getElementById('cliente-cnpj').value === '11.111.111/0001-11'), rot + ' cliente-form editar: nome e CNPJ do cliente carregados');
+    await botoesSolidos(page, rot + ' cliente-form editar');
+    await page.screenshot({ path: path.join(CAPTURAS, 'cliente-form-editar-' + w + '.png') });
+    await irPara(page, srv.base, '/gestao/cliente-form.php?id=' + C.hostil);
+    await checagemGeral(page, rot + ' cliente-form hostil', contadores);
+    ok(await page.evaluate(() => document.getElementById('cliente-nome').value.includes('<img src=x onerror=window.__xss=51>') && document.querySelectorAll('#form-cliente img').length === 0), rot + ' cliente-form hostil: nome hostil so como VALOR do campo');
+    await irPara(page, srv.base, '/gestao/cliente-form.php?id=' + C.longo);
+    await verificarFormCliente(page, rot + ' cliente-form longo', w, true);
+    await checagemGeral(page, rot + ' cliente-form longo', contadores);
+    await focoAPartir(page, rot + ' cliente-form editar', '#cliente-nome', 5);
+
+    // ---- empresas: lista (8 linhas: 5 do F2 + 3 extras)
+    resp = await irPara(page, srv.base, '/gestao/empresas.php');
+    ok(resp.status() === 200 && await page.evaluate(() => { const a = document.querySelector('.gestao-menu__link[aria-current="page"]'); return a && a.textContent.trim() === 'Empresas' && document.getElementById('gestao-titulo').textContent === 'Empresas' && document.title.startsWith('Empresas'); }), rot + ' empresas: 200, menu "Empresas" atual e titulo "Empresas"');
+    await checagemGeral(page, rot + ' empresas', contadores);
+    await semInlineOrdens(page, rot + ' empresas');
+    faltam = await page.evaluate(l => l.filter(i => !document.getElementById(i)), IDS_EMPRESAS);
+    ok(faltam.length === 0, rot + ' empresas: ids do contrato presentes' + (faltam.length ? ' -> ' + faltam.join(',') : ''));
+    await verificarMenuAdmin(page, rot + ' empresas', 'Empresas');
+    await verificarNotaCad(page, rot + ' empresas', 'empresas-aviso', 'O Talent só enxerga empresas ativas');
+    ok(await page.evaluate(() => { const b = document.getElementById('btn-nova-empresa'), c = getComputedStyle(b); return b.tagName === 'A' && c.backgroundColor === 'rgb(1, 121, 173)' && c.color === 'rgb(255, 255, 255)' && b.getBoundingClientRect().height >= 44 && !!b.querySelector('svg') && b.textContent.trim() === 'Nova empresa'; }), rot + ' empresas: "Nova empresa" primario, >= 44px, com icone');
+    ok(await page.evaluate(() => document.querySelectorAll('#tabela-empresas tbody tr[data-id-empresa]').length === 8), rot + ' empresas: 8 empresas (5 do F2 + 3 extras)');
+    const te = await verificarTabelaCad(page, rot + ' empresas', w, 'empresa');
+    const tx = await page.evaluate(() => Array.from(document.querySelectorAll('#tabela-empresas tbody tr[data-id-empresa]')).map(t => t.querySelector('.col-nome').textContent + '=' + t.getAttribute('data-ativo') + '/' + t.querySelector('.col-totens').textContent.trim()));
+    ok(tx.includes('Maua I=1/3 ativo(s) de 4') && tx.includes('Maua II=1/1 ativo(s) de 1') && tx.includes('Empresa Inativa=0/Nenhum totem') && tx.includes('Sem Totem=1/Nenhum totem') && tx.includes('Com Totem Extra=1/1 ativo(s) de 1'), rot + ' empresas: com totens ativos/inativos (Maua I 3 de 4), sem totens, inativa (' + tx.join(' | ') + ')');
+    ok(await page.evaluate(() => { const nomes = Array.from(document.querySelectorAll('#tabela-empresas .col-nome')).map(c => c.textContent); const h = nomes.find(n => n.includes('onerror')); return !!h && document.querySelectorAll('#tabela-empresas img').length === 0 && nomes.some(n => n.length === 100); }), rot + ' empresas: nome hostil como TEXTO e empresa de 100 caracteres (sem estourar, ja checado na tabela)');
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresas-' + w + '.png') });
+    await focoAPartir(page, rot + ' empresas', '#btn-nova-empresa', 8);
+    // excluir de empresa COM totens: o botao esta habilitado; o servidor recusa com o aviso de erro (nada muda)
+    const idMaua1 = await idPorNome(page, 'empresa', 'Maua I');
+    ok(await page.evaluate(id => { const b = document.getElementById('btn-empresa-excluir-' + id); return !b.disabled && b.getAttribute('aria-disabled') === null && b.getAttribute('aria-label').includes('não é possível: há totens vinculados'); }, idMaua1), rot + ' empresas: "Excluir" da empresa com totens esta habilitado e o aria-label avisa que nao e possivel');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-empresa-excluir-' + idMaua1)]);
+    await checagemGeral(page, rot + ' empresas recusa', contadores);
+    ok(await page.evaluate(() => { const f = document.getElementById('gestao-flash'); return f && f.getAttribute('data-tipo') === 'erro' && f.textContent.includes('Remova ou mova os totens desta empresa antes de excluir') && f.getAttribute('role') === 'alert' && !document.getElementById('empresa-confirmacao') && document.querySelectorAll('#tabela-empresas tbody tr[data-id-empresa]').length === 8; }), rot + ' empresas: o servidor recusa excluir empresa com totens (aviso de erro, sem confirmacao, 8 linhas)');
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresas-recusa-' + w + '.png') });
+    // confirmacoes: inativar com totem ativo (Maua II) e excluir (Sem Totem)
+    const idMaua2 = await idPorNome(page, 'empresa', 'Maua II');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-empresa-inativar-' + idMaua2)]);
+    ok(page.url().includes('confirmar=inativar&id=' + idMaua2), rot + ' empresas: Inativar (empresa com totem ativo) leva a ?confirmar=inativar&id=N');
+    await checagemGeral(page, rot + ' empresas confirma-inativar', contadores);
+    await verificarConfirmacaoCad(page, rot + ' empresas inativar', w, 'empresa', 'inativar', 'Inativar mesmo assim', { texto: '1 totem(ns) ativo(s) vão deixar de concluir o check-in no Talent' });
+    await verificarMenuAdmin(page, rot + ' empresas confirma', 'Empresas');
+    await botoesSolidos(page, rot + ' empresas confirma-inativar');
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresas-confirma-inativar-' + w + '.png') });
+    await focoAPartir(page, rot + ' empresas confirma', '#empresa-confirmacao-cancelar', 3);
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#empresa-confirmacao-cancelar')]);
+    ok(await page.evaluate(() => !document.getElementById('empresa-confirmacao') && document.querySelectorAll('#tabela-empresas tbody tr[data-id-empresa]').length === 8 && document.querySelector('#tabela-empresas tbody tr[data-ativo="0"]') !== null), rot + ' empresas: "Cancelar" volta a lista sem confirmacao e sem inativar');
+    const idSem = await idPorNome(page, 'empresa', 'Sem Totem');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-empresa-excluir-' + idSem)]);
+    await checagemGeral(page, rot + ' empresas confirma-excluir', contadores);
+    await verificarConfirmacaoCad(page, rot + ' empresas excluir', w, 'empresa', 'excluir', 'Excluir definitivamente', { texto: 'exclui a empresa de forma definitiva' });
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresas-confirma-excluir-' + w + '.png') });
+    const idLonga = await page.evaluate(() => { const tr = Array.from(document.querySelectorAll('#tabela-empresas tbody tr')).find(t => t.querySelector('.col-nome').textContent.length === 100); return tr.getAttribute('data-id-empresa'); });
+    await irPara(page, srv.base, '/gestao/empresas.php?confirmar=excluir&id=' + idLonga);
+    await verificarConfirmacaoCad(page, rot + ' empresas confirma-longa', w, 'empresa', 'excluir', 'Excluir definitivamente', {});
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresas-confirma-longa-' + w + '.png') });
+
+    // ---- formularios de empresa: novo (erro de validacao) e editar com o aviso de URLs
+    resp = await irPara(page, srv.base, '/gestao/empresa-form.php');
+    ok(resp.status() === 200 && await page.evaluate(() => document.querySelector('.gestao-menu__link[aria-current="page"]').textContent.trim() === 'Empresas'), rot + ' empresa-form: 200 e menu "Empresas" atual');
+    await checagemGeral(page, rot + ' empresa-form novo', contadores);
+    await semInlineOrdens(page, rot + ' empresa-form novo');
+    ok((await page.evaluate(l => l.filter(i => !document.getElementById(i)), ['form-empresa', 'empresa-nome', 'empresa-cnpj', 'btn-salvar-empresa', 'btn-cancelar-empresa'])).length === 0, rot + ' empresa-form novo: ids do contrato presentes');
+    await verificarFormEmpresa(page, rot + ' empresa-form novo', w, false);
+    await botoesSolidos(page, rot + ' empresa-form novo');
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresa-form-novo-' + w + '.png') });
+    await focoAPartir(page, rot + ' empresa-form novo', '#empresa-nome', 5);
+    await page.type('#empresa-nome', 'Empresa Com Nome Muito Longo Demais');
+    await page.type('#empresa-cnpj', '123');
+    const e422 = await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-salvar-empresa')]);
+    ok(e422[0].status() === 422, rot + ' empresa-form novo: nome longo demais/CNPJ invalido -> 422 (' + e422[0].status() + ')');
+    await checagemGeral(page, rot + ' empresa-form erro', contadores);
+    await verificarErrosCad(page, rot + ' empresa-form erro', 'empresa', ['nome', 'cnpj']);
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresa-form-erro-' + w + '.png') });
+    await irPara(page, srv.base, '/gestao/empresa-form.php?id=' + idMaua1);
+    await checagemGeral(page, rot + ' empresa-form editar', contadores);
+    await verificarFormEmpresa(page, rot + ' empresa-form editar', w, true, '4 no total, 3 ativo(s)');
+    ok(await page.evaluate(() => document.getElementById('empresa-nome').value === 'Maua I' && document.getElementById('empresa-cnpj').value === '14.706.199/0001-82'), rot + ' empresa-form editar: nome e CNPJ da empresa carregados');
+    await botoesSolidos(page, rot + ' empresa-form editar');
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresa-form-editar-' + w + '.png') });
+    await focoAPartir(page, rot + ' empresa-form editar', '#empresa-nome', 5);
+    await irPara(page, srv.base, '/gestao/empresa-form.php?id=' + idLonga);
+    await verificarFormEmpresa(page, rot + ' empresa-form longa', w, true, 'nenhum');
+    await checagemGeral(page, rot + ' empresa-form longa', contadores);
+    await page.close();
+}
+
+/**
+ * F6 (2026-10-09, ajustes pos-seguranca): A2 (texto de ajuda do nome do cliente) e A1 (aviso de ambiguidade do OCR: 1o passo da criacao no
+ * formulario e 1o passo de ATIVAR na lista). Nao grava nada (cancela nos dois); o cliente inativo da ativacao e semeado e removido por comando.
+ */
+async function cenarioCadastrosAmbiguidade(browser, srv, w, h, contadores) {
+    const rot = w + 'x' + h + ' ambiguidade';
+    const page = await paginaCad(browser, srv, w, h, rot, contadores, false);
+    const TXT_AJUDA = 'O nome é normalizado (maiúsculas, sem pontuação e sem termos como LTDA e S/A) para o reconhecimento automático das notas. Prefira escrever o nome como aparece na nota fiscal.';
+    const RE_AVISO = '^Este nome é parecido com o de outros clientes e pode fazer o OCR das notas não identificar automaticamente (\\d+) cliente\\(s\\) \\(cairá no preenchimento manual\\)\\. Confirme para continuar\\.$';
+    // ---- A2: texto de ajuda
+    await irPara(page, srv.base, '/gestao/cliente-form.php');
+    ok(await page.evaluate(t => { const a = document.getElementById('cliente-nome-ajuda'); return !!a && a.textContent.trim() === t && !document.body.textContent.includes('sem acentos') && !document.body.textContent.includes('compara o nome'); }, TXT_AJUDA), rot + ' A2: ajuda do nome = texto novo (normalizacao e "prefira o nome da nota"), sem prometer acentos');
+    await verificarFormCliente(page, rot + ' A2 form novo', w, false);
+    // ---- A1 (criar): 1o passo
+    await page.type('#cliente-nome', 'Acme Logistica Sul');
+    await page.type('#cliente-cnpj', '11222333000181');
+    const nav = await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-salvar-cliente')]);
+    ok(nav[0].status() === 200 && page.url().endsWith('/gestao/cliente-form.php'), rot + ' criar 1o passo: resposta 200 na propria pagina do formulario (sem gravar; ' + nav[0].status() + ')');
+    await checagemGeral(page, rot + ' criar 1o passo', contadores);
+    await semInlineOrdens(page, rot + ' criar 1o passo');
+    const f = await page.evaluate(re => {
+        const r = el => el.getBoundingClientRect();
+        const box = document.getElementById('cliente-ambiguidade'), txt = document.getElementById('cliente-ambiguidade-texto'), af = document.getElementById('cliente-ambiguidade-afetados'), res = document.getElementById('cliente-ambiguidade-resumo');
+        const form = document.getElementById('form-cliente-confirmar-ambiguidade'), conf = document.getElementById('btn-confirmar-ambiguidade'), volt = document.getElementById('btn-voltar-ambiguidade'), canc = document.getElementById('btn-cancelar-ambiguidade');
+        const fl = document.getElementById('gestao-flash'), cs = getComputedStyle(box);
+        const est = b => { const c = getComputedStyle(b); return [c.backgroundColor, c.color, c.borderTopWidth, c.borderTopColor].join('|') + '|' + Math.round(r(b).height); };
+        const m = txt.textContent.trim().match(new RegExp(re));
+        return {
+            role: box.getAttribute('role'), cls: box.className, borda: cs.borderTopWidth + '|' + cs.borderTopStyle + '|' + cs.borderTopColor, svg: !!box.querySelector(':scope > svg'), corpo: !!box.querySelector(':scope > .gestao-estado__corpo'),
+            avisoOk: !!m, n: m ? Number(m[1]) : 0, afTxt: af ? af.textContent.trim() : '', resTxt: res.textContent.trim(), resStrong: res.querySelector('strong') && res.querySelector('strong').textContent,
+            flash: fl ? { role: fl.getAttribute('role'), tipo: fl.getAttribute('data-tipo'), txt: fl.textContent.replace(/\s+/g, ' ').trim() } : null,
+            hid: Array.from(form.querySelectorAll('input[type="hidden"]')).map(i => i.name + '=' + (i.name === 'csrf_token' ? '*' : i.value)).join('&'),
+            conf: est(conf), volt: est(volt), canc: est(canc), confTxt: conf.textContent.trim(), voltTxt: volt.textContent.trim(), cancTxt: canc.textContent.trim(), voltHref: volt.getAttribute('href'), cancHref: canc.getAttribute('href'),
+            ordem: !!(conf.compareDocumentPosition(volt) & Node.DOCUMENT_POSITION_FOLLOWING) && !!(volt.compareDocumentPosition(canc) & Node.DOCUMENT_POSITION_FOLLOWING),
+            dentro: [box, conf, volt, canc].every(e => r(e).right <= innerWidth + 0.5 && r(e).left >= 0), estouro: Array.from(box.querySelectorAll('p, strong')).filter(x => x.scrollWidth > x.clientWidth + 1).length,
+            alertas: document.querySelectorAll('[role="alert"]').length, semForm: !document.getElementById('form-cliente') && !document.getElementById('btn-salvar-cliente'), titulo: document.querySelector('.gestao-cartao__titulo').textContent,
+        };
+    }, RE_AVISO);
+    ok(f.role === 'alert' && f.cls.includes('gestao-estado--aviso') && f.borda === '3px|solid|rgb(58, 58, 58)' && f.svg && f.corpo && f.alertas === 1, rot + ' criar 1o passo: aviso = caixa 3px #3A3A3A com icone, role=alert unico');
+    ok(f.avisoOk && f.n >= 1, rot + ' criar 1o passo: mensagem FIXA com N (' + f.n + ') cliente(s)');
+    ok(/^Clientes afetados \(até 5\): /.test(f.afTxt) && f.afTxt.includes('ACME LOGISTICA SA') && f.afTxt.slice('Clientes afetados (até 5): '.length).split(', ').length <= 5, rot + ' criar 1o passo: tela de confirmacao lista os clientes afetados (ate 5) (' + f.afTxt + ')');
+    ok(f.resTxt === 'Nome a gravar: Acme Logistica Sul' && f.resStrong === 'Acme Logistica Sul', rot + ' criar 1o passo: resumo do nome a gravar');
+    ok(f.flash && f.flash.role === 'status' && f.flash.tipo === 'info' && /automaticamente \d+ cliente\(s\)/.test(f.flash.txt) && !f.flash.txt.includes('ACME LOGISTICA SA'), rot + ' criar 1o passo: flash informativo com a mensagem fixa e SEM nome de cliente (' + (f.flash && f.flash.txt.slice(0, 60)) + ')');
+    ok(/csrf_token=\*/.test(f.hid) && /(^|&)cnpj=11222333000181(&|$)/.test(f.hid) && /(^|&)ativo=1(&|$)/.test(f.hid) && /(^|&)nome=Acme Logistica Sul(&|$)/.test(f.hid) && /(^|&)confirmar=1(&|$)/.test(f.hid) && f.semForm, rot + ' criar 1o passo: so o formulario de confirmacao (csrf, nome, cnpj, ativo e confirmar=1 ocultos; sem o formulario editavel)');
+    ok(f.conf.startsWith('rgb(1, 121, 173)|rgb(255, 255, 255)|2px|rgb(1, 121, 173)|') && f.volt.startsWith('rgb(255, 255, 255)|rgb(1, 121, 173)|2px|rgb(1, 121, 173)|') && f.canc.startsWith('rgb(255, 255, 255)|rgb(1, 121, 173)|2px|rgb(1, 121, 173)|') && [f.conf, f.volt, f.canc].every(x => Number(x.split('|').pop()) >= 44), rot + ' criar 1o passo: Confirmar primario e Voltar/Cancelar secundarios, todos >= 44px');
+    ok(f.confTxt === 'Confirmar e criar cliente' && f.voltTxt === 'Voltar e editar o nome' && f.cancTxt === 'Cancelar' && f.voltHref === '/gestao/cliente-form.php' && f.cancHref === '/gestao/clientes.php' && f.ordem, rot + ' criar 1o passo: rotulos e destinos (Confirmar, Voltar e editar o nome, Cancelar) nessa ordem');
+    ok(f.dentro && f.estouro === 0 && f.titulo === 'Confirme para continuar', rot + ' criar 1o passo: tudo dentro da tela, textos sem estourar');
+    await botoesSolidos(page, rot + ' criar 1o passo');
+    await page.screenshot({ path: path.join(CAPTURAS, 'cliente-ambiguidade-' + w + '.png') });
+    await focoAPartir(page, rot + ' criar 1o passo', '#btn-confirmar-ambiguidade', 3);
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-voltar-ambiguidade')]);
+    ok(page.url().endsWith('/gestao/cliente-form.php') && await page.evaluate(() => !!document.getElementById('form-cliente') && document.getElementById('cliente-nome').value === ''), rot + ' criar 1o passo: "Voltar e editar o nome" abre o formulario em branco');
+    // ---- A1 (ativar): cliente inativo semeado cujo nome causa ambiguidade
+    const sem = await comandoServidor(srv, 'semear-ambiguidade', 'AMBIGUIDADE-SEMEADA');
+    const idAmb = JSON.parse(sem.slice('AMBIGUIDADE-SEMEADA '.length)).id;
+    await irPara(page, srv.base, '/gestao/clientes.php?q=ACME');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-cliente-ativar-' + idAmb)]);
+    ok(page.url().includes('/gestao/clientes.php') && page.url().includes('confirmar=ativar&id=' + idAmb), rot + ' ativar 1o passo: Ativar leva a ?confirmar=ativar&id=N (' + page.url().replace(srv.base, '') + ')');
+    await checagemGeral(page, rot + ' ativar 1o passo', contadores);
+    const a = await page.evaluate(re => {
+        const r = el => el.getBoundingClientRect();
+        const box = document.getElementById('cliente-confirmacao'), txt = document.getElementById('cliente-confirmacao-texto'), af = document.getElementById('cliente-confirmacao-afetados');
+        const form = box.querySelector('form.gestao-form-acao'), conf = document.getElementById('btn-cliente-confirmar'), canc = document.getElementById('cliente-confirmacao-cancelar');
+        const est = b => { const c = getComputedStyle(b); return [c.backgroundColor, c.color, c.borderTopWidth, c.borderTopColor].join('|') + '|' + Math.round(r(b).height); };
+        const m = txt.textContent.trim().match(new RegExp(re));
+        return {
+            acao: box.getAttribute('data-acao'), role: box.getAttribute('role'), borda: getComputedStyle(box).borderTopWidth + '|' + getComputedStyle(box).borderTopStyle + '|' + getComputedStyle(box).borderTopColor, svg: !!box.querySelector(':scope > svg'),
+            avisoOk: !!m, afTxt: af ? af.textContent.trim() : '', nome: box.querySelector('strong').textContent, conf: est(conf), confTxt: conf.textContent.trim(), confIcone: !!conf.querySelector('svg'), confAria: conf.getAttribute('aria-label'), canc: est(canc), cancTxt: canc.textContent.trim(),
+            ordem: !!(canc.compareDocumentPosition(conf) & Node.DOCUMENT_POSITION_FOLLOWING), hid: Array.from(form.querySelectorAll('input[type="hidden"]')).map(i => i.name + '=' + (i.name === 'csrf_token' ? '*' : i.value)).join('&'),
+            dentro: [box, conf, canc].every(e => r(e).right <= innerWidth + 0.5 && r(e).left >= 0), estouro: Array.from(box.querySelectorAll('p, strong')).filter(x => x.scrollWidth > x.clientWidth + 1).length, alertas: document.querySelectorAll('[role="alert"]').length,
+        };
+    }, RE_AVISO);
+    ok(a.acao === 'ativar' && a.role === 'alert' && a.borda === '3px|solid|rgb(58, 58, 58)' && a.svg && a.alertas === 1, rot + ' ativar 1o passo: caixa de aviso (3px #3A3A3A, icone, role=alert unico, data-acao=ativar)');
+    ok(a.avisoOk && a.nome === 'ACME LOGISTICA SUL' && /^Clientes afetados \(até 5\): /.test(a.afTxt), rot + ' ativar 1o passo: mensagem FIXA com N, nome do cliente e afetados (' + a.afTxt.slice(0, 80) + ')');
+    ok(a.confTxt === 'Ativar mesmo assim' && a.confIcone && a.conf.startsWith('rgb(1, 121, 173)|rgb(255, 255, 255)|2px|rgb(1, 121, 173)|') && a.confAria.startsWith('Ativar mesmo assim: ') && a.canc.startsWith('rgb(255, 255, 255)|rgb(1, 121, 173)|2px|rgb(1, 121, 173)|') && a.cancTxt === 'Cancelar' && a.ordem && Number(a.conf.split('|').pop()) >= 44 && Number(a.canc.split('|').pop()) >= 44, rot + ' ativar 1o passo: "Ativar mesmo assim" primario (acao nao destrutiva) com icone e aria-label, Cancelar secundario ANTES, >= 44px');
+    ok(/csrf_token=\*/.test(a.hid) && /(^|&)acao=ativar(&|$)/.test(a.hid) && new RegExp('(^|&)id_cliente=' + idAmb + '(&|$)').test(a.hid) && /(^|&)confirmar=1(&|$)/.test(a.hid) && a.dentro && a.estouro === 0, rot + ' ativar 1o passo: formulario POST com csrf, acao, id_cliente e confirmar=1; tudo dentro da tela (' + a.hid + ')');
+    await botoesSolidos(page, rot + ' ativar 1o passo');
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-confirma-ativar-' + w + '.png') });
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#cliente-confirmacao-cancelar')]);
+    ok(await page.evaluate(id => { const tr = document.querySelector('tr[data-id-cliente="' + id + '"]'); return !document.getElementById('cliente-confirmacao') && !!tr && tr.getAttribute('data-ativo') === '0'; }, idAmb), rot + ' ativar: "Cancelar" volta a lista e o cliente continua INATIVO');
+    await comandoServidor(srv, 'limpar-ambiguidade', 'AMBIGUIDADE-LIMPA');
+    await page.close();
+}
+
+/** 680x900: lista, confirmacao e formularios dos dois cadastros em tela estreita. */
+async function cenarioCadastrosEstreito(browser, srv, contadores) {
+    const w = 680, h = 900, rot = '680x900 cadastros';
+    const page = await paginaCad(browser, srv, w, h, rot, contadores, false);
+    const C = srv.info.clientes;
+    await irPara(page, srv.base, '/gestao/clientes.php');
+    await checagemGeral(page, rot + ' clientes', contadores);
+    ok(await page.evaluate(() => { const f = document.getElementById('clientes-filtros'); return getComputedStyle(f).flexDirection === 'column' && Array.from(f.querySelectorAll('.gestao-campo')).every(c => Math.round(c.getBoundingClientRect().width) >= f.getBoundingClientRect().width - 40); }), rot + ' clientes: filtros empilhados em 1 coluna na largura toda');
+    await verificarTabelaCad(page, rot + ' clientes', w, 'cliente');
+    await verificarPaginacaoOrdens(page, rot + ' clientes', 1, 3, 'clientes-paginacao');
+    ok(await page.evaluate(() => document.getElementById('clientes-paginacao').getBoundingClientRect().right <= innerWidth + 0.5), rot + ' clientes: paginacao dentro da tela');
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-680.png') });
+    await irPara(page, srv.base, '/gestao/clientes.php?confirmar=excluir&id=' + C.acme);
+    await checagemGeral(page, rot + ' clientes confirma', contadores);
+    await verificarConfirmacaoCad(page, rot + ' clientes excluir', w, 'cliente', 'excluir', 'Excluir definitivamente', {});
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-confirma-680.png') });
+    await irPara(page, srv.base, '/gestao/cliente-form.php?id=' + C.longo);
+    await checagemGeral(page, rot + ' cliente-form', contadores);
+    await verificarFormCliente(page, rot + ' cliente-form', w, true);
+    await irPara(page, srv.base, '/gestao/empresas.php');
+    await checagemGeral(page, rot + ' empresas', contadores);
+    await verificarTabelaCad(page, rot + ' empresas', w, 'empresa');
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresas-680.png') });
+    const idM2 = await idPorNome(page, 'empresa', 'Maua II');
+    await irPara(page, srv.base, '/gestao/empresas.php?confirmar=inativar&id=' + idM2);
+    await checagemGeral(page, rot + ' empresas confirma', contadores);
+    await verificarConfirmacaoCad(page, rot + ' empresas inativar', w, 'empresa', 'inativar', 'Inativar mesmo assim', {});
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresas-confirma-680.png') });
+    await irPara(page, srv.base, '/gestao/empresa-form.php?id=' + idM2);
+    await checagemGeral(page, rot + ' empresa-form', contadores);
+    await verificarFormEmpresa(page, rot + ' empresa-form', w, true, '1 no total, 1 ativo(s)');
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresa-form-680.png') });
+    await page.close();
+}
+
+/** Perfil usuario: sem Clientes/Empresas no menu e 403 nas 4 paginas. */
+async function cenarioCadastrosUsuario(browser, srv, contadores) {
+    const rot = '1366x768 cadastros usuario';
+    const page = await paginaCad(browser, srv, 1366, 768, rot, contadores, false, 'otavio.usuario');
+    ok(await page.evaluate(() => !Array.from(document.querySelectorAll('.gestao-menu__link')).some(l => /Clientes|Empresas/.test(l.textContent))), rot + ': o menu do perfil usuario NAO tem Clientes nem Empresas');
+    for (const caminho of ['/gestao/clientes.php', '/gestao/cliente-form.php', '/gestao/empresas.php', '/gestao/empresa-form.php']) {
+        const r = await irPara(page, srv.base, caminho);
+        ok(r.status() === 403, rot + ': ' + caminho + ' responde 403 ao perfil usuario (' + r.status() + ')');
+    }
+    await checagemGeral(page, rot + ' 403', contadores);
+    await page.close();
+}
+
+/** Sem JS: tudo funciona por link/formulario (criar, editar, ativar/inativar, excluir em dois passos). */
+async function cenarioCadastrosSemJs(browser, srv, contadores) {
+    const rot = 'sem JS cadastros';
+    const page = await paginaCad(browser, srv, 1366, 768, rot, contadores, true);
+    const C = srv.info.clientes;
+    const nav = acao => Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), acao()]);
+    const flash = () => page.evaluate(() => { const f = document.getElementById('gestao-flash'); return f && { tipo: f.getAttribute('data-tipo'), txt: f.textContent.replace(/\s+/g, ' ').trim() }; });
+    await irPara(page, srv.base, '/gestao/clientes.php');
+    await checagemGeral(page, rot + ' clientes', contadores);
+    ok(await page.evaluate(() => document.querySelector('.gestao-sidebar').getBoundingClientRect().width === 248 && document.querySelectorAll('#tabela-clientes tbody tr').length === 25), rot + ': clientes completo sem JS (sidebar 248px, 25 linhas)');
+    await verificarTabelaCad(page, rot + ' clientes', 1366, 'cliente');
+    await nav(() => page.click('#pag-proxima'));
+    ok(await page.evaluate(() => document.getElementById('pag-posicao').textContent.trim() === 'Página 2 de 3' && document.getElementById('pag-anterior').tagName === 'A'), rot + ': "Proxima" (link) leva a pagina 2');
+    await irPara(page, srv.base, '/gestao/clientes.php');
+    await page.select('#filtro-situacao', 'inativos');
+    await nav(() => page.click('#btn-aplicar-filtros'));
+    ok(await page.evaluate(() => document.querySelectorAll('#tabela-clientes tbody tr').length === 2 && document.getElementById('filtro-situacao').value === 'inativos'), rot + ': formulario GET filtra por situacao sem JS');
+    await nav(() => page.click('#btn-limpar-filtros'));
+    ok(await page.evaluate(() => document.getElementById('filtro-situacao').value === 'todos' && document.querySelectorAll('#tabela-clientes tbody tr').length === 25), rot + ': "Limpar filtros" volta a lista completa');
+    // criar cliente (CNPJ com DV valido, digitado com mascara)
+    const cnpjNovo = cnpjComDv('555000000001');
+    await nav(() => page.click('#btn-novo-cliente'));
+    await page.type('#cliente-nome', 'ZETA NOVO CLIENTE LTDA');
+    await page.type('#cliente-cnpj', cnpjNovo.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5'));
+    await nav(() => page.click('#btn-salvar-cliente'));
+    let fl = await flash();
+    ok(page.url().endsWith('/gestao/clientes.php?msg=cliente_criado') && fl && fl.tipo === 'sucesso' && fl.txt.includes('Cliente cadastrado'), rot + ': criar cliente volta a lista com o aviso de sucesso (' + (fl && fl.txt.slice(0, 40)) + ')');
+    await checagemGeral(page, rot + ' cliente-criado', contadores);
+    await irPara(page, srv.base, '/gestao/clientes.php?q=ZETA');
+    const idZeta = await idPorNome(page, 'cliente', 'ZETA NOVO CLIENTE LTDA');
+    ok(!!idZeta && await page.evaluate(() => document.querySelector('#tabela-clientes .col-cnpj').textContent.trim().length === 18), rot + ': o cliente criado aparece na lista com o CNPJ formatado');
+    // editar nome
+    await nav(() => page.click('#btn-cliente-editar-' + idZeta));
+    await page.click('#cliente-nome', { clickCount: 3 });
+    await page.type('#cliente-nome', 'ZETA RENOMEADO LTDA');
+    await nav(() => page.click('#btn-salvar-cliente'));
+    fl = await flash();
+    ok(fl && fl.tipo === 'sucesso' && fl.txt.includes('Cliente atualizado'), rot + ': editar nome volta a lista com o aviso de sucesso');
+    // (toda acao volta a lista SEM filtros, pagina 1: a linha e conferida de novo pela busca)
+    const ativoDe = async (q, nome) => { await irPara(page, srv.base, '/gestao/clientes.php?q=' + encodeURIComponent(q)); return page.evaluate(n => { const tr = Array.from(document.querySelectorAll('#tabela-clientes tbody tr')).find(t => t.querySelector('.col-nome').textContent === n); return tr ? tr.getAttribute('data-ativo') : null; }, nome); };
+    const NZ = 'ZETA RENOMEADO LTDA';
+    // inativar e ativar (sem atendimento: direto, sem confirmacao)
+    await irPara(page, srv.base, '/gestao/clientes.php?q=ZETA');
+    await nav(() => page.click('#btn-cliente-inativar-' + idZeta));
+    fl = await flash();
+    ok(fl && fl.tipo === 'sucesso' && fl.txt.includes('Cliente inativado') && await ativoDe('ZETA', NZ) === '0' && await page.evaluate(() => !!document.querySelector('[id^="btn-cliente-ativar-"]')), rot + ': Inativar (sem atendimento) inativa direto; a linha vira "Inativo" com o botao Ativar');
+    await checagemGeral(page, rot + ' cliente-inativado', contadores);
+    await nav(() => page.click('#btn-cliente-ativar-' + idZeta));
+    fl = await flash();
+    ok(fl && fl.tipo === 'sucesso' && fl.txt.includes('Cliente ativado') && await ativoDe('ZETA', NZ) === '1', rot + ': Ativar reativa o cliente');
+    // excluir em dois passos: 1o passo (confirmacao) -> Cancelar -> de novo -> confirmar
+    await nav(() => page.click('#btn-cliente-excluir-' + idZeta));
+    ok(page.url().includes('confirmar=excluir') && await page.evaluate(() => !!document.getElementById('cliente-confirmacao')) && await ativoDe('ZETA', NZ) === '1', rot + ': Excluir NAO apaga: mostra a confirmacao (nada foi alterado ainda)');
+    await nav(() => page.click('#btn-cliente-excluir-' + idZeta));
+    await checagemGeral(page, rot + ' cliente-confirma', contadores);
+    await page.screenshot({ path: path.join(CAPTURAS, 'cliente-confirma-sem-js.png') });
+    await nav(() => page.click('#cliente-confirmacao-cancelar'));
+    ok(await page.evaluate(() => !document.getElementById('cliente-confirmacao')) && await ativoDe('ZETA', NZ) === '1', rot + ': "Cancelar" volta a lista e o cliente continua la');
+    await nav(() => page.click('#btn-cliente-excluir-' + idZeta));
+    await nav(() => page.click('#btn-cliente-confirmar'));
+    fl = await flash();
+    ok(fl && fl.tipo === 'sucesso' && fl.txt.includes('Cliente excluído de forma definitiva') && await ativoDe('ZETA', NZ) === null, rot + ': "Excluir definitivamente" exclui e avisa (o cliente some da lista)');
+    // inativar ACME (atendimento em andamento): confirmacao obrigatoria
+    await irPara(page, srv.base, '/gestao/clientes.php?q=ACME');
+    await nav(() => page.click('#btn-cliente-inativar-' + C.acme));
+    ok(await page.evaluate(id => { const c = document.getElementById('cliente-confirmacao'); return c && c.getAttribute('data-acao') === 'inativar' && document.querySelector('tr[data-id-cliente="' + id + '"]').getAttribute('data-ativo') === '1'; }, C.acme), rot + ': Inativar cliente com atendimento em andamento pede confirmacao e NAO inativa ainda');
+    await nav(() => page.click('#btn-cliente-confirmar'));
+    fl = await flash();
+    ok(fl && fl.txt.includes('Cliente inativado') && await page.evaluate(id => document.querySelector('tr[data-id-cliente="' + id + '"]').getAttribute('data-ativo') === '0', C.acme), rot + ': "Inativar mesmo assim" inativa');
+    // erro de validacao sem JS: 422 com os erros e os valores de volta
+    await irPara(page, srv.base, '/gestao/cliente-form.php');
+    await page.type('#cliente-nome', 'Y');
+    await page.type('#cliente-cnpj', '12');
+    const r = await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-salvar-cliente')]);
+    ok(r[0].status() === 422, rot + ': formulario de cliente sem JS devolve 422 com erros');
+    await checagemGeral(page, rot + ' cliente-form erro', contadores);
+    await verificarErrosCad(page, rot + ' cliente-form erro', 'cliente', ['nome', 'cnpj']);
+    // empresas sem JS
+    await irPara(page, srv.base, '/gestao/empresas.php');
+    await checagemGeral(page, rot + ' empresas', contadores);
+    await verificarTabelaCad(page, rot + ' empresas', 1366, 'empresa');
+    const cnpjEmp = cnpjComDv('666000000001');
+    await nav(() => page.click('#btn-nova-empresa'));
+    await page.type('#empresa-nome', 'NovaEmp');
+    await page.type('#empresa-cnpj', cnpjEmp);
+    await nav(() => page.click('#btn-salvar-empresa'));
+    fl = await flash();
+    ok(page.url().endsWith('/gestao/empresas.php?msg=empresa_criada') && fl && fl.tipo === 'sucesso' && fl.txt.includes('Empresa cadastrada'), rot + ': criar empresa volta a lista com o aviso de sucesso');
+    const idNova = await idPorNome(page, 'empresa', 'NovaEmp');
+    ok(!!idNova, rot + ': a empresa criada aparece na lista');
+    await nav(() => page.click('#btn-empresa-editar-' + idNova));
+    await page.click('#empresa-nome', { clickCount: 3 });
+    await page.type('#empresa-nome', 'NovaEmp2');
+    await nav(() => page.click('#btn-salvar-empresa'));
+    fl = await flash();
+    ok(fl && fl.tipo === 'sucesso' && fl.txt.includes('Empresa atualizada') && await idPorNome(page, 'empresa', 'NovaEmp2') === idNova, rot + ': editar nome da empresa volta a lista com o aviso de sucesso');
+    await nav(() => page.click('#btn-empresa-inativar-' + idNova));
+    fl = await flash();
+    ok(fl && fl.txt.includes('Empresa inativada') && await page.evaluate(id => document.querySelector('tr[data-id-empresa="' + id + '"]').getAttribute('data-ativo') === '0', idNova), rot + ': Inativar empresa sem totem ativo inativa direto');
+    await checagemGeral(page, rot + ' empresa-inativada', contadores);
+    await nav(() => page.click('#btn-empresa-ativar-' + idNova));
+    fl = await flash();
+    ok(fl && fl.txt.includes('Empresa ativada'), rot + ': Ativar reativa a empresa');
+    // inativar empresa COM totem ativo (extra): confirmacao obrigatoria
+    const idCom = await idPorNome(page, 'empresa', 'Com Totem Extra');
+    await nav(() => page.click('#btn-empresa-inativar-' + idCom));
+    ok(await page.evaluate(id => { const c = document.getElementById('empresa-confirmacao'); return c && c.getAttribute('data-acao') === 'inativar' && document.querySelector('tr[data-id-empresa="' + id + '"]').getAttribute('data-ativo') === '1'; }, idCom), rot + ': Inativar empresa com totem ativo pede confirmacao e NAO inativa ainda');
+    await checagemGeral(page, rot + ' empresa-confirma', contadores);
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresa-confirma-sem-js.png') });
+    await nav(() => page.click('#btn-empresa-confirmar'));
+    fl = await flash();
+    ok(fl && fl.txt.includes('Empresa inativada') && await page.evaluate(id => document.querySelector('tr[data-id-empresa="' + id + '"]').getAttribute('data-ativo') === '0', idCom), rot + ': "Inativar mesmo assim" inativa a empresa');
+    // excluir (sem totem) em dois passos
+    await nav(() => page.click('#btn-empresa-excluir-' + idNova));
+    ok(await page.evaluate(() => { const c = document.getElementById('empresa-confirmacao'); return c && c.getAttribute('data-acao') === 'excluir'; }), rot + ': Excluir empresa sem totem mostra a confirmacao (nada apagado ainda)');
+    await nav(() => page.click('#btn-empresa-confirmar'));
+    fl = await flash();
+    ok(fl && fl.txt.includes('Empresa excluída de forma definitiva') && await idPorNome(page, 'empresa', 'NovaEmp2') === null, rot + ': "Excluir definitivamente" exclui a empresa');
+    // excluir empresa COM totens: recusa do servidor
+    const idM1 = await idPorNome(page, 'empresa', 'Maua I');
+    await nav(() => page.click('#btn-empresa-excluir-' + idM1));
+    fl = await flash();
+    ok(fl && fl.tipo === 'erro' && fl.txt.includes('Remova ou mova os totens') && !!(await idPorNome(page, 'empresa', 'Maua I')), rot + ': Excluir empresa com totens: o servidor recusa com aviso de erro e a empresa fica');
+    await checagemGeral(page, rot + ' empresa-recusa', contadores);
+    // erro de validacao sem JS
+    await irPara(page, srv.base, '/gestao/empresa-form.php');
+    await page.type('#empresa-nome', 'Empresa Com Nome Muito Longo Demais');
+    await page.type('#empresa-cnpj', '12');
+    const r2 = await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-salvar-empresa')]);
+    ok(r2[0].status() === 422, rot + ': formulario de empresa sem JS devolve 422 com erros');
+    await checagemGeral(page, rot + ' empresa-form erro', contadores);
+    await verificarErrosCad(page, rot + ' empresa-form erro', 'empresa', ['nome', 'cnpj']);
+    await page.close();
+}
+
+/** Estado vazio de clientes e empresas (esvazia so o banco QA, por stdin; ultimo cenario). */
+async function cenarioCadastrosVazio(browser, srv, contadores) {
+    const rot = '1366x768 cadastros-vazio';
+    await comandoServidor(srv, 'esvaziar-cadastros', 'CADASTROS-ESVAZIADOS');
+    const page = await paginaCad(browser, srv, 1366, 768, rot, contadores, false);
+    await irPara(page, srv.base, '/gestao/clientes.php');
+    await checagemGeral(page, rot + ' clientes', contadores);
+    const c = await page.evaluate(() => { const e = document.getElementById('clientes-vazio'); return { txt: e && e.textContent.replace(/\s+/g, ' ').trim(), svg: !!(e && e.querySelector('svg')), borda: e && getComputedStyle(e).borderTopStyle, tab: !!document.getElementById('tabela-clientes'), pag: !!document.getElementById('clientes-paginacao'), cont: document.getElementById('clientes-contador').textContent.trim(), novo: !!document.getElementById('btn-novo-cliente'), icone: e && e.querySelector('use').getAttribute('href') }; });
+    ok(c.txt === 'Nenhum cliente cadastrado. Cadastre o primeiro.' && c.svg && c.icone === '#i-clientes' && c.borda === 'dashed' && !c.tab && !c.pag && c.cont === 'Nenhum cliente encontrado.' && c.novo, rot + ' clientes: estado vazio com icone, texto, borda tracejada, sem tabela/paginacao e com "Novo cliente" (' + c.txt + ')');
+    await botoesSolidos(page, rot + ' clientes');
+    await page.screenshot({ path: path.join(CAPTURAS, 'clientes-vazio.png') });
+    await irPara(page, srv.base, '/gestao/empresas.php');
+    await checagemGeral(page, rot + ' empresas', contadores);
+    const e = await page.evaluate(() => { const x = document.getElementById('empresas-vazio'); return { txt: x && x.textContent.replace(/\s+/g, ' ').trim(), svg: !!(x && x.querySelector('svg')), borda: x && getComputedStyle(x).borderTopStyle, icone: x && x.querySelector('use').getAttribute('href'), linhas: document.querySelectorAll('#tabela-empresas tbody tr[data-id-empresa]').length, w: x && Math.round(x.getBoundingClientRect().width), tw: Math.round(document.getElementById('tabela-empresas').getBoundingClientRect().width) }; });
+    ok(e.txt === 'Nenhuma empresa cadastrada. Cadastre a primeira.' && e.svg && e.icone === '#i-empresas' && e.borda === 'dashed' && e.linhas === 0 && e.w > 200, rot + ' empresas: estado vazio com icone, texto e borda tracejada, sem linhas (' + e.txt + ')');
+    await botoesSolidos(page, rot + ' empresas');
+    await page.screenshot({ path: path.join(CAPTURAS, 'empresas-vazio.png') });
+    await page.close();
+}
+
 (async () => {
     const contadores = { csp: [], erros: [], externos: [], semCsp: [], secundarios: [] };
     let srv = null, browser = null;
@@ -2024,7 +2786,7 @@ async function cenarioOrdensVazio(browser, srv, contadores) {
         srv = await subirServidor();
         console.log('servidor QA em ' + srv.base + ' (banco ' + srv.info.banco + ')');
         browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
-        // GESTAO_SO=logs|ordens roda so os cenarios da F3c|F4 (atalho de desenvolvimento; a rodada oficial roda tudo)
+        // GESTAO_SO=logs|ordens|cadastros roda so os cenarios da F3c|F4|F6 (atalho de desenvolvimento; a rodada oficial roda tudo)
         const SO = process.env.GESTAO_SO || '';
         if (SO === '') {
             await cenarioViewport(browser, srv, 1366, 768, true, contadores);
@@ -2051,6 +2813,21 @@ async function cenarioOrdensVazio(browser, srv, contadores) {
             await cenarioOrdensSemJs(browser, srv, contadores);
             await cenarioOrdensVazio(browser, srv, contadores);
         }
+        // F6 (cadastros): clientes e empresas em 3 viewports + 680, perfil usuario e sem JS (muda so clientes/empresas extras); as 3 empresas extras
+        // so existem durante este bloco (stdin semear/limpar) para nao alterar as contagens dos cenarios de totens; o vazio roda por ultimo
+        if (SO === '' || SO === 'cadastros') {
+            await comandoServidor(srv, 'semear-cadastros', 'CADASTROS-SEMEADOS');
+            await cenarioCadastrosViewport(browser, srv, 1366, 768, contadores);
+            await cenarioCadastrosViewport(browser, srv, 1920, 1080, contadores);
+            await cenarioCadastrosViewport(browser, srv, 1000, 700, contadores);
+            await cenarioCadastrosEstreito(browser, srv, contadores);
+            await cenarioCadastrosAmbiguidade(browser, srv, 1366, 768, contadores);
+            await cenarioCadastrosAmbiguidade(browser, srv, 1920, 1080, contadores);
+            await cenarioCadastrosAmbiguidade(browser, srv, 680, 900, contadores);
+            await cenarioCadastrosUsuario(browser, srv, contadores);
+            await cenarioCadastrosSemJs(browser, srv, contadores);
+            await comandoServidor(srv, 'limpar-cadastros', 'CADASTROS-LIMPOS');
+        }
         // F2 (totens): lista, novo totem e URL em 3 viewports; fluxos com JS; sem JS; estado vazio (ultimo: esvazia o banco QA)
         if (SO === '') {
             await cenarioTotensViewport(browser, srv, 1366, 768, contadores);
@@ -2060,6 +2837,7 @@ async function cenarioOrdensVazio(browser, srv, contadores) {
             await cenarioTotensSemJs(browser, srv, contadores);
             await cenarioTotensVazio(browser, srv, contadores);
         }
+        if (SO === '' || SO === 'cadastros') { await cenarioCadastrosVazio(browser, srv, contadores); }
         ok(contadores.csp.length === 0, 'console: nenhuma mensagem de CSP no Chrome' + (contadores.csp.length ? ' -> ' + contadores.csp.slice(0, 3).join(' | ') : ''));
         ok(contadores.erros.length === 0, 'nenhum erro de JavaScript nas paginas' + (contadores.erros.length ? ' -> ' + contadores.erros.slice(0, 3).join(' | ') : ''));
         ok(contadores.externos.length === 0, 'nenhuma requisicao externa (CDN/fonte/imagem)' + (contadores.externos.length ? ' -> ' + contadores.externos.slice(0, 3).join(' | ') : ''));

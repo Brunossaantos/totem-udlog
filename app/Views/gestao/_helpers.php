@@ -67,6 +67,9 @@ if (!function_exists('gestaoSprite')) {
             'erro' => '<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/>',
             'externo' => '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>',
             'ponto' => '<circle cx="12" cy="12" r="7"/>',
+            'clientes' => '<path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 9h.01M15 9h.01M9 13h.01M15 13h.01M10 21v-4h4v4"/>',
+            'empresas' => '<rect x="4" y="2" width="16" height="20" rx="1"/><path d="M9 22v-4h6v4M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/>',
+            'excluir' => '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>',
             'desbloquear' => '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
         ];
         $saida = '<svg class="gestao-sprite" width="0" height="0" aria-hidden="true" focusable="false"><defs>';
@@ -90,6 +93,19 @@ if (!function_exists('gestaoData')) {
         }
 
         return '<time datetime="' . h($m[1] . '-' . $m[2] . '-' . $m[3] . 'T' . $m[4] . ':' . $m[5]) . '">' . h($m[3] . '/' . $m[2] . '/' . $m[1] . ' ' . $m[4] . ':' . $m[5]) . '</time>';
+    }
+}
+
+if (!function_exists('gestaoCnpj')) {
+    /** CNPJ de 14 digitos -> "00.000.000/0000-00" (so exibicao; o banco guarda so digitos). Outro formato volta escapado como veio. */
+    function gestaoCnpj(?string $valor): string
+    {
+        $valor = (string) $valor;
+        if (preg_match('/\A\d{14}\z/D', $valor) !== 1) {
+            return h($valor);
+        }
+
+        return h(substr($valor, 0, 2) . '.' . substr($valor, 2, 3) . '.' . substr($valor, 5, 3) . '/' . substr($valor, 8, 4) . '-' . substr($valor, 12, 2));
     }
 }
 
