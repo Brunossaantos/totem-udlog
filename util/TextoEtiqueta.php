@@ -2,27 +2,10 @@
 
 namespace Util;
 
-/**
- * Normalizacao de texto variavel das etiquetas para ASCII puro (a fonte core
- * do FPDF/impressora termica nao imprime acento de forma confiavel).
- *
- * Funcao pura, sem I/O e sem dependencia de locale nem de iconv //TRANSLIT.
- * A tabela explicita (Latin-1 Supplement + Latin Extended-A + alguns pontos
- * comuns) e a fonte primaria; se a extensao intl estiver presente,
- * Normalizer (NFD) + remocao de marcas combinantes cobre o que a tabela nao
- * previu. Nao ha dependencia de intl (o PHP 8.0 do XAMPP local nao a tem).
- */
 final class TextoEtiqueta
 {
-    /** @var array<string,string>|null */
     private static ?array $mapa = null;
 
-    /**
-     * UTF-8 (ou latin1, se o UTF-8 for invalido) => ASCII imprimivel.
-     * Sem equivalente ASCII (emoji, simbolos) => removido; controles e
-     * espacos Unicode viram espaco; espacos colapsados; trim.
-     * $max > 0 limita o numero de caracteres (ASCII: 1 byte = 1 caractere).
-     */
     public static function paraAscii(string $texto, int $max = 0): string
     {
         if ($texto === '') {
@@ -62,7 +45,6 @@ final class TextoEtiqueta
         return $out;
     }
 
-    /** @return array<string,string> */
     private static function mapa(): array
     {
         if (self::$mapa !== null) {

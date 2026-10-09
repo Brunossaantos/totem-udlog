@@ -2,24 +2,10 @@
 
 namespace Util;
 
-/**
- * Cabecalhos e respostas de erro da Gestao Totem (demanda gestao-totem, F1).
- * Os metodos que "encerram" a requisicao (redirecionar, negar, json) chamam
- * exit. PHP 8.0 nao tem o tipo `never`, entao o retorno e void.
- */
 final class GestaoHttp
 {
     public const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'; base-uri 'none'";
 
-    /**
-     * Acao (botao) da pagina de erro de `negar()`:
-     *  - ACAO_LOGIN: "Ir para o login" (sem sessao);
-     *  - ACAO_INICIO: "Voltar ao início" (com sessao; /gestao/ leva a pagina inicial do perfil);
-     *  - ACAO_RECARREGAR: "Recarregar a página" (token invalido, pagina expirada, erro
-     *    temporario; e um link GET para o mesmo caminho, sem query);
-     *  - ACAO_CONTA: "Ir para Minha conta" (troca de senha obrigatoria);
-     *  - ACAO_NENHUMA: sem botao (HTTPS/Host invalidos: nenhum link resolveria).
-     */
     public const ACAO_LOGIN = 'login';
 
     public const ACAO_INICIO = 'inicio';
@@ -30,10 +16,8 @@ final class GestaoHttp
 
     public const ACAO_NENHUMA = 'nenhuma';
 
-    /** Texto padrao de erro interno (excecao nao tratada, falha inesperada). */
     public const MSG_ERRO_INTERNO = 'Não foi possível concluir. Nada foi alterado. Tente novamente em instantes.';
 
-    /** Cabecalhos de seguranca em TODA resposta da gestao (200, 302, 4xx, 5xx). */
     public static function cabecalhosSeguranca(): void
     {
         header('Cache-Control: no-store, private');
@@ -44,7 +28,6 @@ final class GestaoHttp
         header('Content-Security-Policy: ' . self::CSP);
     }
 
-    /** Redireciona (302) para um caminho do proprio site (sempre iniciado por /gestao/). */
     public static function redirecionar(string $caminho, int $status = 302): void
     {
         if (!str_starts_with($caminho, '/gestao/') || str_contains($caminho, "\r") || str_contains($caminho, "\n")) {
@@ -55,11 +38,6 @@ final class GestaoHttp
         exit;
     }
 
-    /**
-     * Tratador global da gestao: excecao nao capturada vira resposta generica 500
-     * com os cabecalhos de seguranca e UM log com SO a classe da excecao (nunca
-     * mensagem, arquivo, linha nem trace: o stack trace pode carregar senha).
-     */
     public static function registrarTratadorDeExcecao(): void
     {
         set_exception_handler(static function (\Throwable $e): void {
@@ -69,7 +47,6 @@ final class GestaoHttp
         });
     }
 
-    /** Resposta 500 generica (usada pelo tratador global e por falhas inesperadas). */
     public static function erroInterno(): void
     {
         if (headers_sent()) {
@@ -80,7 +57,6 @@ final class GestaoHttp
         self::negar(500, 'Erro interno', self::MSG_ERRO_INTERNO, [], self::ACAO_RECARREGAR);
     }
 
-    /** Caminho atual (sem query) so se for da propria gestao; senao a raiz da gestao. */
     private static function caminhoAtual(): string
     {
         $caminho = parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
@@ -91,10 +67,6 @@ final class GestaoHttp
         return $caminho;
     }
 
-    /**
-     * Pagina de erro minima (sem script nem estilo inline, compativel com a CSP).
-     * `$acao` escolhe o botao (ver ACAO_*).
-     */
     public static function negar(int $status, string $titulo, string $mensagem, array $cabecalhosExtras = [], string $acao = self::ACAO_LOGIN): void
     {
         http_response_code($status);
@@ -132,7 +104,6 @@ final class GestaoHttp
         exit;
     }
 
-    /** @param array<string,mixed> $corpo */
     public static function json(int $status, array $corpo): void
     {
         http_response_code($status);

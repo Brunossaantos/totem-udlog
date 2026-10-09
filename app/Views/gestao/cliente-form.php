@@ -1,17 +1,4 @@
 <?php
-/**
- * Criar/editar cliente (só admin). Variáveis: $editando (bool), $id_alvo (int|null),
- * $valores (array nome, cnpj, ativo), $erros (array campo => mensagem; campos nome, cnpj,
- * ativo), $situacao_atual (texto, só na edição), $ambiguidade (null, ou total e nomes: passo 1 da
- * confirmação de ambiguidade do OCR) e $texto_ambiguidade (mensagem fixa pronta).
- *
- * Com $ambiguidade a página mostra o aviso (até 5 nomes de clientes afetados), o resumo do que
- * será gravado e um formulário só com campos ocultos + confirmar=1 (o nome não fica editável
- * entre o aviso e a confirmação); o servidor só grava no segundo passo.
- *
- * Na edição só o nome muda: o CNPJ aparece somente leitura (e não é enviado) e a situação
- * muda pelos botões Ativar/Inativar da lista. Sem script nem style inline.
- */
 $erroCampo = static function (string $campo) use ($erros): string {
     if (!isset($erros[$campo])) {
         return '';

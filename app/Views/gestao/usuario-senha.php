@@ -1,9 +1,4 @@
 <?php
-/**
- * Senha temporária (exibida UMA vez, só nesta resposta POST). Variáveis:
- * $contexto ('criado'|'redefinida'), $usuario_login, $usuario_nome,
- * $senha_temporaria. Não há como rever esta tela.
- */
 ?>
 <section class="gestao-cartao" id="senha-temporaria-cartao">
 <h2 class="gestao-cartao__titulo"><?= $contexto === 'criado' ? 'Usuário criado' : 'Senha redefinida' ?></h2>

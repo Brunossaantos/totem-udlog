@@ -1,6 +1,5 @@
 <?php
 
-// Porta de entrada da Gestao Totem: manda para o login ou para a pagina inicial do perfil.
 require_once __DIR__ . '/../../vendor/autoload.php';
 
 use App\Controller\GestaoContexto;

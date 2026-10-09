@@ -1,17 +1,4 @@
 <?php
-/**
- * Lista de clientes (tb_cliente do totem; só admin). Variáveis: $clientes (list; cada
- * linha: id_cliente, nome, cnpj (só dígitos; exibido formatado), ativo, criado_em), $total,
- * $pagina, $paginas, $por_pagina, $filtros (situacao ativos|inativos|todos, q), $busca_curta
- * (bool: q com menos de 3 caracteres foi ignorada), $tem_filtros, $url_anterior, $url_proxima
- * (null = sem página), $url_lista (a lista com os filtros atuais), $contador (texto pronto),
- * $confirmacao (null ou acao, id_cliente, nome, texto, rotulo, andamento: segundo passo de
- * inativar/excluir/ativar; para ativar traz tambem `nomes`, ate 5 clientes afetados pela ambiguidade do OCR).
- *
- * As ações são <form method=post> com CSRF e funcionam sem JS. A confirmação em dois passos é
- * do servidor (não usa data-confirmar): o primeiro POST volta com o aviso, o segundo executa.
- * Sem script nem style inline.
- */
 $situacoes = ['todos' => 'Todos', 'ativos' => 'Ativos', 'inativos' => 'Inativos'];
 ?>
 <div class="gestao-barra-acoes" id="clientes-acoes">

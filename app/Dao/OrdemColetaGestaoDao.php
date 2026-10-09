@@ -10,38 +10,10 @@ use PDOStatement;
 use Util\Conexao;
 use Util\ConexaoGestaoColetas;
 
-/**
- * Acesso da Gestao Totem (F4) as ordens de coleta do banco EXTERNO
- * `udlogo59_db_gestao_coletas` (tb_ordens_coleta, tb_clientes,
- * tb_ordem_coleta_arquivos) e, SO para contagem sem dado pessoal, a
- * tb_atendimento do banco do TOTEM. Demanda gestao-totem F4a (2026-10-08).
- *
- * Decisoes do usuario: sem mascara de dados (usuario e admin veem tudo), sem
- * limite por usuario, 25 linhas por pagina, busca so por numero (prefixo >= 3
- * caracteres, nunca %x%), cliente e periodo; sem busca por placa/motorista.
- *
- * Regras de seguranca:
- *  - TODO valor vai por bind tipado (nunca concatenado). O UNICO texto SQL
- *    montado em PHP sao constantes deste arquivo (aba, coluna/direcao do
- *    ORDER BY por whitelist, LIMIT/OFFSET inteiros ja saneados e ligados por
- *    bind).
- *  - Filtro invalido NUNCA alarga a consulta: vira resultado vazio.
- *  - Nenhum metodo identifica OC so por numero para alterar estado: ativar e
- *    inativar sao por ID, atomicos (CAS no WHERE status).
- *  - Falha do banco vira OrdemColetaGestaoException (mensagem fixa, sem a
- *    excecao original: ela pode conter host, usuario, SQL e valores).
- *  - rowCount() e "linhas ALTERADAS": a conexao do banco externo
- *    (Util\ConexaoGestaoColetas) NAO usa MYSQL_ATTR_FOUND_ROWS. Mesmo se usasse,
- *    o CAS por status garante que linha casada = linha alterada.
- *
- * Os $pdo sao injetaveis para os testes; em producao a conexao e obtida so
- * no uso (nunca no construtor), como os demais DAOs do banco externo.
- */
 class OrdemColetaGestaoDao
 {
     public const POR_PAGINA = 25;
     public const TETO_CONTAGEM = 10000;
-    /** TETO_CONTAGEM / POR_PAGINA: alem disso o OFFSET nao compensa (filtre mais). */
     public const MAX_PAGINA = 400;
     public const DIAS_ATIVAS_ANTIGAS = 15;
     public const NUMERO_PREFIXO_MIN = 3;
@@ -54,14 +26,12 @@ class OrdemColetaGestaoDao
     public const R_INEXISTENTE = 'inexistente';
     public const R_ESTADO_MUDOU = 'estado_mudou';
 
-    /** aba => condicao fixa (constante, nunca vinda de entrada). */
     private const ABA_SQL = [
         'ativas' => "oc.status = 'ATIVA'",
         'ativas_15d' => "oc.status = 'ATIVA' AND oc.criado_em < DATE_SUB(NOW(), INTERVAL 15 DAY)",
         'inativas' => "oc.status = 'INATIVA'",
     ];
 
-    /** chave publica de ordenacao => coluna (whitelist; so estas strings entram no ORDER BY). */
     private const ORDEM_SQL = [
         'criado_em' => 'oc.criado_em',
         'inativada_em' => 'oc.inativada_em',
@@ -101,20 +71,7 @@ class OrdemColetaGestaoDao
     {
     }
 
-    // ------------------------------------------------------------------
-    // Filtros
-    // ------------------------------------------------------------------
 
-    /**
-     * Normaliza e valida os filtros (whitelist de chaves; chave desconhecida e
-     * ignorada). Devolve ['validos' => [...], 'invalidos' => [chaves]]. Um
-     * valor presente e invalido (array, charset, tamanho, data) vai para
-     * 'invalidos' e a consulta devolve VAZIO; ordem/dir invalidos caem no
-     * padrao da aba (nao alargam nada).
-     *
-     * @param array<string,mixed> $filtros
-     * @return array{validos: array<string,mixed>, invalidos: list<string>}
-     */
     public static function normalizarFiltros(array $filtros, string $aba): array
     {
         if (!in_array($aba, self::ABAS, true)) {
@@ -127,7 +84,6 @@ class OrdemColetaGestaoDao
         ];
         $invalidos = [];
 
-        // cliente_id: inteiro positivo
         $v = $filtros['cliente_id'] ?? null;
         if ($v !== null && $v !== '') {
             if (is_int($v) && $v >= 1) {
@@ -139,7 +95,6 @@ class OrdemColetaGestaoDao
             }
         }
 
-        // numero: charset fechado, ate 50; >= 3 caracteres = prefixo, senao exato
         $v = $filtros['numero'] ?? null;
         if ($v !== null && $v !== '') {
             $texto = is_string($v) ? trim($v) : null;
@@ -168,7 +123,6 @@ class OrdemColetaGestaoDao
             }
         }
 
-        // ordenacao: whitelist; qualquer outra coisa = padrao da aba
         $padrao = $aba === 'inativas' ? 'inativada_em' : 'criado_em';
         $ordem = $filtros['ordem'] ?? null;
         if (!is_string($ordem) || !array_key_exists($ordem, self::ORDEM_SQL) || ($ordem === 'inativada_em' && $aba !== 'inativas')) {
@@ -188,19 +142,16 @@ class OrdemColetaGestaoDao
         return ['validos' => $validos, 'invalidos' => $invalidos];
     }
 
-    /** Escapa curingas do LIKE ('|' e o caractere de escape: vale com ou sem NO_BACKSLASH_ESCAPES). */
     public static function escaparLike(string $texto): string
     {
         return str_replace(['|', '%', '_', '\\'], ['||', '|%', '|_', '|\\'], $texto);
     }
 
-    /** Pagina efetiva: 1..MAX_PAGINA. */
     public static function paginaEfetiva(int $pagina): int
     {
         return max(1, min(self::MAX_PAGINA, $pagina));
     }
 
-    /** 'Y-m-d' real (sem rolagem de calendario) entre 1970 e 2100, ou null. */
     private static function dataValida(mixed $v): ?string
     {
         if (!is_string($v) || preg_match('/\A[0-9]{4}-[0-9]{2}-[0-9]{2}\z/D', $v) !== 1) {
@@ -215,13 +166,6 @@ class OrdemColetaGestaoDao
         return ($ano >= 1970 && $ano <= 2100) ? $v : null;
     }
 
-    /**
-     * WHERE + binds. Devolve null se algum filtro e invalido (resultado vazio,
-     * sem tocar no banco).
-     *
-     * @param array<string,mixed> $filtros
-     * @return array{where:string, binds:array<string,array{0:mixed,1:int}>, ordem:string, dir:string}|null
-     */
     private function montarWhere(array $filtros, string $aba): ?array
     {
         $n = self::normalizarFiltros($filtros, $aba);
@@ -239,7 +183,6 @@ class OrdemColetaGestaoDao
         }
         if ($f['numero'] !== null) {
             if (strlen($f['numero']) >= self::NUMERO_PREFIXO_MIN) {
-                // prefixo ("x%"), nunca "%x%"
                 $cond[] = "oc.numero_ordem_coleta LIKE :numero ESCAPE '|'";
                 $binds['numero'] = [self::escaparLike($f['numero']) . '%', PDO::PARAM_STR];
             } else {
@@ -272,17 +215,7 @@ class OrdemColetaGestaoDao
         return (new DateTimeImmutable($data))->modify('+1 day')->format('Y-m-d');
     }
 
-    // ------------------------------------------------------------------
-    // Leitura
-    // ------------------------------------------------------------------
 
-    /**
-     * Uma pagina (25 linhas) de ordens da aba, ja filtradas e ordenadas.
-     * Colunas SEM mascara (decisao do usuario).
-     *
-     * @param array<string,mixed> $filtros
-     * @return list<array<string,mixed>>
-     */
     public function listar(array $filtros, string $aba, int $pagina): array
     {
         $m = $this->montarWhere($filtros, $aba);
@@ -291,7 +224,6 @@ class OrdemColetaGestaoDao
         }
         $pagina = self::paginaEfetiva($pagina);
 
-        // coluna e direcao vem de constantes (whitelist), nunca da entrada
         $ordenarPor = self::ORDEM_SQL[$m['ordem']] . ' ' . ($m['dir'] === 'ASC' ? 'ASC' : 'DESC') . ', oc.id DESC';
 
         $sql = 'SELECT ' . self::SELECT_COLUNAS . self::FROM_SQL
@@ -308,13 +240,6 @@ class OrdemColetaGestaoDao
         return array_map([self::class, 'tipar'], $linhas);
     }
 
-    /**
-     * Total da aba com TETO (nunca COUNT(*) irrestrito): conta no maximo
-     * TETO_CONTAGEM + 1 linhas.
-     *
-     * @param array<string,mixed> $filtros
-     * @return array{total:int, truncado:bool, rotulo:string}
-     */
     public function contar(array $filtros, string $aba): array
     {
         $m = $this->montarWhere($filtros, $aba);
@@ -337,12 +262,6 @@ class OrdemColetaGestaoDao
         return ['total' => $n, 'truncado' => false, 'rotulo' => number_format($n, 0, ',', '.')];
     }
 
-    /**
-     * Contagem das 3 abas (3 consultas no maximo), com os mesmos filtros.
-     *
-     * @param array<string,mixed> $filtros
-     * @return array<string,array{total:int, truncado:bool, rotulo:string}>
-     */
     public function contagensPorAba(array $filtros): array
     {
         $saida = [];
@@ -353,7 +272,6 @@ class OrdemColetaGestaoDao
         return $saida;
     }
 
-    /** @return array<string,mixed>|null */
     public function buscarPorId(int $id): ?array
     {
         if ($id < 1) {
@@ -370,10 +288,8 @@ class OrdemColetaGestaoDao
 
     public const MAX_CLIENTES_SELECT = 2000;
 
-    /** Maximo de pares cliente+numero por consulta em lote (= linhas por pagina). */
     public const MAX_PARES_LOTE = self::POR_PAGINA;
 
-    /** @return list<array{id:int, razao_social:string, cnpj:string}> */
     public function listarClientes(): array
     {
         $linhas = $this->executar(
@@ -388,11 +304,6 @@ class OrdemColetaGestaoDao
         ], $linhas);
     }
 
-    /**
-     * Um cliente por id (consulta direta, sem depender do limite do select), ou null.
-     *
-     * @return array{id:int, razao_social:string, cnpj:string}|null
-     */
     public function clientePorId(int $id): ?array
     {
         if ($id < 1) {
@@ -407,14 +318,6 @@ class OrdemColetaGestaoDao
         return $l ? ['id' => (int) $l['id'], 'razao_social' => (string) $l['razao_social'], 'cnpj' => (string) $l['cnpj']] : null;
     }
 
-    /**
-     * Ids das ordens de VARIOS pares (cliente CNPJ, numero) em UMA consulta (UNION ALL
-     * de subconsultas, no maximo 2 ids por par). A chave do resultado e o indice do
-     * par recebido. Par com CNPJ ou numero vazios => lista vazia (sem consulta).
-     *
-     * @param list<array{0:string,1:string}> $pares
-     * @return array<int,list<int>>
-     */
     public function idsPorClienteNumeroLote(array $pares): array
     {
         $pares = array_slice(array_values($pares), 0, self::MAX_PARES_LOTE);
@@ -450,13 +353,6 @@ class OrdemColetaGestaoDao
         return $saida;
     }
 
-    /**
-     * Estados das ordens de um CLIENTE (CNPJ) + numero, no maximo 2 linhas
-     * (basta para detectar 0 / 1 / ambiguo). Usado na resolucao manual das
-     * baixas pendentes.
-     *
-     * @return list<string> 'ATIVA'|'INATIVA'
-     */
     public function statusPorClienteNumero(string $cnpj, string $numero): array
     {
         $cnpj = OrdemColetaDao::normalizarCnpj($cnpj);
@@ -475,13 +371,6 @@ class OrdemColetaGestaoDao
         return array_map('strval', $linhas);
     }
 
-    /**
-     * Ids das ordens de um CLIENTE (CNPJ) + numero, no maximo 2 (0 = nao
-     * localizada, 1 = unica, 2 = ambigua). Usado so para montar o link "Abrir
-     * ordem" das baixas pendentes.
-     *
-     * @return list<int>
-     */
     public function idsPorClienteNumero(string $cnpj, string $numero): array
     {
         $cnpj = OrdemColetaDao::normalizarCnpj($cnpj);
@@ -501,11 +390,6 @@ class OrdemColetaGestaoDao
         return array_map('intval', $linhas);
     }
 
-    /**
-     * Registro do PDF da OC (por cnpj do cliente + numero), sem tocar no disco.
-     *
-     * @return array{id:int, caminho_relativo:string, sha256:string, tamanho:int}|null
-     */
     public function arquivoDaOc(int $id): ?array
     {
         if ($id < 1) {
@@ -535,11 +419,7 @@ class OrdemColetaGestaoDao
         ];
     }
 
-    // ------------------------------------------------------------------
-    // Escrita atomica por ID
-    // ------------------------------------------------------------------
 
-    /** ATIVA -> INATIVA (inativada_em = agora). Ver alterarEstado(). */
     public function inativarPorId(int $id): string
     {
         return $this->alterarEstado(
@@ -549,7 +429,6 @@ class OrdemColetaGestaoDao
         );
     }
 
-    /** INATIVA -> ATIVA (inativada_em volta a NULL). Ver alterarEstado(). */
     public function ativarPorId(int $id): string
     {
         return $this->alterarEstado(
@@ -559,11 +438,6 @@ class OrdemColetaGestaoDao
         );
     }
 
-    /**
-     * rowCount() = 1 => efetivado. 0 => reler por id para distinguir
-     * ja_no_estado (alguem ja deixou a ordem no estado pedido), inexistente, ou
-     * estado_mudou (corrida: o estado mudou e voltou entre o UPDATE e a leitura).
-     */
     private function alterarEstado(int $id, string $estadoPedido, string $sqlUpdate): string
     {
         if ($id < 1) {
@@ -588,33 +462,17 @@ class OrdemColetaGestaoDao
         return (string) $status === $estadoPedido ? self::R_JA_NO_ESTADO : self::R_ESTADO_MUDOU;
     }
 
-    // ------------------------------------------------------------------
-    // Atendimentos do TOTEM (so contagem, sem dado pessoal)
-    // ------------------------------------------------------------------
 
-    /**
-     * Atendimentos de Expedicao EM ANDAMENTO apontando para a OC (cnpj do
-     * cliente + numero). tb_atendimento.cliente_cnpj (VARCHAR(20)) e gravado
-     * verbatim de tb_clientes.cnpj (so digitos) na Expedicao. CNPJ vazio => 0.
-     */
     public function atendimentosEmAndamentoDaOc(string $cnpj, string $numero): int
     {
         return $this->contarAtendimentos($cnpj, $numero, 'em_andamento');
     }
 
-    /** Atendimentos de Expedicao CONCLUIDOS da OC (OC "ja baixada" pelo check-in). */
     public function atendimentoConcluidoDaOc(string $cnpj, string $numero): int
     {
         return $this->contarAtendimentos($cnpj, $numero, 'concluido');
     }
 
-    /**
-     * Comparacao SEM funcao na coluna (pode usar indice): o CNPJ e normalizado aqui
-     * e comparado com os dois formatos conhecidos, so digitos (gravado na Expedicao,
-     * a partir de tb_clientes.cnpj) e mascarado 00.000.000/0000-00 (formato do
-     * cadastro local do Recebimento). Outras variacoes de mascara nao casam.
-     * A consulta comeca por tipo/status/ordem_coleta (idx_status).
-     */
     private function contarAtendimentos(string $cnpj, string $numero, string $status): int
     {
         $cnpj = OrdemColetaDao::normalizarCnpj($cnpj);
@@ -642,28 +500,12 @@ class OrdemColetaGestaoDao
         )->fetchColumn();
     }
 
-    // ------------------------------------------------------------------
-    // Infra
-    // ------------------------------------------------------------------
 
-    /**
-     * PENDENCIA REGISTRADA (revisao F4a): ConexaoGestaoColetas::obter() pode
-     * lancar \RuntimeException generica FORA de executar() (que so converte
-     * PDOException em OrdemColetaGestaoException). Por isso os chamadores
-     * (OrdemColetaBaixaRn e os controllers da gestao) capturam \Throwable, nao
-     * so OrdemColetaGestaoException. Comportamento mantido de proposito.
-     */
     private function pdoExterno(): PDO
     {
         return $this->pdo ?? ConexaoGestaoColetas::obter();
     }
 
-    /**
-     * prepare + bind tipado + execute. Qualquer PDOException vira a excecao
-     * generica (sem mensagem do driver, sem SQL, sem valores).
-     *
-     * @param array<string,array{0:mixed,1:int}> $binds
-     */
     private function executar(PDO $pdo, string $sql, array $binds = []): PDOStatement
     {
         try {
@@ -679,10 +521,6 @@ class OrdemColetaGestaoDao
         }
     }
 
-    /**
-     * @param array<string,mixed> $l
-     * @return array<string,mixed>
-     */
     private static function tipar(array $l): array
     {
         $l['id'] = (int) $l['id'];

@@ -7,14 +7,7 @@ use Util\Auth;
 use Util\Resposta;
 use App\Controller\ImpressaoTesteController;
 
-// Endpoint ISOLADO de diagnostico (demanda impressao-etiqueta-teste) — NUNCA
-// reaproveita atendimento.php/AtendimentoRn/TalentClient/OrdemColetaClient.
-// Mesmo padrao de autenticacao de toda rota publica: Util\Auth::validarTotem().
 
-// Bootstrap isolado: mesma protecao aplicada em public/api/nota.php --
-// Util\Bootstrap::conectar() cobre .env ausente/malformado, variavel
-// obrigatoria de banco ausente/invalida e falha de conexao (ver
-// util/Bootstrap.php e util/Conexao.php).
 try {
     $pdo = Bootstrap::conectar(__DIR__ . '/../../');
 } catch (\Throwable $e) {

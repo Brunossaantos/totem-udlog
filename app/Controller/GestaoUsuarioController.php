@@ -5,12 +5,6 @@ namespace App\Controller;
 use App\Rn\UsuarioGestaoRn;
 use Util\GestaoHttp;
 
-/**
- * Usuarios da Gestao Totem (SO admin; o guard esta em GestaoContexto):
- * listar, criar, editar nome/perfil, ativar/desativar e redefinir senha
- * (demanda gestao-totem, F1). Os metodos devolvem o resultado de pagina que
- * `gestaoRenderizar()` imprime, ou redirecionam (PRG com ?msg=codigo).
- */
 final class GestaoUsuarioController
 {
     private UsuarioGestaoRn $rn;
@@ -20,12 +14,6 @@ final class GestaoUsuarioController
         $this->rn = new UsuarioGestaoRn($ctx->pdo);
     }
 
-    /**
-     * usuarios.php: GET lista. POST acao=ativar|desativar|desbloquear|redefinir-senha + id_usuario
-     * (redefinir-senha exige tambem versao_senha: a `senha_versao` que a tela mostrou).
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function listar(): array
     {
         if ($this->ctx->auth->metodoSeguro()) {
@@ -68,12 +56,6 @@ final class GestaoUsuarioController
         return [];
     }
 
-    /**
-     * usuario-form.php: GET (?id= para editar) mostra o formulario. POST salva
-     * (cria se nao ha id_usuario, edita se ha).
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function formulario(): array
     {
         $idTexto = GestaoContexto::post('id_usuario') !== '' ? GestaoContexto::post('id_usuario') : GestaoContexto::query('id');
@@ -128,12 +110,6 @@ final class GestaoUsuarioController
         return [];
     }
 
-    /**
-     * Cada linha de `usuarios` traz `bloqueado_ate` (so se o bloqueio ainda vale,
-     * senao null), `eh_proprio` (bool: e o admin logado) e `senha_versao`.
-     *
-     * @param array{tipo:string,texto:string}|null $flashLocal
-     */
     private function pagina(int $status, ?array $flashLocal = null): array
     {
         $logado = $this->ctx->idUsuario();
@@ -154,10 +130,6 @@ final class GestaoUsuarioController
         ];
     }
 
-    /**
-     * @param array<string,string> $valores
-     * @param array<string,string> $erros
-     */
     private function formularioView(int $status, ?int $idAlvo, array $valores, array $erros): array
     {
         return [
@@ -175,12 +147,6 @@ final class GestaoUsuarioController
         ];
     }
 
-    /**
-     * Tela da senha temporaria: aparece SO nesta resposta (POST), nunca em URL,
-     * flash ou banco (so o hash).
-     *
-     * @param array<string,mixed> $usuario
-     */
     private function senhaTemporaria(string $contexto, array $usuario, string $senha): array
     {
         return [

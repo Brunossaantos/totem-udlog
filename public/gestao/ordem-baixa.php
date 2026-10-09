@@ -1,6 +1,5 @@
 <?php
 
-// Marcar como resolvida uma baixa pendente de ordem de coleta (POST + CSRF, PRG). Perfis usuario e admin.
 require_once __DIR__ . '/../../vendor/autoload.php';
 require_once __DIR__ . '/../../app/Views/gestao/_helpers.php';
 

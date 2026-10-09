@@ -24,10 +24,6 @@ use App\Rn\LgpdRn;
 use App\Rn\NotaFiscalRn;
 use App\Controller\AtendimentoController;
 
-// Bootstrap isolado: mesma protecao aplicada em public/api/nota.php --
-// Util\Bootstrap::conectar() cobre .env ausente/malformado, variavel
-// obrigatoria de banco ausente/invalida e falha de conexao (ver
-// util/Bootstrap.php e util/Conexao.php).
 try {
     $pdo = Bootstrap::conectar(__DIR__ . '/../../');
 } catch (\Throwable $e) {
@@ -35,9 +31,6 @@ try {
 }
 $totem = Auth::validarTotem($pdo);
 
-// App\Dao\OrdemColetaDao so conecta ao banco externo de gestao de coletas
-// (Util\ConexaoGestaoColetas — nunca reaproveita $pdo, que e do banco do
-// totem) no momento real da consulta, nao aqui na instanciacao.
 $ordemColetaClient = new OrdemColetaClient(new OrdemColetaDao());
 $atendimentoRn = new AtendimentoRn(new AtendimentoDao($pdo), $ordemColetaClient);
 
@@ -46,20 +39,11 @@ $talentRn = new TalentRn(
     $talentClient,
     new AtendimentoDao($pdo),
     $_ENV['STORAGE_PATH'],
-    // anexo da Ordem de Coleta (anexo-ordem-coleta-n8n): conexao preguicosa,
-    // so abre o banco externo ao montar o payload de uma Expedicao.
     AnexoOrdemColetaLeitor::padrao()
 );
 
-// DocumentoRn usado so para revalidar CNH/CRLV ja gravados no momento da
-// transicao de etapa (avancar-etapa-expedicao) — nao instancia VioDecodeClient
-// aqui (essa dependencia so e necessaria em documento.php?acao=validar-qr).
 $documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo));
 
-// App\Rn\LgpdRn + $pdo (demanda tela-inicial-lgpd-totem, 2026-09-24):
-// exigidos por AtendimentoController::iniciar() para validar/consumir o
-// token de aceite LGPD dentro da mesma transacao que cria o atendimento
-// (ver comentario de decisao arquitetural no proprio Controller).
 $lgpdRn = new LgpdRn(new AceiteLgpdDao($pdo));
 
 $controller = new AtendimentoController(
@@ -73,9 +57,6 @@ $controller = new AtendimentoController(
     new OrdemColetaPendenteBaixaDao($pdo),
     $lgpdRn,
     $pdo,
-    // hardening-revisao-notas-e-cliente (2026-09-30): estado derivado do
-    // cliente das notas e validacao do cliente manual contra tb_cliente
-    // ativa; o storage das fotos usa o padrao (STORAGE_PATH).
     new NotaFiscalRn(new AtendimentoNotaDao($pdo), new ClienteDao($pdo)),
     new ClienteDao($pdo)
 );
@@ -103,8 +84,6 @@ switch ($acao) {
         $controller->concluirDigitalizacao($entrada, (int) $totem['id_totem']);
         break;
     case 'avancar-etapa-expedicao':
-        // Alias de compatibilidade — hoje delega para avancarEtapaDocumentos(),
-        // ja generalizado para expedicao E recebimento.
         $controller->avancarEtapaExpedicao($entrada, (int) $totem['id_totem']);
         break;
     case 'avancar-etapa-documentos':

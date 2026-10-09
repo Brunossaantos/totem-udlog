@@ -4,12 +4,6 @@ namespace App\Dao;
 
 use PDO;
 
-/**
- * Sessoes da Gestao Totem em TABELA (tb_gestao_sessao, migration 020).
- * `id_sessao` e o sha256 do token do cookie: o token em si nunca e gravado.
- * Todas as comparacoes de tempo usam a hora do BANCO (NOW()), sem depender do
- * fuso do PHP.
- */
 class SessaoGestaoDao
 {
     public function __construct(private PDO $pdo)
@@ -30,14 +24,6 @@ class SessaoGestaoDao
         $stmt->execute();
     }
 
-    /**
-     * Busca a sessao + usuario (ativo e perfil lidos do BANCO a cada chamada).
-     * Devolve null se nao existe, expirou (teto absoluto) ou passou da
-     * inatividade. A decisao sobre `ativo` e `ua_hash` fica com o chamador, que
-     * revoga a sessao quando preciso.
-     *
-     * @return array<string,mixed>|null
-     */
     public function buscarValida(string $idSessao, int $idleMin): ?array
     {
         $stmt = $this->pdo->prepare(
@@ -56,7 +42,6 @@ class SessaoGestaoDao
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    /** Atualiza ultimo_acesso_em no maximo 1x por minuto (condicao no proprio UPDATE). */
     public function tocar(string $idSessao): void
     {
         $stmt = $this->pdo->prepare(
@@ -72,7 +57,6 @@ class SessaoGestaoDao
         $stmt->execute(['id' => $idSessao]);
     }
 
-    /** Revoga as sessoes do usuario (todas, ou todas menos uma). @return int quantas */
     public function revogarDoUsuario(int $idUsuario, ?string $exceto = null): int
     {
         if ($exceto === null) {
@@ -86,7 +70,6 @@ class SessaoGestaoDao
         return $stmt->rowCount();
     }
 
-    /** Limpeza em lote pequeno (chamada oportunista no login). */
     public function apagarExpiradas(int $limite = 200): int
     {
         $stmt = $this->pdo->prepare('DELETE FROM tb_gestao_sessao WHERE expira_em <= NOW() LIMIT ' . max(1, $limite));

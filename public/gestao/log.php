@@ -1,6 +1,5 @@
 <?php
 
-// Detalhe de um registro de log (?id=). So admin, so GET.
 require_once __DIR__ . '/../../vendor/autoload.php';
 require_once __DIR__ . '/../../app/Views/gestao/_helpers.php';
 

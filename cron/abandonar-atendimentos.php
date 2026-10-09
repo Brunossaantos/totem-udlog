@@ -1,40 +1,4 @@
 <?php
-// Rodar via cron do cPanel, SOMENTE via PHP CLI, UMA VEZ POR DIA:
-//   php /caminho/absoluto/cron/abandonar-atendimentos.php
-//
-// Rodada corretiva da demanda hardening-revisao-notas-e-cliente (2026-10-01):
-// politica de ABANDONO/RETENCAO de fotos de notas.
-//
-//  - Atendimento em_andamento SEM ATIVIDADE ha mais de 24 horas e abandonado:
-//    vai ao estado terminal ja existente 'cancelado' (mesmo estado do cancelar
-//    e da inatividade do front) e as fotos das notas vao para a quarentena
-//    (nota_NN.jpg.<id_nota>.del). Depois ficam mais 24 horas e o cron
-//    cron/limpar-notas-quarentena.php as apaga de vez (o mtime do .del e
-//    renovado no momento da quarentena).
-//  - "Sem atividade" (colunas existentes, nao ha coluna dedicada): o MAIOR
-//    entre tb_atendimento.atualizado_em e, entre as notas, criado_em e
-//    processado_em. Nunca candidato: atendimento ativo/recente, concluido,
-//    cancelado, bloqueado, ou com envio ao Talent em curso/aceito
-//    (talent_checkin_status ENVIANDO/ENVIADO/ENVIO_INDETERMINADO).
-//  - Cada atendimento: BEGIN, lock da linha, REVALIDACAO sob lock, rename das
-//    fotos, UPDATE (CAS em_andamento -> cancelado), COMMIT; falha antes do
-//    COMMIT devolve as fotos e faz ROLLBACK (continua em_andamento; a proxima
-//    execucao tenta de novo). Ver App\Rn\AbandonoAtendimentoRn.
-//  - LIMITE de 500 atendimentos por execucao (o restante fica para a proxima).
-//
-// Este script PRECISA de banco (diferente de limpar-notas-quarentena.php, que
-// nao usa): conexao por Util\Bootstrap (so PDO com prepared statements). Sem
-// STORAGE_PATH valido nada e alterado (fail-closed). Mesmo padrao dos demais
-// crons: rejeita execucao fora de PHP CLI (nao existe rota em public/api/
-// para este script) e o log final e SEMPRE agregado (contagens), sem placa,
-// pasta, caminho, nome de arquivo ou dado de nota.
-//
-// Ordem sugerida no cPanel: este script primeiro e limpar-notas-quarentena.php
-// depois (qualquer ordem e segura: os .del novos sempre esperam 24 horas).
-//
-// Codigo de saida: 0 = sucesso (mesmo sem candidatos, ou com limite atingido);
-// 1 = falha (.env/banco/STORAGE_PATH indisponivel, atendimento que falhou ao
-// abandonar, ou foto sem caminho valido).
 
 require_once __DIR__ . '/../vendor/autoload.php';
 

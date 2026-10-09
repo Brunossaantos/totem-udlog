@@ -1,31 +1,5 @@
 'use strict';
 
-/**
- * Deteccao de falta de papel pela permanencia do job na fila do spooler.
- *
- * Medicao empirica (EPSON TM-T88VII Receipt, porta TMUSB001, driver
- * Receipt6): com papel o job aparece na fila e SAI em <1 s; sem papel fica
- * "Printing, Retained" com 0 paginas por 36+ s. Os campos de estado da
- * impressora nao distinguem os dois casos nesse driver.
- *
- * Mini PC de producao (EPSON TM-T88V, driver "EPSON TM-T88V Receipt5",
- * porta ESDPRT001): o Windows registra o DocumentName com o CAMINHO COMPLETO
- * (ex.: C:\Users\...\Temp\impressao-local-udlog-<uuid>.pdf), enquanto no
- * Receipt6 vem so o nome do arquivo. Por isso a comparacao e feita pelo NOME
- * BASE (ultimo segmento apos \ ou /), com igualdade exata contra o nome do
- * arquivo temporario (UUID gerado internamente) -- sem includes/endsWith.
- * Sem papel o job fica "Normal" na fila (>24 s) e a impressora reporta
- * PrinterState=144 (PAPER_OUT 0x10 | OFFLINE 0x80); com papel o job sai em
- * ~3 s. O PrinterState NAO e usado como sinal nesta versao: a deteccao e so
- * pela permanencia do job na fila.
- *
- * Seguranca: os comandos PowerShell abaixo sao CONSTANTES. Nome da
- * impressora (allowlist/config), nome do documento (arquivo temporario com
- * UUID gerado internamente) e Id do job (inteiro validado) viajam apenas
- * por variaveis de ambiente do processo filho -- nunca concatenados em
- * string de comando. execFile sem shell.
- */
-
 const { execFile } = require('child_process');
 
 const SCRIPT_LISTAR = [
@@ -34,8 +8,6 @@ const SCRIPT_LISTAR = [
   'ConvertTo-Json -Compress -InputObject $j',
 ].join(' ');
 
-// Remove SOMENTE o job de Id informado, e so se o NOME BASE do documento
-// (GetFileName aceita \ e /) for exatamente o arquivo temporario deste servico.
 const SCRIPT_REMOVER = [
   "$ErrorActionPreference='Stop';",
   '$id=[int]$env:UDLOG_JOB_ID;',
@@ -50,7 +22,6 @@ const INTERVALO_PADRAO_MS = 500;
 const JANELA_VISAO_PADRAO_MS = 3000;
 const CONFIRMACAO_TENTATIVAS = 3;
 
-/** Ultimo segmento do caminho (separadores \ e /). Sem separador, devolve o proprio texto. */
 function nomeBase(documentName) {
   const partes = String(documentName).split(/[\\/]/);
   return partes[partes.length - 1];
@@ -94,7 +65,6 @@ function parsearJson(texto) {
   }
 }
 
-/** Lista e valida os jobs da fila. Lanca Error se a saida for invalida. */
 async function listarJobs(execFileImpl, impressora) {
   const saida = parsearJson(await executarPowerShell(execFileImpl, SCRIPT_LISTAR, {
     UDLOG_PRINTER_NAME: impressora,
@@ -121,19 +91,6 @@ async function removerJob(execFileImpl, impressora, jobId, nomeDocumento) {
   return !!saida && saida.removido === true;
 }
 
-/**
- * Monitora a fila apos o Sumatra sair com codigo 0.
- *
- * @param {object} p
- * @param {string} p.impressora nome da impressora (allowlist)
- * @param {string} p.nomeDocumento nome exato do arquivo temporario gerado internamente
- * @param {number} p.limiteMs tempo maximo com o job retido antes de considerar sem papel
- * @param {Function} [p.execFileImpl] injetavel para teste
- * @param {Function} [p.dormir] injetavel para teste
- * @param {Function} [p.agora] injetavel para teste
- * @param {Function} [p.log]
- * @returns {Promise<{resultado: 'impresso'|'sem_papel', jobRemovido?: boolean, motivo?: string}>}
- */
 async function verificarFila(p) {
   const {
     impressora,

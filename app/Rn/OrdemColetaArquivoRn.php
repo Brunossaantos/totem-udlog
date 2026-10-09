@@ -6,29 +6,14 @@ use App\Dao\CaminhoJaRegistradoException;
 use App\Dao\OrdemColetaArquivoDao;
 use Util\OrdemColetaArquivoStorage;
 
-/**
- * Regra de negocio do anexo (PDF) da Ordem de Coleta enviado pelo n8n
- * (demanda anexo-ordem-coleta-n8n, 2026-10-05). Escopo: Expedicao.
- *
- * O servidor valida SO o minimo (a validacao pesada do PDF e do n8n):
- * campos, base64 estrito, tamanho decodificado <= limite e assinatura %PDF-.
- *
- * Retorno de receber(): array com 'http', e
- *  - sucesso (200/201): 'dados' => {status, tamanho_bytes, sha256};
- *  - erro: 'codigo' (estavel) e 'mensagem' (fixa), opcional 'dados'.
- * Nunca ecoa entrada, caminho ou mensagem de excecao; logs so com codigos
- * fixos e get_class.
- */
 class OrdemColetaArquivoRn
 {
     public const LIMITE_PADRAO_BYTES = 5242880;
 
-    /** Lote fixo da retencao. */
     public const LOTE_RETENCAO = 200;
 
     public const DIAS_RETENCAO = 15;
 
-    /** Voltas de gravacao+registro quando o NOME colide com outra linha. */
     private const MAX_TENTATIVAS_NOME = 3;
 
     public function __construct(
@@ -46,13 +31,11 @@ class OrdemColetaArquivoRn
         return self::LIMITE_PADRAO_BYTES;
     }
 
-    /** Teto do corpo HTTP bruto (JSON + base64): 1,5 x o limite do arquivo. */
     public static function tetoCorpo(int $limiteBytes): int
     {
         return intdiv($limiteBytes * 3, 2);
     }
 
-    /** @return array{http:int, codigo?:string, mensagem?:string, dados?:array} */
     public function receber(mixed $entrada): array
     {
         if (!is_array($entrada)) {
@@ -78,7 +61,6 @@ class OrdemColetaArquivoRn
         if ($tamanhoBase64 % 4 !== 0) {
             return self::erro(400, 'CAMPO_INVALIDO', 'Campo invalido ou ausente.', ['campo' => 'arquivo_base64']);
         }
-        // limite barato ANTES de decodificar (nao aloca o binario de um corpo enorme)
         if (intdiv($tamanhoBase64, 4) * 3 > $this->limiteBytes + 3) {
             return self::erro(413, 'ARQUIVO_MUITO_GRANDE', 'Arquivo acima do limite permitido.');
         }
@@ -98,8 +80,6 @@ class OrdemColetaArquivoRn
 
         $sha256 = hash('sha256', $bytes);
 
-        // Duplicado idempotente: mesmo conteudo ja registrado E arquivo ainda
-        // presente com o mesmo tamanho (se o arquivo sumiu, regrava abaixo).
         try {
             $atual = $this->dao->buscarPorChave($cnpj, $numero);
         } catch (\Throwable $e) {
@@ -112,14 +92,11 @@ class OrdemColetaArquivoRn
             return ['http' => 200, 'dados' => ['status' => 'duplicado', 'tamanho_bytes' => $tamanho, 'sha256' => $sha256]];
         }
 
-        // 1) publica o arquivo novo (nome exclusivo)  2) transacao  3) COMMIT
-        // 4) apaga o antigo. 1062 em uk caminho_relativo = colisao de NOME com
-        // outra linha: gera outro nome (o arquivo existente NUNCA e apagado).
         $reservado = function (string $relativo): bool {
             try {
                 return $this->dao->caminhoRegistrado($relativo);
             } catch (\Throwable $e) {
-                return false; // a publicacao exclusiva e a garantia real
+                return false;
             }
         };
         $resultado = null;
@@ -137,13 +114,9 @@ class OrdemColetaArquivoRn
                 $resultado = $this->dao->substituir($cnpj, $numero, $novo, $tamanho, $sha256);
                 break;
             } catch (CaminhoJaRegistradoException $e) {
-                // o caminho pertence a OUTRA linha: nao apagar; novo nome na proxima volta
                 error_log('OrdemColetaArquivoRn: caminho_ja_registrado');
                 $novo = null;
             } catch (\Throwable $e) {
-                // a transacao falhou: o registro antigo (e o arquivo antigo) ficam
-                // intactos; o arquivo novo (criado por esta chamada) sai SO se
-                // nenhuma linha o referencia.
                 $this->descartarArquivoNovo($novo);
 
                 return $this->falhaBanco($e, 'gravacao_registro');
@@ -174,14 +147,6 @@ class OrdemColetaArquivoRn
         ];
     }
 
-    /**
-     * Retencao diaria (cron). Para cada linha elegivel: valida o caminho
-     * (regex/realpath/sem symlink) -> unlink (ausente = ok) -> DELETE da linha.
-     * Falha de unlink ou caminho invalido MANTEM a linha (contada em
-     * 'falhas'). Devolve so contagens.
-     *
-     * @return array{elegiveis:int, apagados:int, ausentes:int, falhas:int}
-     */
     public function limparExpirados(int $lote = self::LOTE_RETENCAO, int $dias = self::DIAS_RETENCAO): array
     {
         $contagem = ['elegiveis' => 0, 'apagados' => 0, 'ausentes' => 0, 'falhas' => 0];
@@ -207,7 +172,6 @@ class OrdemColetaArquivoRn
         return $contagem;
     }
 
-    /** Numero da OC: string UTF-8 valida, 1-50 caracteres apos trim, sem controles/NUL. */
     public static function normalizarNumero(mixed $numero): ?string
     {
         if (!is_string($numero) || str_contains($numero, "\0")) {
@@ -227,7 +191,6 @@ class OrdemColetaArquivoRn
         return $numero;
     }
 
-    /** Base64 estrito (alfabeto padrao, padding correto, sem espacos nem prefixo data:). */
     public static function decodificarBase64Estrito(string $base64): ?string
     {
         $tamanho = strlen($base64);
@@ -246,7 +209,6 @@ class OrdemColetaArquivoRn
         return $bytes === false ? null : $bytes;
     }
 
-    /** Remove o arquivo novo SO se nenhuma linha o referencia (em duvida, mantem). */
     private function descartarArquivoNovo(string $novo): void
     {
         try {

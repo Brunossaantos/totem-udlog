@@ -11,24 +11,6 @@ use Util\CnpjValidador;
 use Util\NomeCadastro;
 use Util\TotemCodigo;
 
-/**
- * Cadastro de EMPRESAS (tb_empresa, banco do TOTEM; ex.: Maua I e II) da Gestao Totem
- * (F6). So admin. Cada totem pertence a uma empresa; o `cnpjArmazem` do Talent e a URL
- * do quiosque vem dela. Regras (decisoes do usuario):
- *  - o nome precisa gerar um slug valido (TotemCodigo::empresa: 1 a 16 caracteres
- *    [A-Z0-9]); senao o totem nao poderia ser criado nem ter a URL regerada;
- *  - CNPJ IMUTAVEL depois de criado; empresas aceitam o CNPJ da UDLOG (caso normal);
- *  - renomear e permitido: as URLs dos totens ja criados mantem o nome antigo ate serem
- *    regeradas (aviso permanente na tela);
- *  - inativar: o Talent so enxerga empresa ATIVA, entao os totens ATIVOS dela deixam de
- *    concluir o check-in; com N>0 exige confirmacao em dois passos. Ativar nao pede;
- *  - excluir: FISICA, SO se NAO houver nenhum totem vinculado (ativo ou nao), sempre com
- *    confirmacao em dois passos. Nunca mexe em totens.
- *
- * Corrida com a criacao de totem: as mutacoes tomam o MESMO lock nomeado de
- * TotemGestaoDao (a criacao de totem o toma), travam a linha da empresa FOR UPDATE e
- * RECONTAM os totens dentro da transacao.
- */
 class EmpresaGestaoRn extends CadastroGestaoBase
 {
     public const NOME_MIN = 2;
@@ -68,15 +50,11 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         $this->totens->liberarLock();
     }
 
-    // ------------------------------------------------------------------ leitura
-
-    /** Cada linha traz totens_ativos e totens_total. @return list<array<string,mixed>> */
     public function listar(): array
     {
         return $this->empresas->listar();
     }
 
-    /** @return array<string,mixed>|null com `totens_ativos` e `totens_total` */
     public function obter(int $idEmpresa): ?array
     {
         $e = $this->empresas->buscarPorId($idEmpresa);
@@ -90,9 +68,6 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         return $e;
     }
 
-    // ------------------------------------------------------------------ validacao
-
-    /** @return array{0:?string,1:?string} [nome, erro] */
     private function validarNome(string $bruto): array
     {
         $nome = NomeCadastro::normalizar($bruto, self::NOME_MIN, self::NOME_MAX);
@@ -107,11 +82,6 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         return [$nome, null];
     }
 
-    /**
-     * Outra empresa (qualquer situacao) com o MESMO slug (TotemCodigo::empresa)? "Maua I" e
-     * "MAUA-I" geram MAUAI e dariam URLs de totem indistinguiveis. Chamar sob o lock e dentro
-     * da transacao. `$exceto` = id da propria empresa (renomear mantendo o slug e permitido).
-     */
     private function slugEmUsoPorOutra(string $nome, ?int $exceto): bool
     {
         $slug = TotemCodigo::empresa($nome);
@@ -124,9 +94,6 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         return false;
     }
 
-    // ------------------------------------------------------------------ criar
-
-    /** @return array{ok:bool,codigo?:string,erros?:array<string,string>,id?:int} */
     public function criar(int $idAdmin, string $nomeBruto, string $cnpjBruto, ?string $ip = null): array
     {
         $erros = [];
@@ -148,7 +115,6 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         return $this->comLock(fn (): array => $this->criarSobLock($idAdmin, (string) $nome, (string) $cnpj, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function criarSobLock(int $idAdmin, string $nome, string $cnpj, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -190,7 +156,6 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         return ['ok' => true, 'id' => $idNovo];
     }
 
-    /** @return array<string,mixed> */
     private function recusaCriarDuplicado(int $idAdmin, ?string $ip): array
     {
         $this->desfazer();
@@ -199,13 +164,6 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         return ['ok' => false, 'codigo' => 'validacao', 'erros' => ['cnpj' => 'Já existe uma empresa cadastrada com este CNPJ. Nada foi criado.']];
     }
 
-    // ------------------------------------------------------------------ editar
-
-    /**
-     * Edita SO o nome. O CNPJ e a situacao nao mudam aqui.
-     *
-     * @return array{ok:bool,codigo?:string,erros?:array<string,string>,sem_mudanca?:bool}
-     */
     public function editar(int $idAdmin, int $idEmpresa, string $nomeBruto, ?string $ip = null): array
     {
         [$nome, $erroNome] = $this->validarNome($nomeBruto);
@@ -216,7 +174,6 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         return $this->comLock(fn (): array => $this->editarSobLock($idAdmin, $idEmpresa, (string) $nome, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function editarSobLock(int $idAdmin, int $idEmpresa, string $nome, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -259,20 +216,11 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         return ['ok' => true];
     }
 
-    // ------------------------------------------------------------------ ativar / inativar
-
-    /**
-     * Inativar com totens ATIVOS vinculados exige `$confirmou` (devolve
-     * `confirmacao_necessaria` com `totens_ativos`, e NADA muda). Ativar nunca pede.
-     *
-     * @return array{ok:bool,codigo?:string,sem_mudanca?:bool,totens_ativos?:int}
-     */
     public function definirAtivo(int $idAdmin, int $idEmpresa, bool $ativo, bool $confirmou, ?string $ip = null): array
     {
         return $this->comLock(fn (): array => $this->definirAtivoSobLock($idAdmin, $idEmpresa, $ativo, $confirmou, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function definirAtivoSobLock(int $idAdmin, int $idEmpresa, bool $ativo, bool $confirmou, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -322,21 +270,11 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         return ['ok' => true];
     }
 
-    // ------------------------------------------------------------------ excluir
-
-    /**
-     * Exclusao FISICA, so sem NENHUM totem vinculado (ativo ou nao), sempre com
-     * confirmacao. Com totem: `empresa_com_totens` (nada muda). Ja excluida:
-     * `empresa_nao_encontrada` (idempotente).
-     *
-     * @return array{ok:bool,codigo?:string}
-     */
     public function excluir(int $idAdmin, int $idEmpresa, bool $confirmou, ?string $ip = null): array
     {
         return $this->comLock(fn (): array => $this->excluirSobLock($idAdmin, $idEmpresa, $confirmou, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function excluirSobLock(int $idAdmin, int $idEmpresa, bool $confirmou, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -371,7 +309,6 @@ class EmpresaGestaoRn extends CadastroGestaoBase
         } catch (PDOException $e) {
             $this->desfazer();
             if ($this->ehFkFilhoExistente($e)) {
-                // a FK de tb_totem barrou: apareceu um totem por fora do lock (ex.: INSERT direto)
                 $this->auditarRecusa('EMPRESA_EXCLUIR', $idAdmin, $idEmpresa, ['motivo_cad' => 'totens_vinculados'], $ip);
 
                 return ['ok' => false, 'codigo' => 'empresa_com_totens'];

@@ -1,19 +1,5 @@
 <?php
 
-/**
- * POST /api/ordem-coleta-anexo.php — recebe o PDF da Ordem de Coleta enviado
- * pelo n8n (demanda anexo-ordem-coleta-n8n, 2026-10-05). Escopo: Expedicao.
- *
- * NAO usa o token do totem (Util\Auth::validarTotem): a autenticacao e
- * servidor-a-servidor (Util\AuthServidor, chave em ORDEM_COLETA_ANEXO_API_KEY)
- * e a rota nao precisa do banco do totem — so do banco externo de gestao de
- * coletas (tb_ordem_coleta_arquivos), aberto de forma preguicosa.
- *
- * Variaveis do .env: ORDEM_COLETA_ANEXO_API_KEY (obrigatoria; ausente = 503),
- * ORDEM_COLETA_ANEXO_MAX_BYTES (opcional, padrao 5242880),
- * ORDEM_COLETA_ANEXO_PERMITIR_HTTP (opcional; "true" so em dev local).
- */
-
 require_once __DIR__ . '/../../vendor/autoload.php';
 
 use Dotenv\Dotenv;
@@ -26,8 +12,6 @@ use App\Dao\OrdemColetaArquivoDao;
 use App\Rn\OrdemColetaArquivoRn;
 
 try {
-    // safeLoad: .env ausente nao e erro aqui (a chave pode vir do ambiente);
-    // chave ausente => 503 fail-closed no AuthServidor.
     Dotenv::createImmutable(__DIR__ . '/../../')->safeLoad();
 
     $chave = $_ENV['ORDEM_COLETA_ANEXO_API_KEY'] ?? getenv('ORDEM_COLETA_ANEXO_API_KEY');
@@ -40,7 +24,6 @@ try {
     $storagePath = rtrim((string) ($_ENV['STORAGE_PATH'] ?? getenv('STORAGE_PATH') ?: ''), '/\\');
     $dirRateLimit = $storagePath !== '' ? $storagePath . DIRECTORY_SEPARATOR . 'ordens_coleta_ratelimit' : null;
 
-    // Authorization: $_SERVER (Apache/FPM, incl. REDIRECT_) ou getallheaders()
     $authorization = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? null;
     if ($authorization === null && function_exists('getallheaders')) {
         foreach (getallheaders() as $nome => $valor) {

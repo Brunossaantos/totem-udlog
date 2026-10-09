@@ -8,16 +8,7 @@ use Util\Resposta;
 use App\Dao\AtendimentoDao;
 use App\Controller\ImpressaoAtendimentoController;
 
-// Endpoint de impressao REAL (demanda talent-doctos-finalizacao-checkin,
-// 2026-09-14) — separado e ISOLADO de impressao-teste.php/
-// ImpressaoTesteController. Mesmo padrao de autenticacao de toda rota
-// publica: Util\Auth::validarTotem(). SO LE resultado ja persistido do
-// check-in — NUNCA dispara/redispara chamada ao Talent.
 
-// Bootstrap isolado: mesma protecao aplicada em public/api/nota.php --
-// Util\Bootstrap::conectar() cobre .env ausente/malformado, variavel
-// obrigatoria de banco ausente/invalida e falha de conexao (ver
-// util/Bootstrap.php e util/Conexao.php).
 try {
     $pdo = Bootstrap::conectar(__DIR__ . '/../../');
 } catch (\Throwable $e) {

@@ -14,27 +14,6 @@ use Util\GestaoHttp;
 use Util\LogSistema;
 use Util\OrdemColetaArquivoStorage;
 
-/**
- * Ordens de coleta da Gestao Totem (demanda gestao-totem, F4b/F4c/F4d; perfis
- * `usuario` e `admin`, o guard esta em GestaoContexto). Sem mascara de dados
- * (decisao do usuario). Ativar/inativar SEMPRE por id da OC (nunca por numero).
- *
- * Regras de seguranca:
- *  - Todo filtro vem da query/POST e e validado por WHITELIST aqui (aba, cliente,
- *    numero, datas, ordenacao, pagina, `mostrar`), e o DAO valida de novo. Valor
- *    invalido e ignorado; nunca vira SQL nem URL. Links de aba/paginacao/ordenacao/
- *    "Voltar" e o `retorno` dos formularios sao montados SO dos filtros validados
- *    (o `retorno` recebido e reparseado e revalidado; nunca e usado como URL).
- *  - Escrita: auditoria PENDENTE aberta ANTES de qualquer UPDATE externo (falha ao
- *    abrir = 503 e nada e executado); fechamento OK/SEM_EFEITO/ERRO depois. O
- *    `detalhe` da auditoria so tem status e motivos da allowlist (sem numero,
- *    CNPJ, nome, placa).
- *  - PDF: o caminho do arquivo NUNCA e montado aqui (so por
- *    OrdemColetaArquivoStorage::ler), auditoria aberta antes de ler o arquivo,
- *    nenhum byte sai sem passar por ler() (tamanho, %PDF-, sha256).
- *  - Nenhuma mensagem de excecao, caminho, numero de OC ou CNPJ vai para log,
- *    auditoria, URL ou resposta de erro.
- */
 final class GestaoOrdemController
 {
     public const POR_PAGINA = OrdemColetaGestaoDao::POR_PAGINA;
@@ -47,17 +26,14 @@ final class GestaoOrdemController
 
     public const DIAS_RETENCAO_PDF = 15;
 
-    /** Valor de `tb_clientes.status` de cliente inativo (o totem nao mostra as ordens dele). */
     public const CLIENTE_INATIVO = 'INATIVO';
 
     public const AVISO_CLIENTE_INATIVO = 'Este cliente está inativo. O totem não vai mostrar esta ordem enquanto o cliente continuar inativo.';
 
-    /** Motivos fixos de integridade do PDF (valores de `motivo` no catalogo do LogSistema). */
     public const MOTIVOS_INTEGRIDADE_PDF = [
         'caminho_invalido', 'tamanho_invalido', 'nao_e_pdf', 'sha256_divergente', 'leitura_falhou', 'prefixo_cnpj_divergente',
     ];
 
-    /** slug da URL => rotulo, id do link e descricao. */
     public const ABAS = [
         'ativas' => [
             'rotulo' => 'Ativas',
@@ -91,21 +67,15 @@ final class GestaoOrdemController
 
     public function __construct(private GestaoContexto $ctx)
     {
-        // o banco externo so e aberto no primeiro uso; os atendimentos vem do banco do totem
         $this->ordens = new OrdemColetaGestaoDao(null, $ctx->pdo);
     }
 
-    // ------------------------------------------------------------------
-    // ordens.php (GET): lista
-    // ------------------------------------------------------------------
 
-    /** @return array{view:string,dados:array<string,mixed>,status:int,titulo?:string} */
     public function listar(): array
     {
         $hoje = $this->hoje();
         try {
             $clientes = null;
-            // cliente validado por consulta direta por id (nunca pela lista limitada do select)
             $f = $this->lerFiltros($_GET, $hoje, true);
 
             $periodo = $this->filtrosDePeriodo($f);
@@ -116,7 +86,6 @@ final class GestaoOrdemController
             $itens = [];
             $linhasBaixa = [];
             if ($f['aba'] === 'baixas') {
-                // "pendentes" ja foi contado acima (mesmo periodo): nao repete
                 $total = $f['mostrar'] === 'pendentes'
                     ? $totalBaixasPendentes
                     : $baixasDao->contar($f['mostrar'], $f['de'] === '' ? null : $f['de'], $f['ate'] === '' ? null : $f['ate']);
@@ -128,7 +97,6 @@ final class GestaoOrdemController
                 }
                 $linhasBaixa = $this->linhasBaixa($baixasDao, $f, $hoje);
             } elseif ($f['cliente_invalido']) {
-                // cliente de formato invalido ou inexistente: NUNCA alarga a lista (vazio)
                 $total = 0;
                 $truncado = false;
                 $rotuloTotal = '0';
@@ -136,7 +104,6 @@ final class GestaoOrdemController
             } else {
                 $filtrosDao = $this->filtrosDao($f);
                 if ($f['cliente'] === '' && $f['numero'] === '' && $f['inativada_de'] === '' && $f['inativada_ate'] === '') {
-                    // so periodo: e a mesma contagem da aba, ja feita acima
                     $cont = $contagens[$f['aba']];
                 } else {
                     $cont = $this->ordens->contar($filtrosDao, $f['aba']);
@@ -151,7 +118,6 @@ final class GestaoOrdemController
                 $itens = $this->decorarOrdens($this->ordens->listar($filtrosDao, $f['aba'], $f['pagina']), $f, $hoje);
             }
             if ($f['aba'] !== 'baixas') {
-                // so as abas com filtro de cliente precisam da lista do select (uma vez por requisicao)
                 $clientes = $this->clientesDoSelect($f['cliente']);
             }
         } catch (Throwable $e) {
@@ -229,11 +195,7 @@ final class GestaoOrdemController
         ];
     }
 
-    // ------------------------------------------------------------------
-    // ordem.php (GET, ?id=): detalhe
-    // ------------------------------------------------------------------
 
-    /** @return array{view:string,dados:array<string,mixed>,status:int,titulo?:string} */
     public function detalhe(): array
     {
         $hoje = $this->hoje();
@@ -255,8 +217,6 @@ final class GestaoOrdemController
             GestaoHttp::redirecionar(self::CAMINHO_ORDENS . '?' . $this->query($f, ['msg' => 'oc_nao_encontrada']));
         }
 
-        // Aviso + formulario de confirmacao (segundo passo de inativar/ativar), so se a
-        // acao ainda faz sentido para o estado atual e ainda ha o que confirmar.
         $confirmacao = null;
         $acaoPedida = GestaoContexto::query('confirmar');
         $clienteInativo = $oc['cliente_status'] === self::CLIENTE_INATIVO;
@@ -334,9 +294,6 @@ final class GestaoOrdemController
         ];
     }
 
-    // ------------------------------------------------------------------
-    // ordem-status.php (POST): ativar / inativar por id
-    // ------------------------------------------------------------------
 
     public function alterarStatus(): void
     {
@@ -359,7 +316,6 @@ final class GestaoOrdemController
         $ip = $this->ctx->ip();
         $usuario = $this->ctx->idUsuario();
 
-        // (a) rele a OC por id
         try {
             $oc = $this->ordens->buscarPorId($id);
         } catch (Throwable $e) {
@@ -372,18 +328,15 @@ final class GestaoOrdemController
             $this->voltarLista($f, 'oc_nao_encontrada');
         }
 
-        // (b) a tela estava desatualizada
         if ((string) $oc['status'] !== $visto) {
             $this->auditarEvento($auditoria, $usuario, $acaoAuditoria, $id, 'SEM_EFEITO', $base + ['motivo_oc' => 'estado_mudou'], $ip);
             $this->voltar($deDetalhe, $id, $f, 'oc_estado_mudou');
         }
-        // (c) ja esta no estado pedido
         if ((string) $oc['status'] === $para) {
             $this->auditarEvento($auditoria, $usuario, $acaoAuditoria, $id, 'SEM_EFEITO', $base + ['motivo_oc' => 'ja_no_estado'], $ip);
             $this->voltar($deDetalhe, $id, $f, $inativar ? 'oc_sem_efeito_ja_inativa' : 'oc_sem_efeito_ja_ativa');
         }
 
-        // (d) aviso com confirmacao explicita (sem bloquear)
         try {
             $n = $inativar
                 ? $this->ordens->atendimentosEmAndamentoDaOc((string) $oc['cnpj'], (string) $oc['numero'])
@@ -392,28 +345,21 @@ final class GestaoOrdemController
             $this->registrarFalhaExterno($e);
             $this->externoIndisponivel();
         }
-        // cliente inativo: AVISO (nao bloqueio) so ao ativar; o totem nao mostra a ordem
         $clienteInativo = !$inativar && $oc['cliente_status'] === self::CLIENTE_INATIVO;
         $detalheFinal = $base;
         if ($n > 0 || $clienteInativo) {
             if (!$confirmou) {
                 GestaoHttp::redirecionar(self::CAMINHO_ORDEM . '?' . $this->queryDetalhe($id, $f, ['confirmar' => $acao, 'msg' => 'oc_confirmacao_necessaria']));
             }
-            // um unico motivo fixo: "ja baixada" (se ha check-in concluido) tem precedencia
             $detalheFinal['motivo_oc'] = $inativar ? 'confirmado_andamento' : ($n > 0 ? 'confirmado_ja_baixada' : 'confirmado_cliente_inativo');
         }
 
-        // (e) auditoria PENDENTE ANTES de qualquer UPDATE externo
         try {
             $idAuditoria = $auditoria->abrir($usuario, $acaoAuditoria, 'ordem_coleta', $id, $base, $ip);
         } catch (Throwable $e) {
             $this->auditoriaIndisponivel($e);
         }
 
-        // (f) UPDATE atomico por id (CAS no status).
-        // Limite conhecido (S6, so documentado): uma excecao DEPOIS de o UPDATE ter sido
-        // efetivado (ex.: queda da conexao na releitura) fecha a auditoria como ERRO mesmo
-        // com a ordem ja alterada; reler o estado nao distingue "fui eu" de "foi outra pessoa".
         try {
             $resultado = $inativar ? $this->ordens->inativarPorId($id) : $this->ordens->ativarPorId($id);
         } catch (Throwable $e) {
@@ -422,7 +368,6 @@ final class GestaoOrdemController
             $this->externoIndisponivel();
         }
 
-        // (g) fechamento + (h) PRG
         if ($resultado === OrdemColetaGestaoDao::R_EFETIVADO) {
             $this->fecharAuditoria($auditoria, $idAuditoria, 'OK', $detalheFinal);
             $this->voltar($deDetalhe, $id, $f, $inativar ? 'oc_inativada' : 'oc_ativada');
@@ -439,9 +384,6 @@ final class GestaoOrdemController
         $this->voltar($deDetalhe, $id, $f, 'oc_estado_mudou');
     }
 
-    // ------------------------------------------------------------------
-    // ordem-baixa.php (POST): marcar baixa pendente como resolvida
-    // ------------------------------------------------------------------
 
     public function resolverBaixa(): void
     {
@@ -500,9 +442,6 @@ final class GestaoOrdemController
         $this->voltarLista($f, 'oc_baixa_recusada_' . $motivo);
     }
 
-    // ------------------------------------------------------------------
-    // ordem-pdf.php (POST): ver o PDF da OC
-    // ------------------------------------------------------------------
 
     public function pdf(): void
     {
@@ -528,9 +467,6 @@ final class GestaoOrdemController
             $this->auditoriaIndisponivel($e);
         }
 
-        // O prefixo de 14 digitos do caminho tem de ser o CNPJ do cliente da OC (c.cnpj):
-        // registro adulterado apontando para o PDF de outro cliente e erro de integridade
-        // (checado ANTES de tocar no disco).
         $caminhoRegistro = (string) $registro['caminho_relativo'];
         $cnpjOc = (string) $oc['cnpj'];
         if (preg_match('/\A\d{14}\z/D', $cnpjOc) !== 1 || strncmp($caminhoRegistro, $cnpjOc, 14) !== 0 || ($caminhoRegistro[14] ?? '') !== '/') {
@@ -544,8 +480,6 @@ final class GestaoOrdemController
                 $this->fecharAuditoria($auditoria, $idAuditoria, 'SEM_EFEITO', ['motivo_oc' => 'arquivo_ausente']);
                 GestaoHttp::redirecionar(self::CAMINHO_ORDEM . '?id=' . $id . '&msg=oc_pdf_indisponivel');
             }
-            // caminho invalido, tamanho, leitura, nao e PDF, sha256 divergente ou prefixo de
-            // CNPJ divergente: integridade. So o codigo FIXO do motivo vai para o LogSistema.
             $motivoLog = in_array($leitura['motivo'], self::MOTIVOS_INTEGRIDADE_PDF, true) ? (string) $leitura['motivo'] : 'falha_inesperada';
             $this->fecharAuditoria($auditoria, $idAuditoria, 'ERRO', []);
             error_log('gestao: oc_pdf_integridade');
@@ -578,20 +512,9 @@ final class GestaoOrdemController
         exit;
     }
 
-    // ------------------------------------------------------------------
-    // Filtros (whitelist)
-    // ------------------------------------------------------------------
 
-    /** @var list<array{id:int,razao_social:string,cnpj:string}>|null cache da requisicao */
     private ?array $clientesCache = null;
 
-    /**
-     * Clientes do select (no maximo MAX_CLIENTES_SELECT, uma consulta por requisicao).
-     * Se o cliente filtrado (ja validado) ficou fora do limite, entra no fim da lista
-     * por consulta direta, para o select refletir o filtro aplicado.
-     *
-     * @return list<array{id:int,razao_social:string,cnpj:string}>
-     */
     private function clientesDoSelect(string $atual): array
     {
         if ($this->clientesCache === null) {
@@ -613,17 +536,6 @@ final class GestaoOrdemController
         return $lista;
     }
 
-    /**
-     * Le e valida os filtros de $fonte ($_GET ou o `retorno` reparseado). Valor
-     * invalido e IGNORADO (com mensagem no campo, se for numero ou data). O CLIENTE e
-     * a excecao: com $verificarCliente ele e conferido por consulta direta por id
-     * (sem depender do limite do select); formato invalido ou inexistente NAO e
-     * ignorado: vira `cliente_invalido` (mensagem no campo e lista VAZIA, nunca
-     * alargada). Sem $verificarCliente so se confere o formato (sem banco).
-     *
-     * @param array<array-key,mixed> $fonte
-     * @return array{aba:string,cliente:string,cliente_invalido:bool,numero:string,de:string,ate:string,inativada_de:string,inativada_ate:string,mostrar:string,ordem:string,dir:string,pagina:int,erros:array<string,string>}
-     */
     private function lerFiltros(array $fonte, DateTimeImmutable $hoje, bool $verificarCliente): array
     {
         $texto = static function (string $chave) use ($fonte): string {
@@ -703,7 +615,6 @@ final class GestaoOrdemController
         ];
     }
 
-    /** @param array<string,string> $erros */
     private function lerData(string $texto, string $campo, string $rotulo, array &$erros): string
     {
         if ($texto === '') {
@@ -720,7 +631,6 @@ final class GestaoOrdemController
         return '';
     }
 
-    /** Direcao padrao: numero e cliente A-Z; criada em, mais recente primeiro (na aba "ativas há mais de 15 dias", mais antiga primeiro). */
     private static function dirPadrao(string $aba, string $ordem): string
     {
         if ($ordem === 'numero' || $ordem === 'cliente') {
@@ -730,7 +640,6 @@ final class GestaoOrdemController
         return $aba === 'ativas_15d' ? 'asc' : 'desc';
     }
 
-    /** @param array<string,mixed> $f @return array<string,string> */
     private function filtrosDePeriodo(array $f): array
     {
         $r = [];
@@ -744,7 +653,6 @@ final class GestaoOrdemController
         return $r;
     }
 
-    /** @param array<string,mixed> $f @return array<string,mixed> */
     private function filtrosDao(array $f): array
     {
         $dao = $this->filtrosDePeriodo($f);
@@ -762,13 +670,6 @@ final class GestaoOrdemController
         return $dao;
     }
 
-    /**
-     * Query string (sem "?") so com filtros validados, em ordem fixa, omitindo o que
-     * e padrao. $extra: pagina (substitui) e msg (so codigo conhecido).
-     *
-     * @param array<string,mixed> $f
-     * @param array<string,mixed> $extra
-     */
     private function query(array $f, array $extra = []): string
     {
         $v = array_merge($f, $extra);
@@ -796,12 +697,6 @@ final class GestaoOrdemController
         return http_build_query($q, '', '&', PHP_QUERY_RFC3986);
     }
 
-    /**
-     * Link de aba: troca a aba e leva so o periodo (a contagem das abas e por periodo);
-     * $limpar tambem zera o periodo (botao Limpar filtros).
-     *
-     * @param array<string,mixed> $f
-     */
     private function queryAba(array $f, string $slug, bool $limpar = false): string
     {
         $troca = ['aba' => $slug, 'cliente' => '', 'numero' => '', 'inativada_de' => '', 'inativada_ate' => '', 'mostrar' => 'pendentes', 'ordem' => 'criado_em', 'dir' => self::dirPadrao($slug, 'criado_em'), 'pagina' => 1];
@@ -813,7 +708,6 @@ final class GestaoOrdemController
         return $this->query(array_merge($f, $troca));
     }
 
-    /** Query do detalhe: id + filtros validados (+ confirmar/msg). @param array<string,mixed> $f @param array<string,string> $extra */
     private function queryDetalhe(int $id, array $f, array $extra = []): string
     {
         $q = 'id=' . $id . '&' . $this->query($f);
@@ -827,7 +721,6 @@ final class GestaoOrdemController
         return $q;
     }
 
-    /** `retorno` do formulario: reparseado e revalidado (nunca usado como URL). @return array<string,mixed> */
     private function filtrosDoRetorno(): array
     {
         $bruto = GestaoContexto::post('retorno');
@@ -839,13 +732,6 @@ final class GestaoOrdemController
         return $this->lerFiltros(is_array($arr) ? $arr : [], $this->hoje(), false);
     }
 
-    /**
-     * Cabecalhos ordenaveis (numero, cliente, criada em): link que alterna a direcao,
-     * `aria-sort` na coluna ativa.
-     *
-     * @param array<string,mixed> $f
-     * @return array<string,array{href:string,aria:string,rotulo:string,ativo:bool}>
-     */
     private function cabecalhosOrdenacao(array $f): array
     {
         $rotulos = ['numero' => 'Número', 'cliente' => 'Cliente', 'criado_em' => 'Criada em'];
@@ -864,15 +750,7 @@ final class GestaoOrdemController
         return $saida;
     }
 
-    // ------------------------------------------------------------------
-    // Montagem de linhas
-    // ------------------------------------------------------------------
 
-    /**
-     * @param list<array<string,mixed>> $linhas
-     * @param array<string,mixed> $f
-     * @return list<array<string,mixed>>
-     */
     private function decorarOrdens(array $linhas, array $f, DateTimeImmutable $hoje): array
     {
         $agora = $this->agora();
@@ -888,7 +766,6 @@ final class GestaoOrdemController
             $l['cnpj_transportadora_fmt'] = self::formatarCnpj((string) ($l['transportadora_cnpj'] ?? ''));
             $l['href_abrir'] = self::CAMINHO_ORDEM . '?id=' . (int) $l['id'] . '&' . $retorno;
             $l['cliente_inativo'] = $l['cliente_status'] === self::CLIENTE_INATIVO;
-            // aba Inativas: dia em que o PDF (ainda existente) sera apagado
             $inativadaEm = $l['status'] === 'INATIVA' ? $this->data($l['inativada_em'] ?? null) : null;
             $l['pdf_apagado_em'] = $l['tem_pdf'] && $inativadaEm !== null
                 ? $inativadaEm->modify('+' . self::DIAS_RETENCAO_PDF . ' days')->format('d/m/Y')
@@ -899,10 +776,6 @@ final class GestaoOrdemController
         return $saida;
     }
 
-    /**
-     * @param array<string,mixed> $f
-     * @return list<array<string,mixed>>
-     */
     private function linhasBaixa(OrdemColetaPendenteBaixaDao $dao, array $f, DateTimeImmutable $hoje): array
     {
         $baixas = $dao->listar(
@@ -913,7 +786,6 @@ final class GestaoOrdemController
             ($f['pagina'] - 1) * self::POR_PAGINA
         );
         $retorno = $this->query($f);
-        // UMA consulta para a pagina inteira (nunca uma por linha)
         $pares = [];
         foreach ($baixas as $b) {
             $pares[] = [(string) ($b['cliente_cnpj'] ?? ''), (string) $b['numero_ordem_coleta']];
@@ -931,13 +803,6 @@ final class GestaoOrdemController
         return $saida;
     }
 
-    /**
-     * Idade da OC: "Hoje"/"Há N dias" nas ATIVAS; "Inativada em dd/mm/aaaa" nas
-     * inativas. Atencao = ATIVA ha mais de 15 dias (mesmo criterio da aba do banco).
-     *
-     * @param array<string,mixed> $oc
-     * @return array{0:string,1:bool}
-     */
     private function idade(array $oc, DateTimeImmutable $agora): array
     {
         if ($oc['status'] !== 'ATIVA') {
@@ -968,7 +833,6 @@ final class GestaoOrdemController
         }
     }
 
-    /** "00000000000000" => "00.000.000/0000-00"; qualquer outra coisa volta como veio. */
     public static function formatarCnpj(string $cnpj): string
     {
         if (preg_match('/\A\d{14}\z/D', $cnpj) !== 1) {
@@ -978,11 +842,7 @@ final class GestaoOrdemController
         return substr($cnpj, 0, 2) . '.' . substr($cnpj, 2, 3) . '.' . substr($cnpj, 5, 3) . '/' . substr($cnpj, 8, 4) . '-' . substr($cnpj, 12, 2);
     }
 
-    // ------------------------------------------------------------------
-    // Infra
-    // ------------------------------------------------------------------
 
-    /** Id de OC (BIGINT UNSIGNED do banco externo): 1 a 18 digitos, sem zero a esquerda. Fora do int de 64 bits nunca passa. */
     public static function idOc(string $texto): ?int
     {
         if (preg_match('/\A[1-9][0-9]{0,17}\z/D', $texto) !== 1) {
@@ -1004,11 +864,9 @@ final class GestaoOrdemController
 
     private function fuso(): DateTimeZone
     {
-        // mesmo fuso (-03:00) da sessao dos dois bancos
         return new DateTimeZone('-03:00');
     }
 
-    /** @return array{view:string,dados:array<string,mixed>,status:int,titulo:string} */
     private function paginaComErro(): array
     {
         return [
@@ -1041,7 +899,6 @@ final class GestaoOrdemController
         GestaoHttp::negar(503, 'Serviço indisponível', 'Não foi possível registrar a ação na trilha de auditoria agora. Nada foi alterado. Tente novamente em instantes.', [], GestaoHttp::ACAO_INICIO);
     }
 
-    /** Log da falha do banco externo: so a classe da excecao (a conexao ja registra a propria falha). */
     private function registrarFalhaExterno(Throwable $e): void
     {
         error_log('gestao: oc_externo_falhou ' . get_class($e));
@@ -1050,7 +907,6 @@ final class GestaoOrdemController
         }
     }
 
-    /** @param array<string,string|int> $detalhe */
     private function fecharAuditoria(AuditoriaDao $auditoria, int $idAuditoria, string $resultado, array $detalhe): void
     {
         try {
@@ -1061,12 +917,6 @@ final class GestaoOrdemController
         }
     }
 
-    /**
-     * Evento ja concluido que nao chegou a abrir linha PENDENTE (recusa antes do UPDATE).
-     * Falha de auditoria aqui nao bloqueia: nada foi alterado.
-     *
-     * @param array<string,string|int> $detalhe
-     */
     private function auditarEvento(AuditoriaDao $auditoria, int $usuario, string $acao, int $idOc, string $resultado, array $detalhe, string $ip): void
     {
         try {
@@ -1077,14 +927,12 @@ final class GestaoOrdemController
         }
     }
 
-    /** @param array<string,mixed> $f */
     private function voltarLista(array $f, string $codigo): void
     {
         $codigo = isset(GestaoContexto::MENSAGENS[$codigo]) ? $codigo : 'erro_interno';
         GestaoHttp::redirecionar(self::CAMINHO_ORDENS . '?' . $this->query($f, ['msg' => $codigo]));
     }
 
-    /** @param array<string,mixed> $f */
     private function voltar(bool $deDetalhe, int $id, array $f, string $codigo): void
     {
         if ($deDetalhe) {

@@ -35,22 +35,14 @@ abstract class CadastroGestaoBase
         $this->auditoria = new AuditoriaDao($pdo);
     }
 
-    /** alvo_tipo da auditoria: 'cliente' | 'empresa'. */
     abstract protected function alvoTipo(): string;
 
-    /** Prefixo do error_log (so a classe da excecao e escrita). */
     abstract protected function prefixoLog(): string;
 
     abstract protected function obterLock(int $segundos): bool;
 
     abstract protected function liberarLock(): void;
 
-    /**
-     * Serializa as mutacoes com um lock NOMEADO do MySQL tomado ANTES da transacao.
-     * Falha ou timeout viram `erro_interno` (log so da classe da excecao).
-     *
-     * @return array<string,mixed>
-     */
     protected function comLock(callable $fn): array
     {
         try {
@@ -88,19 +80,16 @@ abstract class CadastroGestaoBase
         return isset($e->errorInfo[1]) && (int) $e->errorInfo[1] === 1062;
     }
 
-    /** Violacao de chave estrangeira ao apagar o pai (1451). */
     protected function ehFkFilhoExistente(PDOException $e): bool
     {
         return isset($e->errorInfo[1]) && (int) $e->errorInfo[1] === 1451;
     }
 
-    /** O ator ainda e admin ativo? (FOR UPDATE nos admins; chamar DENTRO da transacao.) */
     protected function atorAdmin(int $idAdmin): bool
     {
         return in_array($idAdmin, $this->usuarios->travarAdminsAtivos(), true);
     }
 
-    /** @return array{ok:false,codigo:string} */
     protected function semPermissao(string $acao, int $idAdmin, ?int $idAlvo, ?string $ip): array
     {
         $this->auditarRecusa($acao, $idAdmin, $idAlvo, [], $ip);
@@ -108,7 +97,6 @@ abstract class CadastroGestaoBase
         return ['ok' => false, 'codigo' => 'sem_permissao'];
     }
 
-    /** @param array<string,string|int> $detalhe */
     protected function auditarRecusa(string $acao, int $idAdmin, ?int $idAlvo, array $detalhe, ?string $ip): void
     {
         try {
@@ -129,7 +117,6 @@ abstract class CadastroGestaoBase
         }
     }
 
-    /** @return array{ok:false,codigo:string} */
     protected function falhaTecnica(string $operacao, Throwable $e, string $acao, int $idAtor, ?int $idAlvo, ?string $ip): array
     {
         error_log($this->prefixoLog() . ': ' . $operacao . '_falhou ' . get_class($e));

@@ -32,19 +32,8 @@ class AtendimentoController
         private ?EmpresaDao $empresaDao = null,
         private ?OrdemColetaClient $ordemColetaClient = null,
         private ?OrdemColetaPendenteBaixaDao $ordemColetaPendenteBaixaDao = null,
-        // Dependencias novas (demanda tela-inicial-lgpd-totem, 2026-09-24),
-        // OPCIONAIS/NULLABLE ao final para preservar 100% dos chamadores
-        // existentes (tests/manual/teste_ordem_coleta_pendente_baixa.php
-        // instancia este Controller sem elas, e nunca chama iniciar()) —
-        // ver comentario em iniciar() sobre o fail-closed quando ausentes.
         private ?LgpdRn $lgpdRn = null,
         private ?PDO $pdo = null,
-        // Dependencias novas (demanda hardening-revisao-notas-e-cliente,
-        // 2026-09-30), OPCIONAIS ao final (mesmo criterio acima): Rn de notas
-        // (estado derivado do cliente), ClienteDao (validacao do cliente
-        // manual contra tb_cliente ativa) e storage das fotos (quarentena no
-        // cancelamento). Ausentes: Rn/storage usam o padrao; sem ClienteDao
-        // nem PDO o cliente manual falha fechado (500).
         private ?NotaFiscalRn $notaFiscalRn = null,
         private ?ClienteDao $clienteDao = null,
         private ?NotaArquivoStorage $notaArquivoStorage = null
@@ -69,49 +58,6 @@ class AtendimentoController
         return $this->clienteDao;
     }
 
-    /**
-     * Passa a EXIGIR e validar 'token_aceite' (demanda
-     * tela-inicial-lgpd-totem, 2026-09-24) alem de tipo/placa, ANTES de
-     * qualquer outro processamento — mesmo espirito de Util\Auth::
-     * validarTotem() rodando primeiro no entrypoint.
-     *
-     * Validacao (nesta ordem):
-     *   1. tipo/placa presentes (checagem ja existente, preservada).
-     *   2. token_aceite presente e no formato esperado (string de 64
-     *      caracteres hexadecimais) — ausente/malformado rejeita ANTES de
-     *      tocar o banco.
-     *   3. Consumo ATOMICO do token (App\Rn\LgpdRn::consumir(), que
-     *      delega a App\Dao\AceiteLgpdDao::consumirPorHash() — CAS
-     *      UPDATE...WHERE + rowCount()) dentro de uma transacao real
-     *      (PDO::beginTransaction/commit/rollBack) que tambem envolve o
-     *      INSERT do atendimento (App\Rn\AtendimentoRn::iniciar()).
-     *
-     * DECISAO ARQUITETURAL registrada explicitamente (ver handoff desta
-     * implementacao): esta e a PRIMEIRA transacao explicita do projeto —
-     * todo o resto do codebase usa exclusivamente o padrao CAS sequencial
-     * (UPDATE...WHERE + rowCount(), sem transacao). Adotada aqui porque o
-     * consumo do token e a criacao do atendimento sao,	 por definicao,
-     * uma UNICA operacao logica ("this token buys exactly one
-     * atendimento"): envolver as duas escritas na mesma transacao evita
-     * que uma falha no INSERT (ex.: violacao de constraint inesperada,
-     * falha de conexao no meio) deixe um token "USADO" ORFAO — sem essa
-     * transacao, o motorista precisaria voltar a tela LGPD e gerar um
-     * token novo mesmo quando o problema real foi transitorio no INSERT,
-     * nao no aceite em si. Rollback desfaz o UPDATE do CAS (token volta a
-     * PENDENTE_USO, pode ser tentado de novo) e o INSERT (nenhum
-     * atendimento orfao). NENHUMA chamada de rede (Talent/VIO/OrdemColeta)
-     * acontece dentro da transacao — so as 2 escritas de banco.
-     *
-     * Se $lgpdRn ou $pdo nao foram injetados (uso fora do endpoint HTTP,
-     * ex. alguns testes manuais que nao chamam iniciar()), falha fechada
-     * (500) — nunca cria atendimento sem validar o aceite.
-     *
-     * rowCount()===0 no CAS (por QUALQUER motivo: token ausente,
-     * malformado, desconhecido, expirado, ja consumido, de outro totem,
-     * versao/hash do termo divergente do atual) responde SEMPRE a MESMA
-     * mensagem generica (409) — nunca diferencia a causa, para nao abrir
-     * vetor de enumeracao.
-     */
     public function iniciar(int $idTotem, array $entrada): void
     {
         $tipo = $entrada['tipo'] ?? null;
@@ -127,9 +73,6 @@ class AtendimentoController
         }
 
         if ($this->pdo === null) {
-            // dependencia opcional nao injetada (uso fora do endpoint HTTP)
-            // -- sem transacao/PDO nao ha como consumir o token com
-            // seguranca, falha fechada.
             Resposta::erro('Nao foi possivel processar o atendimento agora', 500);
         }
 
@@ -159,13 +102,6 @@ class AtendimentoController
         Resposta::sucesso(['id_atendimento' => $idAtendimento, 'proxima_tela' => 'quantidade_notas']);
     }
 
-    /**
-     * Consome o token de aceite LGPD e cria o atendimento na MESMA
-     * transacao real (ver comentario de decisao arquitetural em
-     * iniciar()). rowCount()===0 no CAS de consumo responde 409 generico
-     * e ENCERRA a requisicao (Resposta::erro faz exit) sem deixar a
-     * transacao aberta — o rollback acontece ANTES do exit.
-     */
     private function consumirAceiteECriarAtendimento(int $idTotem, string $tipo, string $placa, string $tokenAceite): int
     {
         $this->pdo->beginTransaction();
@@ -180,12 +116,6 @@ class AtendimentoController
 
             $idAtendimento = $this->atendimentoRn->iniciar($idTotem, $tipo, $placa, $idAceite);
 
-            // Reconciliacao de kiosk (Tarefa 3, rodada corretiva de
-            // 2026-09-26) — ver App\Dao\AtendimentoDao::
-            // reconciliarProcessamentoVioApiBrAbandonado() para o
-            // comportamento completo. So UPDATE local (nenhuma chamada de
-            // rede/Talent/VIO dentro desta transacao, mesma garantia ja
-            // documentada acima para o restante deste metodo).
             $this->atendimentoRn->reconciliarProcessamentoAbandonado($idTotem, $idAtendimento);
 
             $this->pdo->commit();
@@ -200,24 +130,6 @@ class AtendimentoController
         }
     }
 
-    /**
-     * Corrigido IDOR (achado do security-especialista, registrado em
-     * ia_development_state.md; corrigido nesta demanda
-     * expedicao-consulta-ordem-coleta-teste, 2026-09-11): antes aceitava "no
-     * escuro" o objeto 'ordem' inteiro enviado pelo front-end, sem nenhuma
-     * validacao de posse/tipo/status/etapa nem confirmacao de que a ordem
-     * pertencia de fato ao resultado consultado para aquele atendimento —
-     * um totem podia gravar cliente_nome/cliente_cnpj/ordem_coleta
-     * arbitrarios em tb_atendimento.
-     *
-     * Correcao: valida posse do atendimento pelo totem autenticado (mesmo
-     * padrao ja usado em outras acoes deste controller), confere tipo/
-     * status/etapa, e RECONSULTA as ordens reais para a placa do atendimento
-     * — so aceita a selecao se o 'numero' enviado pelo front bater com uma
-     * das ordens realmente retornadas. Os dados gravados em tb_atendimento
-     * vem SEMPRE do resultado reconsultado no servidor, nunca do que o front
-     * enviou (cliente_nome/cliente_cnpj do front sao ignorados).
-     */
     public function selecionarOrdem(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
@@ -235,11 +147,6 @@ class AtendimentoController
         if ($atendimento['status'] !== 'em_andamento') {
             Resposta::erro('Atendimento nao esta em andamento');
         }
-        // 'placa' e a etapa inicial (definida por AtendimentoDao::criar) e
-        // permanece assim ate a ordem ser efetivamente selecionada — quando
-        // ha so 1 ordem, AtendimentoController::iniciar() ja seleciona
-        // sozinho e avanca para 'dados_encontrados', entao esta acao so faz
-        // sentido enquanto o atendimento ainda estiver em 'placa'.
         if ($atendimento['etapa_atual'] !== 'placa') {
             Resposta::erro('Atendimento nao esta na etapa esperada para selecionar a ordem');
         }
@@ -275,17 +182,6 @@ class AtendimentoController
 
         switch ($etapa) {
             case 'confirmacao':
-                // Corrigido IDOR critico (achado do security-especialista,
-                // 2026-09-09): antes nao validava posse/tipo/status/etapa,
-                // permitindo que um totem sobrescrevesse motorista_nome/
-                // motorista_cpf de atendimento alheio. Espelha exatamente o
-                // padrao ja usado no case 'digitalizacao_notas' abaixo.
-                // A tela de confirmacao (exp_confirma/rec_confirma) e a
-                // ULTIMA etapa persistida em tb_atendimento antes do ajudante
-                // — nem 'confirmacao' nem 'ajudante' chamam atualizarEtapa(),
-                // entao a etapa_atual esperada aqui e a mesma dos dois casos:
-                // 'exp_confirmacao'/'rec_confirmacao' (gravada por
-                // avancarEtapaDocumentos() no gate final).
                 $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
                 if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
@@ -299,9 +195,6 @@ class AtendimentoController
                     Resposta::erro('Atendimento nao esta na etapa esperada para confirmar os dados');
                 }
 
-                // Decisao de produto 2026-10-02: RNTRC (e todo campo exibido
-                // na confirmacao e exigido pelo Talent) e obrigatorio AQUI.
-                // Faltando algo, nada e gravado e a etapa nao avanca.
                 $ausentes = $this->atendimentoRn->camposObrigatoriosAusentes($atendimento, is_array($dados) ? $dados : []);
                 if ($ausentes !== []) {
                     Resposta::erroComDados(
@@ -316,25 +209,6 @@ class AtendimentoController
                 $this->atendimentoRn->salvarDadosMotorista($idAtendimento, $dados);
                 break;
             case 'cliente':
-                // Identificacao MANUAL do cliente no Recebimento (atendente confirma
-                // nome/cnpj). Deve avancar etapa_atual para 'rec_cnh', a mesma
-                // proxima etapa usada pelo fluxo AUTOMATICO via OCR em
-                // concluirDigitalizacao() (expedicao-vio-cnh-crlv, 2026-09-09) —
-                // mantendo as duas fontes de identificacao de cliente consistentes
-                // entre si. Sem isso, etapa_atual ficava presa em 'cliente' e o
-                // primeiro upload de rec_cnh falhava na checagem de etapa em
-                // DocumentoController::upload(). Nome da etapa unificado (rec_cnh,
-                // em vez de rec_cnh_frente/rec_cnh_verso separadas) na rodada
-                // corretiva de 2026-09-26 — revogou a assimetria anterior em
-                // relacao a Expedicao (exp_cnh), decisao explicita do usuario.
-                //
-                // Corrigido IDOR critico (achado do security-especialista,
-                // 2026-09-09): antes nao validava posse/tipo/status/etapa,
-                // permitindo sobrescrever cliente_nome/cliente_cnpj de
-                // atendimento alheio e forcar a transicao para
-                // 'rec_cnh'. So existe na etapa 'cliente' (gravada por
-                // concluirDigitalizacao() quando nenhuma nota identifica o
-                // cliente automaticamente), e so no Recebimento.
                 $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
                 if ($atendimento['tipo'] !== 'recebimento') {
@@ -347,13 +221,6 @@ class AtendimentoController
                     Resposta::erro('Atendimento nao esta na etapa esperada para identificar o cliente');
                 }
 
-                // Validacao do cliente MANUAL (demanda hardening-revisao-notas-
-                // e-cliente, 2026-09-30): o cliente precisa existir em
-                // tb_cliente ATIVA (unica allowlist oficial, decisao D2) —
-                // a UDLOG/transportadora nunca e cliente ativo, entao nunca
-                // passa. Nome e CNPJ gravados vem SEMPRE de tb_cliente, nunca
-                // do que o front enviou. Rejeicao generica (mesma mensagem
-                // para CNPJ invalido, inexistente ou inativo).
                 $clienteDao = $this->clienteDao();
                 if ($clienteDao === null) {
                     Resposta::erro('Nao foi possivel confirmar o cliente agora', 500);
@@ -375,12 +242,6 @@ class AtendimentoController
                 $this->atendimentoRn->atualizarEtapa($idAtendimento, 'rec_cnh');
                 break;
             case 'ajudante':
-                // Corrigido IDOR critico (achado do security-especialista,
-                // 2026-09-09): antes nao validava posse/tipo/status/etapa,
-                // permitindo sobrescrever ajudante_nome/ajudante_cpf de
-                // atendimento alheio. Mesma etapa esperada de 'confirmacao'
-                // (ver comentario acima) — nenhum dos dois persiste
-                // transicao de etapa_atual.
                 $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
                 if (!in_array($atendimento['tipo'], ['expedicao', 'recebimento'], true)) {
@@ -398,24 +259,17 @@ class AtendimentoController
                     Resposta::erro('Atendimento nao esta na etapa esperada para informar o ajudante');
                 }
 
-                // Correcao de ajudante apos falha do check-in (2026-10-02): a
-                // etapa_atual NAO muda no ERRO_REPROCESSAVEL (continua
-                // *_confirmacao), entao basta o estado do check-in permitir.
-                // Validacao de entrada ANTES de tocar no banco.
                 $ajudante = $this->atendimentoRn->normalizarAjudante($dados['nome'] ?? null, $dados['cpf'] ?? null);
                 if ($ajudante === null) {
                     Resposta::erro('Dados do ajudante invalidos: informe o nome completo e o CPF com 11 digitos', 422);
                     return;
                 }
-                // Gravacao atomica sob lock de linha (estado do check-in checado no DAO).
                 if (!$this->atendimentoRn->salvarAjudante($idAtendimento, $ajudante['nome'], $ajudante['cpf'])) {
                     Resposta::erro('Nao e possivel alterar o ajudante: o check-in ja esta em processamento ou foi enviado', 409);
                     return;
                 }
                 break;
             case 'digitalizacao_notas':
-                // marca a etapa formal da digitalizacao de notas do recebimento;
-                // NotaController::processar exige essa etapa antes de aceitar qualquer nota.
                 $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
                 if ($atendimento['tipo'] !== 'recebimento') {
@@ -444,11 +298,6 @@ class AtendimentoController
             Resposta::erro('Atendimento nao encontrado', 404);
         }
 
-        // CAS no banco (App\Dao\AtendimentoDao::bloquear) — status='concluido'
-        // e terminal e imutavel (demanda integridade-conclusao-atendimento,
-        // 2026-09-16). false so acontece se o atendimento ja estava
-        // concluido no momento exato do UPDATE; nenhuma alteracao no banco
-        // nesse caso.
         if (!$this->atendimentoRn->bloquear($idAtendimento)) {
             Resposta::erro('Atendimento ja concluido, nao pode mais ser bloqueado', 409);
             return;
@@ -457,30 +306,6 @@ class AtendimentoController
         Resposta::sucesso(['ok' => true]);
     }
 
-    /**
-     * Conclui a etapa de digitalizacao de notas do Recebimento (demanda
-     * hardening-revisao-notas-e-cliente, 2026-09-30): TUDO sob lock de
-     * linha de tb_atendimento em transacao curta (BEGIN ... COMMIT), sempre
-     * na ordem atendimento -> notas, e so responde DEPOIS de fechar a
-     * transacao (Resposta faz exit; exit dentro de try pula o finally).
-     *
-     * Ordem: id valido (400); posse e tipo (404); status (400); etapa errada
-     * mantem o ramo idempotente (sucesso com o mesmo corpo da vencedora);
-     * BEGIN + FOR UPDATE em tb_atendimento e releitura sob lock; notas ativas
-     * travadas (menos de 1 ou mais de 5 = 400); SE a flag
-     * CONCLUIR_EXIGE_NUMERO_NOTA for literalmente "true": numero_nota
-     * pendente (fora do formato 1 a 9 digitos sem zero a esquerda) =
-     * HTTP 422 NOTAS_SEM_NUMERO com ROLLBACK (etapa e cliente inalterados);
-     * estado derivado do cliente (NotaFiscalRn::avaliarClienteDoAtendimento);
-     * CAS da etapa; se IDENTIFICADO grava cliente_nome/cliente_cnpj (decisao
-     * D1) sem sobrescrever cliente ja gravado; COMMIT.
-     *
-     * So IDENTIFICADO vai a rec_cnh. NAO_IDENTIFICADO e ANOMALIA vao a
-     * rec_cliente (etapa 'cliente') sem gravar cliente; a resposta sinaliza
-     * cliente_estado e cliente_motivo (CONFLITO|INDETERMINADO, so na
-     * anomalia). Flag ausente/qualquer outro valor = comportamento anterior
-     * (sem validacao de numero).
-     */
     public function concluirDigitalizacao(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
@@ -489,7 +314,6 @@ class AtendimentoController
             Resposta::erro('Dados incompletos');
         }
 
-        // posse e tipo antes de abrir a transacao (mensagem generica)
         $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
         if ($atendimento['tipo'] !== 'recebimento') {
@@ -513,12 +337,6 @@ class AtendimentoController
         Resposta::sucesso($resultado['dados']);
     }
 
-    /**
-     * Abre a transacao, executa concluirDentroDaTransacao() e a fecha
-     * (COMMIT so se http < 400). Nunca chama Resposta.
-     *
-     * @return array{http:int, erro?:string, codigo?:string, dados?:array}
-     */
     private function concluirSobLock(int $idAtendimento, int $idTotem, bool $exigeNumero): array
     {
         $mensagemFalha = 'Nao foi possivel concluir a digitalizacao agora — tente novamente';
@@ -554,16 +372,11 @@ class AtendimentoController
                 try {
                     $this->atendimentoRn->desfazerTransacao();
                 } catch (\Throwable $e) {
-                    // conexao descartada no fim da requisicao
                 }
             }
         }
     }
 
-    /**
-     * Corpo da resposta de sucesso (aditivo): proxima_tela e etapa ja
-     * existiam; cliente_estado/cliente_motivo sao novos.
-     */
     private function corpoConclusao(array $avaliacao): array
     {
         $identificado = $avaliacao['estado'] === NotaFiscalRn::CLIENTE_IDENTIFICADO;
@@ -576,9 +389,6 @@ class AtendimentoController
         ];
     }
 
-    /**
-     * @return array{http:int, erro?:string, codigo?:string, dados?:array}
-     */
     private function concluirDentroDaTransacao(int $idAtendimento, int $idTotem, bool $exigeNumero): array
     {
         $atendimento = $this->atendimentoRn->buscarParaUpdate($idAtendimento);
@@ -591,18 +401,9 @@ class AtendimentoController
         }
 
         $notaRn = $this->notaFiscalRn();
-        // notas ativas travadas (depois do atendimento, nunca o contrario)
         $notas = $notaRn->listarNotasAtivasTravadas($idAtendimento);
 
         if ($atendimento['etapa_atual'] !== 'digitalizacao_notas') {
-            // Ramo idempotente (bug encontrado pelo qa-testes em 2026-09-17):
-            // a requisicao perdedora de uma corrida so chega aqui DEPOIS que a
-            // vencedora ja terminou (etapa ja avancada). Sob lock o estado das
-            // notas esta congelado, entao recalcular o destino da o MESMO
-            // resultado da vencedora: se a etapa atual e o destino (ou uma
-            // etapa legitima posterior), responde sucesso idempotente com o
-            // mesmo corpo, sem nenhum efeito colateral. Senao e situacao
-            // genuinamente anomala (400).
             $avaliacao = $notaRn->avaliarClienteDoAtendimento($idAtendimento, false, true);
             $destino = $avaliacao['estado'] === NotaFiscalRn::CLIENTE_IDENTIFICADO ? 'rec_cnh' : 'cliente';
 
@@ -622,22 +423,6 @@ class AtendimentoController
             return ['http' => 400, 'erro' => 'Limite de 5 notas fiscais excedido para esse atendimento'];
         }
 
-        // F1 (rodada corretiva 2026-10-01): NENHUM cliente e persistido (nem a
-        // etapa avanca) enquanto qualquer nota ATIVA ainda estiver PENDENTE ou
-        // PROCESSANDO dentro do teto de OCR (NotaFiscalRn::OCR_TIMEOUT_
-        // SEGUNDOS = 120 s desde o upload). HTTP 409 OCR_EM_ANDAMENTO com SO
-        // as ordens (1..5) em processamento; ROLLBACK (etapa, cliente_nome e
-        // cliente_cnpj inalterados). Vale com a flag CONCLUIR_EXIGE_NUMERO_NOTA
-        // ligada ou desligada. Todas as notas foram travadas e lidas acima,
-        // sob o lock do atendimento, na mesma transacao que depois grava o
-        // cliente. Notas acima do teto nao bloqueiam: vao ao fallback manual
-        // (avaliarClienteDoAtendimento com exigirTerminais).
-        //
-        // PRECEDENCIA (documentada e testada): 400 (sem notas / mais de 5) >
-        // 409 OCR_EM_ANDAMENTO > 422 NOTAS_SEM_NUMERO > decisao de cliente.
-        // O 409 vem antes do 422 porque, com OCR ainda em curso, o numero e o
-        // cliente da nota podem estar prestes a chegar; so depois de todas as
-        // notas terminais o numero pendente e um erro do motorista.
         $classificacao = NotaFiscalRn::classificarNotasEmProcessamento($notas);
         if ($classificacao['bloqueantes'] !== []) {
             return [
@@ -659,8 +444,6 @@ class AtendimentoController
             if ($ordensPendentes !== []) {
                 sort($ordensPendentes);
 
-                // mesma mensagem de finalizar(); dados so com inteiros
-                // (nunca id_nota, numero, CNPJ, caminho ou imagem)
                 return [
                     'http'   => 422,
                     'erro'   => 'Existem notas fiscais sem numero definido (NOTAS_SEM_NUMERO)',
@@ -674,19 +457,10 @@ class AtendimentoController
             }
         }
 
-        // Estado DERIVADO das notas ativas (unica fonte; o OR legado com
-        // algumaIdentificada, sem filtro de cliente ativo, foi removido).
-        // So IDENTIFICADO vai a rec_cnh; NAO_IDENTIFICADO e ANOMALIA vao a
-        // rec_cliente sem gravar cliente.
         $avaliacao = $notaRn->avaliarClienteDoAtendimento($idAtendimento, false, true);
         $corpo = $this->corpoConclusao($avaliacao);
         $etapa = $corpo['etapa'];
 
-        // CAS dedicado (demanda integridade-conclusao-atendimento,
-        // 2026-09-16): so grava se etapa_atual ainda for
-        // 'digitalizacao_notas' e status ainda for 'em_andamento'. Sob lock
-        // de linha nao deveria perder, mas a guarda permanece (defesa em
-        // profundidade e idempotencia).
         $venceuCas = $this->atendimentoRn->concluirDigitalizacaoNotas($idAtendimento, $etapa);
 
         if (!$venceuCas) {
@@ -700,8 +474,6 @@ class AtendimentoController
         }
 
         if ($avaliacao['estado'] === NotaFiscalRn::CLIENTE_IDENTIFICADO && is_array($avaliacao['cliente'])) {
-            // D1: grava o cliente automatico na MESMA transacao do CAS, sem
-            // sobrescrever cliente ja confirmado/gravado por outro caminho.
             $this->atendimentoRn->gravarClienteAutomaticoSeVazio(
                 $idAtendimento,
                 (string) $avaliacao['cliente']['razao_social'],
@@ -712,18 +484,6 @@ class AtendimentoController
         return ['http' => 200, 'dados' => $corpo];
     }
 
-    /**
-     * Ordem legitima das etapas do Recebimento apos digitalizacao_notas —
-     * usada exclusivamente para decidir se a segunda requisicao concorrente
-     * de concluirDigitalizacao() (que perdeu o CAS) pode responder sucesso
-     * idempotente: a etapa atual do banco precisa ser a etapa-alvo desta
-     * chamada, ou qualquer etapa posterior legitima ja alcancada por quem
-     * venceu a corrida (ambos os ramos, com ou sem identificacao automatica
-     * de cliente, convergem para 'rec_cnh' e seguem a mesma
-     * sequencia dai em diante). Etapa 'rec_cnh' unificada (antes
-     * 'rec_cnh_frente'/'rec_cnh_verso' separadas) na rodada corretiva de
-     * 2026-09-26.
-     */
     private const SEQUENCIA_POS_DIGITALIZACAO_RECEBIMENTO = [
         'cliente', 'rec_cnh', 'rec_crlv', 'rec_aguarde_documentos', 'rec_confirmacao', 'impressao',
     ];
@@ -740,19 +500,6 @@ class AtendimentoController
         return $indiceAtual >= $indiceAlvo;
     }
 
-    /**
-     * Sequencia REAL e autorizada pelo backend para CNH/CRLV da Expedicao
-     * (demanda expedicao-vio-cnh-crlv; REPLANEJAMENTO 2026-09-09 tornou o
-     * processamento assincrono do lado do navegador):
-     *   dados_encontrados -> exp_cnh -> exp_crlv -> exp_aguarde_documentos
-     *   -> exp_confirmacao -> impressao.
-     * exp_cnh -> exp_crlv e exp_crlv -> exp_aguarde_documentos exigem so que
-     * a FOTO tenha sido enviada (upload feito) — NAO que a validacao VIO ja
-     * tenha terminado (ela roda em segundo plano no front-end). A aprovacao
-     * efetiva (VIO_TRIAL/VIO_VALIDADO/MANUAL) so e OBRIGATORIA no gate final
-     * exp_aguarde_documentos -> exp_confirmacao e revalidada de novo em
-     * exp_confirmacao -> impressao (nunca confia so na etapa ja alcancada).
-     */
     private const SEQUENCIA_EXPEDICAO = [
         'dados_encontrados'        => ['proxima_etapa' => 'exp_cnh', 'proxima_tela' => 'exp_cnh', 'gate' => null],
         'exp_cnh'                  => ['proxima_etapa' => 'exp_crlv', 'proxima_tela' => 'exp_crlv', 'gate' => 'upload_cnh'],
@@ -761,40 +508,12 @@ class AtendimentoController
         'exp_confirmacao'          => ['proxima_etapa' => 'impressao', 'proxima_tela' => 'impressao', 'gate' => 'ambos_aprovados'],
     ];
 
-    /**
-     * Mesma logica para Recebimento (mesma demanda, escopo expandido no
-     * REPLANEJAMENTO 2026-09-09): rec_cnh -> rec_crlv ->
-     * rec_aguarde_documentos -> rec_confirmacao.
-     *
-     * Unificado na rodada corretiva de 2026-09-26: a etapa de CNH do
-     * Recebimento existia como DUAS etapas separadas (rec_cnh_frente/
-     * rec_cnh_verso), assimetria em relacao a Expedicao (exp_cnh, unica
-     * etapa) que uma decisao de produto ANTERIOR classificava como
-     * intencional. O usuario revogou essa decisao explicitamente nesta
-     * demanda (frente e verso da CNH devem permanecer em memoria no
-     * front-end ate o envio conjunto, sem gate de etapa entre um upload e
-     * outro) — agora 'rec_cnh' e uma etapa unica, mesmo padrao de exp_cnh:
-     * os 2 uploads (cnh_frente/cnh_verso, ver
-     * DocumentoController::ETAPAS_UPLOAD) acontecem na MESMA etapa, e o
-     * gate de saida ('upload_cnh') so libera a transicao para rec_crlv
-     * quando AMBOS os arquivos ja estao salvos em disco — nunca no meio do
-     * caminho, entre a captura da frente e a do verso.
-     */
     private const SEQUENCIA_RECEBIMENTO_DOCUMENTOS = [
         'rec_cnh'                => ['proxima_etapa' => 'rec_crlv', 'proxima_tela' => 'rec_crlv', 'gate' => 'upload_cnh'],
         'rec_crlv'               => ['proxima_etapa' => 'rec_aguarde_documentos', 'proxima_tela' => 'rec_aguarde_documentos', 'gate' => 'upload_crlv'],
         'rec_aguarde_documentos' => ['proxima_etapa' => 'rec_confirmacao', 'proxima_tela' => 'rec_confirma', 'gate' => 'ambos_aprovados'],
     ];
 
-    /**
-     * Maquina de estados GENERALIZADA (Expedicao E Recebimento) para as
-     * etapas de CNH/CRLV — substitui a versao anterior restrita a Expedicao,
-     * reaproveitando a MESMA logica de gate (App\Rn\DocumentoRn::
-     * cnhAprovada/crlvAprovado, ja agnostico de tipo) sem duplicar regra de
-     * negocio entre os dois fluxos. O front-end NUNCA decide sozinho mudar
-     * de tela — toda transicao passa por aqui, com posse/tipo/status/regra
-     * de negocio revalidados no backend a cada chamada.
-     */
     public function avancarEtapaDocumentos(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
@@ -812,8 +531,6 @@ class AtendimentoController
             Resposta::erro('Atendimento nao esta em andamento');
         }
         if ($this->documentoRn === null) {
-            // dependencia opcional nao injetada (uso fora do endpoint HTTP) —
-            // nao ha como validar CNH/CRLV com seguranca, falha fechada.
             Resposta::erro('Nao foi possivel avancar a etapa agora', 500);
         }
 
@@ -833,19 +550,11 @@ class AtendimentoController
         $this->atendimentoRn->atualizarEtapa($idAtendimento, $transicao['proxima_etapa']);
         $resposta = ['proxima_tela' => $transicao['proxima_tela'], 'etapa' => $transicao['proxima_etapa']];
         if (in_array($transicao['proxima_etapa'], ['exp_confirmacao', 'rec_confirmacao'], true)) {
-            // Aditivo: a tela de confirmacao precisa dos dados ja persistidos
-            // (VIO ou preenchimento manual); o front nunca os recebia.
             $resposta['dados_confirmacao'] = $this->dadosParaConfirmacao($atendimento);
         }
         Resposta::sucesso($resposta);
     }
 
-    /**
-     * Dados do PROPRIO atendimento (posse ja validada) exibidos na tela de
-     * confirmacao. CPF integral de proposito: o motorista o confere/edita ali
-     * e salvarDadosMotorista() compara digitos contra o snapshot (mascarar
-     * corromperia a confirmacao).
-     */
     private function dadosParaConfirmacao(array $a): array
     {
         $validade = (string) ($a['cnh_validade'] ?? '');
@@ -868,70 +577,21 @@ class AtendimentoController
         ];
     }
 
-    /**
-     * Alias de compatibilidade — nome/rota anterior (ciclo sincrono,
-     * restrito a Expedicao) do que hoje e avancarEtapaDocumentos(), ja
-     * generalizado para os dois tipos de atendimento.
-     */
     public function avancarEtapaExpedicao(array $entrada, int $idTotem): void
     {
         $this->avancarEtapaDocumentos($entrada, $idTotem);
     }
 
-    /**
-     * Avalia o "gate" de uma transicao: null = sem restricao; upload_cnh/
-     * upload_crlv = sempre liberados (fluxo QR-only: nao ha foto/arquivo de
-     * documento em disco; a validacao VIO roda em segundo plano e nao
-     * bloqueia a etapa seguinte); ambos_aprovados = CNH E CRLV precisam estar
-     * em estado terminal ACEITAVEL (mesma checagem do gate final de
-     * impressao, sem nenhuma flexibilizacao).
-     */
     private function gateDeTransicaoLiberado(array $atendimento, ?string $gate): bool
     {
         return match ($gate) {
             null => true,
-            // Usado por exp_cnh/exp_crlv e rec_cnh/rec_crlv.
-            // QR-only inicia a validacao sem persistir fotos de documento.
             'upload_cnh', 'upload_crlv' => true,
             'ambos_aprovados' => $this->documentoRn->cnhAprovada($atendimento) && $this->documentoRn->crlvAprovado($atendimento),
             default => false,
         };
     }
 
-    /**
-     * Finalizacao do atendimento — envio do check-in ao Talent
-     * (Portaria/Checkin). Corrigido IDOR CRITICO nesta demanda
-     * (integracao-talent-portaria-checkin, 2026-09-09): antes usava
-     * atendimentoRn->buscar() puro, sem validar posse/tipo/status/etapa —
-     * qualquer totem autenticado podia disparar o check-in (com CPF/CNH/
-     * anexos) de um atendimento de OUTRO totem.
-     *
-     * Sequencia de validacao (correcao de comentario apos revisao do
-     * security-especialista e qa-testes — a checagem 1 usa mensagem
-     * generica de proposito para nunca revelar posse/existencia a outro
-     * totem; as checagens 2-5 ja operam sobre um atendimento CONFIRMADO
-     * como do totem autenticado, entao podem ter mensagens distintas entre
-     * si sem constituir vazamento de informacao entre totens — mesmo
-     * padrao ja usado nos demais `case` de salvarEtapa() neste controller):
-     *   1. posse (buscarAtendimentoDoTotem) — mensagem generica
-     *      'Atendimento nao encontrado', NUNCA revela se o id existe ou
-     *      pertence a outro totem (cobre tanto "nao existe" quanto
-     *      "existe mas e de outro totem")
-     *   2. tipo expedicao|recebimento — tambem 'Atendimento nao encontrado'
-     *      (coincide com a mensagem da checagem 1, mas por motivo diferente:
-     *      aqui e so validacao de dado, nao ocultacao de IDOR)
-     *   3. status em_andamento — 'Atendimento nao esta em andamento'
-     *   4. etapa_atual = etapa de confirmacao esperada (exp_confirmacao/
-     *      rec_confirmacao) — 'Atendimento nao esta na etapa esperada para
-     *      finalizar'
-     *   5. documentos obrigatorios aprovados (cnhAprovada && crlvAprovado)
-     *      — 'Documentos obrigatorios pendentes/invalidos'
-     *   6. cnpjArmazem resolvivel (totem tem id_empresa valido) — mensagem
-     *      PROPRIA aqui, nao e um caso de IDOR (nao revela nada sobre outro
-     *      atendimento, so sobre a configuracao do PROPRIO totem)
-     *   7. idempotencia (CAS de talent_checkin_status) — ULTIMA checagem,
-     *      imediatamente antes de ler qualquer anexo do disco/montar payload
-     */
     public function finalizar(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
@@ -950,9 +610,6 @@ class AtendimentoController
         if ($this->documentoRn === null || !$this->documentoRn->cnhAprovada($atendimento) || !$this->documentoRn->crlvAprovado($atendimento)) {
             Resposta::erro('Documentos obrigatorios pendentes/invalidos');
         }
-        // Gate final (decisao 2026-10-02): o Talent exige veiculo.rntc e tipo
-        // e o CRLV aprovado ja nao garante nenhum dos dois; so a confirmacao
-        // os preenche.
         $ausentesFinal = [];
         if (trim((string) ($atendimento['crlv_rntc'] ?? '')) === '') {
             $ausentesFinal['crlv_rntc'] = 'RNTRC';
@@ -979,20 +636,11 @@ class AtendimentoController
         $empresa = $idEmpresa !== null ? $this->empresaDao->buscarPorId((int) $idEmpresa) : null;
 
         if ($empresa === null) {
-            // Nunca assume empresa default — totem sem vinculo configurado
-            // falha explicitamente (decisao de produto, ver
-            // docs/handoffs/2026-09-09-integracao-talent-portaria-checkin.md).
             Resposta::erro('Totem sem empresa/armazem configurado para envio ao Talent', 500);
         }
 
         $notas = $this->notaDao->listarPorAtendimento($idAtendimento);
 
-        // GATES REAIS de doctos[] (demanda talent-doctos-finalizacao-checkin,
-        // 2026-09-14) — substituem a trava incondicional TALENT_DOCTOS_PENDENTE
-        // anterior. Rodam ANTES do CAS de idempotencia, exercitando 100% da
-        // validacao mesmo quando TALENT_CHECKIN_ATIVO estiver desligado (ver
-        // abaixo) — defesa em profundidade, App\Rn\TalentRn::montarPayload()
-        // tambem valida isso internamente.
         if ($atendimento['tipo'] === 'recebimento') {
             foreach ($notas as $nota) {
                 if (trim((string) ($nota['numero_nota'] ?? '')) === '') {
@@ -1001,45 +649,23 @@ class AtendimentoController
                 }
             }
         } else {
-            // expedicao — defesa em profundidade, ordem_coleta ja deveria
-            // estar garantido a montante (selecionar-ordem)
             if (trim((string) ($atendimento['ordem_coleta'] ?? '')) === '') {
                 Resposta::erro('Atendimento sem ordem de coleta selecionada', 422);
                 return;
             }
         }
 
-        // Mecanismo de "ativacao configuravel fail-closed" — enquanto
-        // TALENT_CHECKIN_ATIVO nao for LITERALMENTE 'true' no .env, nenhuma
-        // chamada de rede real ao Talent ocorre daqui pra frente, mas TODOS
-        // os gates acima (doctos/posse/tipo/status/etapa/documentos) ja
-        // foram exercitados normalmente. Fail-closed: ausente/qualquer outro
-        // valor = tratado como desativado. Permite "ligar" no futuro so
-        // mudando esta variavel de ambiente, sem alterar codigo. Ver
-        // docs/handoffs/2026-09-14-talent-doctos-finalizacao-checkin.md.
         $talentCheckinAtivo = ($_ENV['TALENT_CHECKIN_ATIVO'] ?? '') === 'true';
         if (!$talentCheckinAtivo) {
             Resposta::erro('Envio ao Talent temporariamente desativado (TALENT_CHECKIN_DESATIVADO)', 503);
             return;
         }
 
-        // CAS de idempotencia (5 estados) — ULTIMO portao antes de ler
-        // anexos do disco/montar payload. App\Rn\TalentRn::processarCheckin
-        // orquestra a maquina de estados inteira (marcar obsoleto -> checar
-        // estado atual -> CAS -> montar payload/anexos -> chamar o Talent ->
-        // gravar resultado).
         $resultado = $this->talentRn->processarCheckin($atendimento, $empresa, $notas);
 
         switch ($resultado['status']) {
             case 'ENVIADO':
             case 'JA_ENVIADO':
-                // Atualizacao de ordem para INATIVA — so Expedicao, so DEPOIS
-                // da confirmacao de sucesso, nunca antes, nunca para
-                // Recebimento. Falha aqui NUNCA bloqueia a resposta de
-                // sucesso ja garantida ao motorista (a senha/nrRegAcesso ja
-                // e valida independente disso) — registrada como pendencia
-                // de auditoria (tb_ordem_coleta_pendente_baixa), idempotente,
-                // sem cron de reconciliacao automatica nesta demanda.
                 if ($atendimento['tipo'] === 'expedicao') {
                     $this->tentarMarcarOrdemConcluida(
                         $idAtendimento,
@@ -1056,18 +682,9 @@ class AtendimentoController
                 Resposta::erro('Nao foi possivel confirmar seu check-in — procure um atendente', 500);
                 return;
             case 'ERRO_REPROCESSAVEL':
-                // Sem reenvio automatico: o estado ERRO_REPROCESSAVEL permite so
-                // uma nova chamada de finalizar() pelo totem. Registra UMA linha
-                // de log sanitizada (id_atendimento + categoria de allowlist
-                // fechada; nunca excecao, corpo, CPF ou token).
                 $categoria = self::categoriaFalhaCheckinParaLog($resultado['erro_categoria'] ?? null);
                 error_log('[AtendimentoController] checkin_talent_erro_reprocessavel id_atendimento=' . $idAtendimento . ' categoria=' . $categoria);
                 self::registrarFalhaCheckinNoLog('talent_erro_reprocessavel', $idAtendimento, $idTotem, $atendimento['tipo'], $categoria);
-                // 202 (contrato mantido): o check-in NAO foi concluido. O texto
-                // nao promete reprocessamento automatico e orienta chamar o
-                // atendimento. dados.mensagem_api (aditivo): retorno real da
-                // Talent, ja sanitizado (<= 300 chars, texto puro); so existe
-                // quando a falha veio de resposta HTTP da Talent. Nunca logada.
                 $textoFalha = self::textoFalhaCheckin($categoria);
                 $mensagemApi = $resultado['mensagem_api'] ?? null;
                 if (is_string($mensagemApi) && $mensagemApi !== '') {
@@ -1077,8 +694,6 @@ class AtendimentoController
                 Resposta::erro($textoFalha, 202);
                 return;
             case 'ENVIO_INDETERMINADO':
-                // Sem retry automatico (por design) — exige conferencia
-                // manual no painel do Talent.
                 self::registrarFalhaCheckinNoLog('talent_indeterminado', $idAtendimento, $idTotem, $atendimento['tipo'], self::categoriaFalhaCheckinParaLog($resultado['erro_categoria'] ?? null));
                 Resposta::erro('Nao foi possivel confirmar seu check-in — procure um atendente', 500);
                 return;
@@ -1087,12 +702,6 @@ class AtendimentoController
         }
     }
 
-    /**
-     * Log central (tb_log_sistema) de uma falha de check-in no Talent. So ids ja
-     * validados (posse do atendimento pelo totem autenticado), tipo e a categoria
-     * da allowlist (categoria_erro); 'erro_desconhecido' nao esta no catalogo e
-     * simplesmente nao e enviada. Nunca excecao, mensagem_api, corpo ou dado pessoal.
-     */
     private static function registrarFalhaCheckinNoLog(string $categoriaLog, int $idAtendimento, int $idTotem, string $tipo, string $categoriaErro): void
     {
         $ctx = ['id_atendimento' => $idAtendimento, 'id_totem' => $idTotem, 'tipo' => $tipo];
@@ -1102,12 +711,6 @@ class AtendimentoController
         LogSistema::registrar($categoriaLog, $ctx);
     }
 
-    /**
-     * Categoria sanitizada de uma falha ERRO_REPROCESSAVEL do check-in para
-     * log/escolha de texto: so as categorias fechadas de
-     * TalentClientException ou o literal interno 'erro_montagem_payload';
-     * qualquer outro valor vira 'erro_desconhecido'.
-     */
     private static function categoriaFalhaCheckinParaLog(mixed $categoria): string
     {
         if (is_string($categoria)
@@ -1117,12 +720,6 @@ class AtendimentoController
         return 'erro_desconhecido';
     }
 
-    /**
-     * Texto fixo e honesto do 202 do finalizar por categoria (allowlist),
-     * sem promessa de reprocessamento automatico; sempre orienta chamar o
-     * atendimento. O retorno real da Talent, quando existe, vai em
-     * dados.mensagem_api.
-     */
     private static function textoFalhaCheckin(string $categoria): string
     {
         switch ($categoria) {
@@ -1140,14 +737,6 @@ class AtendimentoController
     public function cancelar(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
-        // sem restricao de tipo/status em PHP: cancelar precisa funcionar em
-        // qualquer tela/tipo/status do fluxo (Expedicao e Recebimento) — so
-        // valida posse aqui. A UNICA restricao (status='concluido' e
-        // terminal/imutavel, demanda integridade-conclusao-atendimento,
-        // 2026-09-16) e aplicada diretamente no CAS do UPDATE
-        // (App\Dao\AtendimentoDao::cancelar), nunca checada em PHP antes —
-        // checar em PHP aqui abriria uma janela de corrida (TOCTOU) entre
-        // este SELECT de posse e o UPDATE.
         $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
         if (!$this->atendimentoRn->cancelar($idAtendimento)) {
@@ -1155,23 +744,11 @@ class AtendimentoController
             return;
         }
 
-        // Decisao D3 (demanda hardening-revisao-notas-e-cliente,
-        // 2026-09-30): cancelamento e abandono (a inatividade cancela pelo
-        // mesmo endpoint) movem as FOTOS DAS NOTAS para quarentena (sem
-        // apagar de vez; o cron diario apaga os .del com mais de 24 h).
-        // Falha aqui NUNCA impede o cancelamento ja confirmado no banco.
         $this->quarentenarFotosDasNotas($idAtendimento, $atendimento);
 
         Resposta::sucesso(['ok' => true]);
     }
 
-    /**
-     * Move as fotos das notas do atendimento cancelado para quarentena
-     * (rename para nota_NN.jpg.<id_nota>.del). Melhor esforco: nunca lanca,
-     * nunca altera a resposta. Log SEMPRE fixo e agregado (contagens e
-     * id_atendimento inteiro; nunca caminho, pasta com placa ou nome de
-     * arquivo).
-     */
     private function quarentenarFotosDasNotas(int $idAtendimento, array $atendimento): void
     {
         try {
@@ -1201,36 +778,6 @@ class AtendimentoController
         }
     }
 
-    /**
-     * Tenta marcar a ordem de coleta como INATIVA (banco externo de gestao
-     * de coletas) apos check-in confirmado no Talent — SEMPRE em try/catch,
-     * SEMPRE sem propagar excecao: qualquer falha real (retorno false por
-     * ordem ainda ATIVA/inexistente, OU excecao) e registrada em
-     * tb_ordem_coleta_pendente_baixa (auditoria idempotente, so os 2
-     * identificadores + timestamps, NUNCA payload/dado pessoal/credencial),
-     * log estruturado sanitizado so com esses 2 IDs. Nunca bloqueia/altera a
-     * resposta de sucesso ja decidida pelo chamador.
-     *
-     * Correcao de auditoria (2026-09-15): o branch JA_ENVIADO do Talent pode
-     * chegar aqui com a ordem ja INATIVA de uma chamada anterior
-     * bem-sucedida (reprocessamento idempotente do mesmo check-in) —
-     * marcarConcluida() retorna false nesse caso (UPDATE condicional
-     * WHERE status='ATIVA' afeta 0 linhas), mas isso NAO e uma falha: a
-     * ordem ja esta no estado final correto. Por isso, quando marcarConcluida()
-     * retorna false, consulta-se o status atual (statusAtual()) para
-     * distinguir "ja estava INATIVA" (idempotente, sucesso, sem registro de
-     * pendencia, sem segunda tentativa de UPDATE) de uma falha real (ordem
-     * ainda ATIVA, inexistente, ou status desconhecido por excecao na
-     * propria consulta de status — tratado como falha real por seguranca).
-     *
-     * F4a (2026-10-08): a ordem e identificada por CLIENTE + numero, nunca so
-     * por numero (o mesmo numero pode existir em outro cliente). O CNPJ vem de
-     * tb_atendimento.cliente_cnpj, gravado em AtendimentoDao::preencherDadosOrdem
-     * a partir de tb_clientes.cnpj da ordem escolhida (Expedicao). Se o CNPJ
-     * estiver ausente/so sem digitos, NAO se tenta inativar (numero ambiguo):
-     * registra-se a pendencia de baixa (resolucao manual na gestao) e
-     * LogSistema oc_baixa_falhou motivo=baixa_pendente.
-     */
     private function tentarMarcarOrdemConcluida(int $idAtendimento, string $numeroOrdemColeta, string $cnpjCliente = ''): void
     {
         $cnpjCliente = \App\Dao\OrdemColetaDao::normalizarCnpj($cnpjCliente);
@@ -1243,7 +790,6 @@ class AtendimentoController
 
         $statusAtual = null;
         if ($cnpjCliente === '') {
-            // Cliente ausente: numero ambiguo, nao inativa (ver docblock).
             error_log("finalizar: atendimento sem CNPJ do cliente, baixa da ordem de coleta NAO tentada (id_atendimento={$idAtendimento})");
         } else {
             try {
@@ -1278,14 +824,6 @@ class AtendimentoController
         }
     }
 
-    /**
-     * Busca o atendimento e garante que pertence ao totem autenticado.
-     * Mensagem de erro generica em qualquer caso de falha (nao existe / eh
-     * de outro totem) para nao vazar a existencia de atendimento alheio.
-     * Mesmo padrao usado em NotaController::buscarAtendimentoDoTotem, adaptado
-     * aqui pois AtendimentoController nao tem AtendimentoDao direto no
-     * construtor (usa AtendimentoRn::buscar, que ja delega ao Dao).
-     */
     private function buscarAtendimentoDoTotem(int $idAtendimento, int $idTotem): array
     {
         $atendimento = $this->atendimentoRn->buscar($idAtendimento);

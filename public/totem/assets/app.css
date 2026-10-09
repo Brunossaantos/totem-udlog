@@ -1,9 +1,3 @@
-/* Paleta oficial UDLOG (demanda tela-inicial-lgpd-totem, 2026-09-24) —
-   fonte: .claude/skills/udlog-brand-colors/SKILL.md, ja validada e
-   aplicada ao projeto INTEIRO nesta implementacao (substitui o navy
-   #0b2a45 usado ate aqui como placeholder, ver tabela de mapeamento no
-   handoff desta demanda). Nao alterar os valores hex sem atualizar a
-   skill primeiro. */
 :root {
     --brand-primary: #0179AD;
     --background: #FFFFFF;
@@ -32,11 +26,6 @@ body {
     padding: 16px 20px 0;
     flex-shrink: 0;
 }
-/* Botao SOLIDO vermelho (pedido explicito do usuario, 2026-09-28)
-   mesmo tom semantico ja usado/aprovado em .btn-alerta (#a32d2d, ja
-   confirmado acessivel), agora com fundo solido + texto branco em vez
-   de outline, para se destacar como acao de cancelamento em todas as
-   telas do fluxo (exceto a tela inicial, onde nao aparece). */
 .btn-cancelar {
     background: #a32d2d;
     border: none;
@@ -58,8 +47,6 @@ body {
 }
 .titulo { font-size: 22px; font-weight: 600; text-align: center; color: var(--text-primary); }
 .titulo-home { font-size: 34px; font-weight: 800; color: #000000; }
-/* mesma ressalva de contraste do .btn-cancelar acima — 15px fica abaixo do
-   limiar seguro para --text-secondary, mantido --text-primary. */
 .subtitulo { font-size: 15px; color: var(--text-primary); text-align: center; }
 
 .btn-primario, .btn-fantasma, .btn-alerta {
@@ -71,8 +58,6 @@ body {
 }
 .btn-primario { background: var(--action-primary); color: var(--action-primary-text); border: 2px solid var(--action-primary); }
 .btn-fantasma { background: var(--surface); color: var(--brand-primary); border: 2px solid var(--brand-primary); }
-/* excecao semantica mantida (erro/alerta) — cor propria fora da paleta de
-   marca, ja acessivel, sempre usada junto de texto (nunca so cor). */
 .btn-alerta { background: var(--surface); color: #a32d2d; border: 2px solid #a32d2d; }
 .btn-primario:disabled { opacity: 0.6; cursor: not-allowed; }
 
@@ -96,7 +81,6 @@ input.campo-texto {
     margin: 0 auto;
 }
 .campo { display: flex; flex-direction: column; gap: 4px; }
-/* ressalva de contraste de novo (13px, ainda menor) — --text-primary. */
 .campo label { font-size: 13px; color: var(--text-primary); font-weight: 600; }
 .campo input {
     border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
@@ -109,7 +93,6 @@ input.campo-texto {
 .caixa-camera { position: relative; width: 100%; max-width: 360px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 4/3; }
 .caixa-camera video { width: 100%; height: 100%; object-fit: cover; }
 .status-leitura { font-size: 13px; color: var(--text-primary); text-align: center; }
-/* excecao semantica mantida (sucesso) — mesma justificativa do erro acima. */
 .status-leitura.ok { color: #1d7a5f; font-weight: 600; }
 
 .cartao-oc { text-align: left; background: #f7f9fa; border: 1.5px solid var(--border); border-radius: 10px; padding: 14px 16px; cursor: pointer; }
@@ -125,30 +108,12 @@ input.campo-texto {
 .miniatura { position: relative; width: 32px; height: 40px; background: var(--action-primary); border-radius: 5px; display: flex; align-items: center; justify-content: center; color: var(--action-primary-text); font-size: 12px; overflow: visible; }
 .miniatura img { width: 100%; height: 100%; object-fit: cover; border-radius: 5px; }
 
-/* aspect-ratio 4/3 e so o fallback ANTES do stream conectar (e antes do primeiro
-   calculo) — 4/3 (horizontal) foi escolhido por ser a proporcao real entregue
-   pelo Netum SD-2000, evitando o "flash" visual de nascer vertical (3/4) e so
-   depois virar horizontal quando o JS calcula a altura real. A propriedade CSS
-   aspect-ratio nao e respeitada de forma confiavel dentro do container
-   flex/column .tela nesse navegador, entao a partir do momento em que a
-   resolucao real do video e conhecida, ajustarProporcaoScanner() (app.js)
-   calcula a altura em PIXELS (clientWidth * videoHeight / videoWidth) e
-   escreve style.height diretamente em #caixaScanner/#previaNota, sobrescrevendo
-   esse fallback (height explicito tem precedencia sobre aspect-ratio). O
-   <video> fica com visibility:hidden (via JS, em abrirStreamScanner) ate a
-   altura real ser aplicada, para nao mostrar frame sem layout correto. */
 .caixa-scanner { position: relative; width: 100%; max-width: 360px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 4/3; flex-shrink: 0; }
 .caixa-scanner video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .guia-scanner { position: absolute; inset: 8%; border: 2px dashed rgba(255,255,255,0.85); border-radius: 8px; pointer-events: none; }
-/* Quadrado de foco do QR (telas exp/rec CNH e CRLV): 4 cantos, centralizado,
-   lado = 36% da ALTURA do quadro de video (QR da CNH ~33% da altura, CRLV
-   ~20%, medidos em exemplos/). Mesma constante em qr-leitura.js (GUIA_PADRAO):
-   o recorte de leitura parte desta regiao. Cantos azul UDLOG #0179AD com
-   contorno branco para ter contraste sobre papel claro e fundo escuro; o
-   centro fica livre (nao cobre o QR). */
 .guia-qr { position: absolute; left: 50%; top: 50%; height: 36%; aspect-ratio: 1 / 1; transform: translate(-50%, -50%); pointer-events: none; }
 .guia-qr::before, .guia-qr::after { content: ""; position: absolute; background-repeat: no-repeat; }
-.guia-qr::before { /* contorno branco (10px) */
+.guia-qr::before {
     inset: -3px;
     background-image:
         linear-gradient(#fff, #fff), linear-gradient(#fff, #fff), linear-gradient(#fff, #fff), linear-gradient(#fff, #fff),
@@ -156,7 +121,7 @@ input.campo-texto {
     background-size: 24% 10px, 10px 24%, 24% 10px, 10px 24%, 24% 10px, 10px 24%, 24% 10px, 10px 24%;
     background-position: left top, left top, right top, right top, left bottom, left bottom, right bottom, right bottom;
 }
-.guia-qr::after { /* cantos azuis (6px) */
+.guia-qr::after {
     inset: 0;
     background-image:
         linear-gradient(#0179AD, #0179AD), linear-gradient(#0179AD, #0179AD), linear-gradient(#0179AD, #0179AD), linear-gradient(#0179AD, #0179AD),
@@ -165,31 +130,13 @@ input.campo-texto {
     background-position: left top, left top, right top, right top, left bottom, left bottom, right bottom, right bottom;
 }
 .previa-nota { width: 100%; max-width: 360px; margin: 0 auto; display: block; border-radius: 12px; object-fit: contain; background: #000; flex-shrink: 0; }
-/* O quadro de notas e a captura de documentos usam a mesma largura util.
-   Os IDs de documento preservam a classe-base e, portanto, nao alteram a
-   rotacao/previa particular das notas. A altura real continua sendo escrita
-   pelo JS depois que o stream negocia sua resolucao. */
 #caixaScanner, #previaNota,
 #expCamCaixa, #expCamPreview,
 #recCamCaixa, #recCamPreview { max-width: min(92%, 900px); }
-/* Os controles que confirmam/refazem documento continuam visiveis no totem
-   vertical e atingem o alvo minimo de toque sem afetar a captura de notas. */
 #expCamControles .btn-primario, #expCamControles .btn-fantasma,
 #recCamControles .btn-primario, #recCamControles .btn-fantasma { min-height: 64px; }
-/* AJUSTE (2026-09-28, demanda foto-nota-em-pe): a previa da nota agora
-   nasce em pe (rotacionada 270 graus na captura, ver capturarFotoScannerNota()
-   em app.js) — mas a altura inline aplicada via JS em ambos os elementos
-   (aplicarAlturaScanner()) usa a proporcao NATIVA do video ao vivo
-   (paisagem, 4:3, correta para #caixaScanner), o que deixava a previa
-   (retrato) com pillarbox grande e a nota pequena dentro da caixa. Este
-   !important sobrescreve SO a altura de #previaNota (nunca a de
-   #caixaScanner, que continua paisagem corretamente, e nunca a de
-   #expCamPreview/#recCamPreview, que nao usam este ID) para a imagem
-   exibir na sua propria proporcao (retrato), sem pillarbox. */
 #previaNota { height: auto !important; max-height: 70vh; }
 .status-scanner { font-size: 13px; color: var(--text-primary); text-align: center; }
-/* excecoes semanticas mantidas (sucesso/erro), texto proprio ja indica o
-   estado (nunca so cor). */
 .status-scanner.ok { color: #1d7a5f; font-weight: 600; }
 .status-scanner.erro { color: #a32d2d; font-weight: 600; }
 
@@ -205,51 +152,21 @@ input.campo-texto {
 .tecla-espaco { flex: 3; max-width: 322px; font-size: 16px; }
 .tecla-ok { max-width: 99px; background: var(--action-primary); color: var(--action-primary-text); }
 
-/* scrim neutro (baseado em --text-primary, rgb(58,58,58)) — evita
-   reintroduzir o navy antigo (#0b2a45) so como cor de fundo semi-
-   transparente do overlay; nao e uma cor de marca/acao, so escurece o
-   conteudo por tras do modal. */
 .modal-fundo { display: none; position: fixed; inset: 0; background: rgba(58,58,58,0.5); align-items: center; justify-content: center; padding: 20px; z-index: 50; }
 .modal-fundo.aberto { display: flex; }
 .modal-caixa { background: var(--surface); border-radius: 14px; padding: 24px; max-width: 320px; text-align: center; display: flex; flex-direction: column; gap: 14px; }
 .modal-caixa .titulo { font-size: 17px; color: var(--text-primary); }
 .modal-caixa .subtitulo { font-size: 14px; color: var(--text-primary); }
 
-/* confirmacao de cancelamento EMPILHADA sobre o modal de numero da nota
-   (achado bloqueante do /03-revisao, demanda talent-doctos-finalizacao-checkin)
-   — elemento PROPRIO e independente de #modalFundo/#modalCaixa, por isso
-   z-index maior (fica por cima do modal de numero da nota, que continua
-   visivel/intacto por tras enquanto esta confirmacao estiver aberta). */
 .modal-fundo-confirma-nota { z-index: 55; }
 
-/* aviso de inatividade em overlay PROPRIO e independente (achado bloqueante
-   do /02-testes de confirmacao, demanda talent-doctos-finalizacao-checkin) —
-   elemento PROPRIO, nunca reaproveita #modalFundo/#modalCaixa nem
-   #modalConfirmCancelNotaFundo/Caixa. Precisa aparecer por cima de QUALQUER
-   overlay que possa estar aberto no momento em que o timer dispara: acima do
-   modal padrao (z-index:50), da confirmacao de cancelamento empilhada sobre o
-   modal de numero da nota (z-index:55) e do overlay de diagnostico de
-   impressao (.diag-overlay, z-index:70, acessivel por toque longo em
-   qualquer tela) — por isso a camada mais alta do projeto. */
 .modal-fundo-inatividade { z-index: 80; }
 
-/* teclado numerico DEDICADO ao modal de numero da nota fiscal (demanda
-   talent-doctos-finalizacao-checkin, achado 2 do /03-revisao) — alvos grandes
-   (~64px), NAO reaproveitado por nenhuma outra tela/teclado do projeto. */
 .teclado-numerico-nota { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; max-width: 280px; margin: 0 auto; }
 .tecla-numerica { height: 64px; font-size: 22px; font-weight: 600; background: var(--surface); border: 2px solid var(--brand-primary); border-radius: 10px; color: var(--text-primary); cursor: pointer; }
 .tecla-numerica-apagar { background: #dbe4ea; border-color: #dbe4ea; }
 .tecla-numerica-confirmar { background: var(--action-primary); border-color: var(--action-primary); color: var(--action-primary-text); }
 
-/* botao de saida do modal obrigatorio de numero da nota (achado 1 e achado
-   de atencao do /03-revisao, demanda talent-doctos-finalizacao-checkin) —
-   antes usava .btn-cancelar (texto cinza claro, sem padding/borda definidos,
-   sem alvo de toque minimo), com contraste insuficiente sendo o UNICO botao
-   de saida disponivel dentro de um modal obrigatorio. Agora usa contraste
-   equivalente a .btn-fantasma (fundo branco, borda solida) com altura minima
-   de 64px, igual ao alvo de toque do teclado numerico dedicado desta mesma
-   tela (.tecla-numerica), mas mais discreto que .btn-alerta/.tecla-numerica-
-   confirmar para nao competir visualmente com "Confirmar". */
 .btn-saida-modal-nota {
     margin-top: 4px;
     min-height: 64px;
@@ -266,22 +183,10 @@ input.campo-texto {
     cursor: pointer;
 }
 
-/* ponto de acesso discreto ao diagnostico de impressao de teste (toque longo)
-   — ver public/totem/assets/diagnostico-impressao.js. Invisivel de proposito,
-   nao e uma decisao de UX confirmada, so a sugestao registrada no handoff de
-   planejamento reaproveitada nesta implementacao. */
 .diag-hotspot { position: fixed; bottom: 0; right: 0; width: 56px; height: 56px; }
 
-/* telas de impressao real pos-Talent (exp_impressao/rec_impressao) —
-   demanda impressao-arquitetura-producao-ux. Botoes com alvo de toque
-   minimo de 64px (item 4), igual ao padrao ja usado em .tecla-numerica/
-   .btn-saida-modal-nota — restrito a estas telas via .impr-btn-alvo, sem
-   afetar botoes de outras telas do projeto. */
 .impr-btn-alvo { min-height: 64px; }
 
-/* indicador visual de processamento (item 2) — spinner CSS simples,
-   reaproveitando a cor de acao oficial da marca, sem cor nova. Usado nos 4
-   momentos de espera das telas de impressao. */
 .impr-spinner {
     width: 48px;
     height: 48px;
@@ -295,7 +200,6 @@ input.campo-texto {
     to { transform: rotate(360deg); }
 }
 
-/* alerta de falta de papel (impressao): destaque legivel, so cores da paleta. */
 .impr-alerta {
     display: flex;
     flex-direction: column;
@@ -329,30 +233,9 @@ input.campo-texto {
 
 .diag-overlay { position: fixed; inset: 0; background: rgba(58,58,58,0.6); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 70; }
 .diag-caixa { background: var(--surface); border-radius: 14px; max-width: 420px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; }
-/* 13px — abaixo do limiar seguro para --text-secondary, mantido --text-primary. */
 .diag-cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text-primary); font-weight: 600; }
 .diag-corpo { padding: 24px 20px; display: flex; flex-direction: column; gap: 18px; }
 
-/* ===================================================================
-   Tela LGPD (demanda tela-inicial-lgpd-totem, 2026-09-24) — primeira
-   tela real da SPA, gate obrigatorio antes de 'home'. Namespace .lgpd-*
-   dedicado, sem reaproveitar/alterar nenhuma classe de tela existente.
-
-   RODADA "transplante literal" (2026-09-25): TODOS os valores abaixo
-   (px, clamp(), hex, rgba(), font-weight, letter-spacing etc.) sao
-   copiados EXATAMENTE de docs/indexTotem.html (fonte de verdade visual),
-   nao aproximados. So a estrutura (nomes de classe, elementos extras
-   necessarios) foi adaptada. Onde o valor de uma variavel do prototipo ja
-   existe em :root com o MESMO hex (--brand-primary, --text-secondary,
-   --border, --action-primary/-text), reaproveita a variavel do projeto em
-   vez de duplicar; --neutral-500 (#9BA0A5) do prototipo == --text-muted
-   ja existente aqui, mesmo valor, reaproveitado.
-   =================================================================== */
-
-/* .kiosk-screen do prototipo -- padding clamp literal aplicado aqui (nao em
-   .tela, classe generica compartilhada por 49 outras telas). display:flex
-   + align/justify:center e width:100% tambem literais do .kiosk-screen;
-   position:relative serve de contexto para o gradiente ::after abaixo. */
 .lgpd-tela {
     position: relative;
     display: flex;
@@ -360,25 +243,10 @@ input.campo-texto {
     align-items: center;
     justify-content: center;
     width: 100%;
-    /* min-height:100% (nao min-height:100vh, ja que aqui e um filho de .tela,
-       que ja preenche a viewport via #app/flex:1) -- necessario para o
-       gradiente ::after cobrir a altura INTEIRA disponivel, igual ao
-       .hero::after do prototipo (que cobre .kiosk-screen inteiro, tela
-       cheia), em vez de ficar restrito so a altura do conteudo. */
     min-height: 100%;
     padding: clamp(24px, 5vw, 64px);
 }
-/* Gradiente decorativo do prototipo REMOVIDO por pedido explicito do
-   usuario (2026-09-25) -- o fundo precisa ser uniforme, todo da mesma
-   cor (var(--background), branco), sem variacao de tom nas bordas. */
 
-/* Ajustado por pedido explicito do usuario (2026-09-25): a tela LGPD
-   precisa ocupar a mesma "resolucao"/largura das demais telas do totem
-   (padrao .tela, largura total), nao ficar restrita a um cartao de
-   780px como no prototipo (pensado para desktop). padding-top:250px
-   removido junto -- so existia para reservar espaco para o logo com
-   position:absolute (ver .lgpd-logo abaixo, tambem revertido para o
-   fluxo normal). */
 .lgpd-content-panel {
     position: relative;
     z-index: 2;
@@ -395,13 +263,8 @@ input.campo-texto {
     background: var(--surface);
     box-shadow: none;
 }
-/* .content-panel > div do prototipo. */
 .lgpd-content-panel > div { width: 100%; }
 
-/* .intro do prototipo -- literal. text-align:center aqui (nao em .lgpd-tela)
-   e o motivo de .lgpd-actions/.lgpd-consent-area ficarem alinhados a
-   esquerda por padrao (igual ao prototipo, onde .actions e irmao de
-   .intro, fora do text-align:center). */
 .lgpd-intro {
     display: flex;
     flex-direction: column;
@@ -411,11 +274,6 @@ input.campo-texto {
     text-align: center;
 }
 
-/* Ajustado por pedido explicito do usuario (2026-09-25): logo volta ao
-   fluxo NORMAL do layout (nao mais position:absolute como no
-   prototipo) -- empurra o conteudo abaixo dela normalmente, igual ao
-   resto das telas do totem, sem exigir padding-top de compensacao.
-   Continua LOCAL (assets/udlog.png), nunca via CDN. */
 .lgpd-logo {
     display: block;
     max-width: 300px;
@@ -425,10 +283,6 @@ input.campo-texto {
     margin: 0 auto clamp(12px, 2vh, 24px) auto;
 }
 
-/* .eyebrow do prototipo -- literal. Aplicado ao texto ja existente "Seja
-   bem-vindo" (mesmo texto do .eyebrow do prototipo) -- nao foi inventado
-   nenhum texto novo, so a classe/papel visual mudou (antes estilizado como
-   .titulo grande, agora como eyebrow pequeno, igual ao prototipo). */
 .lgpd-eyebrow {
     width: 100%;
     margin: 0 0 18px;
@@ -439,9 +293,6 @@ input.campo-texto {
     text-transform: uppercase;
 }
 
-/* h1 do prototipo -- literal. Aplicado ao texto ja existente "Vamos
-   iniciar seu atendimento." (mesmo texto do h1 do prototipo, sem o "?"
-   final -- conteudo/copy nao foi alterado, so a classe/papel visual). */
 .lgpd-titulo {
     margin: 0;
     color: var(--text-primary);
@@ -451,10 +302,6 @@ input.campo-texto {
     letter-spacing: -0.04em;
 }
 
-/* .subtitle do prototipo -- literal. Aplicado ao paragrafo de resumo ja
-   existente (sem equivalente literal no prototipo -- so eyebrow/h1/subtitle
-   existem la -- escolhido por ser o texto descritivo logo abaixo do
-   titulo, mesma posicao estrutural do .subtitle). */
 .lgpd-subtitulo {
     max-width: 650px;
     margin: 24px auto 0;
@@ -463,14 +310,6 @@ input.campo-texto {
     line-height: 1.48;
 }
 
-/* .actions do prototipo -- literal. Ordem interna dos filhos NAO segue o
-   prototipo (la: botao, depois .consent-area) -- aqui a ordem
-   consentimento-antes-de-acao ja aprovada em rodada anterior foi mantida
-   (fora do escopo desta demanda, que e so visual), entao
-   .lgpd-consent-area vem primeiro. Margem 34px do .consent-area do
-   prototipo (que la separava o botao da area de consentimento) foi
-   reaproveitada como margin-top do botao "Continuar" aqui, ja que agora e
-   ele quem vem depois. */
 .lgpd-actions {
     display: flex;
     flex-direction: column;
@@ -479,9 +318,6 @@ input.campo-texto {
     margin: clamp(48px, 6svh, 88px) auto 0 auto;
 }
 
-/* .consent-area do prototipo -- literal (sem o margin-top:34px, que aqui
-   nao se aplica por ser o primeiro filho de .lgpd-actions -- o espaco
-   equivalente ja vem do margin-top de .lgpd-actions acima). */
 .lgpd-consent-area {
     width: 100%;
     padding: 26px 24px;
@@ -491,10 +327,6 @@ input.campo-texto {
     text-align: left;
 }
 
-/* .consent-label do prototipo -- literal (grid 34px 1fr, gap 18px). Sem
-   min-height:64px do padrao geral do projeto -- o prototipo nao garante
-   essa altura minima de alvo de toque; medido via Puppeteer nesta rodada
-   (ver handoff) para registrar honestamente a altura real resultante. */
 .lgpd-checkbox-label {
     display: grid;
     grid-template-columns: 34px 1fr;
@@ -503,8 +335,6 @@ input.campo-texto {
     cursor: pointer;
 }
 
-/* .consent-checkbox do prototipo -- literal (34px, ja usado desde a rodada
-   anterior). */
 .lgpd-checkbox {
     width: 34px;
     height: 34px;
@@ -513,14 +343,12 @@ input.campo-texto {
     cursor: pointer;
 }
 
-/* .consent-text do prototipo -- literal. */
 .lgpd-consent-text {
     color: var(--text-primary);
     font-size: clamp(18px, 2.15vw, 27px);
     line-height: 1.45;
 }
 
-/* .terms-link do prototipo -- literal. */
 .lgpd-link-ver-termo {
     display: block;
     width: max-content;
@@ -537,10 +365,6 @@ input.campo-texto {
     text-underline-offset: 6px;
 }
 
-/* .start-button do prototipo -- literal (min-height clamp, padding,
-   border-radius 20px == --radius-medium, box-shadow == --shadow-button,
-   font clamp, font-weight 800). margin-top:34px reaproveita o valor que no
-   prototipo pertencia a .consent-area (ver comentario em .lgpd-actions). */
 .lgpd-btn-continuar {
     display: inline-flex;
     align-items: center;
@@ -561,13 +385,11 @@ input.campo-texto {
     letter-spacing: 0.02em;
     transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
-/* .start-button::after do prototipo -- literal (seta). */
 .lgpd-btn-continuar::after {
     content: "→";
     font-size: 1.25em;
     line-height: 1;
 }
-/* .start-button:active/:disabled do prototipo -- literal. */
 .lgpd-btn-continuar:active:not(:disabled) {
     transform: scale(0.985);
     box-shadow: 0 7px 18px rgba(1, 121, 173, 0.24);
@@ -578,22 +400,8 @@ input.campo-texto {
     cursor: not-allowed;
 }
 
-/* ===================================================================
-   Modal do termo completo -- elemento PROPRIO e independente de
-   #modalFundo/#modalCaixa generico (mesma convencao ja madura no
-   projeto: header/footer fixos, corpo com overflow-y:auto).
-   =================================================================== */
-
-/* .modal-overlay do prototipo -- padding e background literais.
-   z-index mantido em 50 (escala de camadas ja existente no projeto,
-   .modal-fundo-inatividade usa 80) -- nao e um valor visual, nao faz
-   parte do transplante de aparencia. */
 .modal-fundo-lgpd { z-index: 50; padding: clamp(16px, 3vw, 42px); background: rgba(0, 0, 0, 0.62); }
 
-/* .privacy-modal do prototipo -- literal, incluindo o teto de 1000px
-   (via min(), escala sozinho para a tela retrato estreita do totem sem
-   necessidade de reduzir o valor manualmente -- medido via Puppeteer nas
-   2 resolucoes de teste, sem overflow em nenhuma). */
 .modal-lgpd-caixa {
     display: flex;
     flex-direction: column;
@@ -607,11 +415,6 @@ input.campo-texto {
     text-align: left;
 }
 
-/* .modal-header do prototipo -- padding/background/color literais. O
-   prototipo nao tem um botao X de fechar no cabecalho (so h2) -- aqui o
-   layout flex/space-between e um acrescimo estrutural estritamente
-   necessario para posicionar o #lgpdModalBtnFechar (elemento extra ja
-   existente em rodadas anteriores, mantido). */
 .modal-lgpd-cabecalho {
     flex: 0 0 auto;
     display: flex;
@@ -622,17 +425,12 @@ input.campo-texto {
     background: var(--brand-primary);
     color: var(--action-primary-text);
 }
-/* .modal-header h2 do prototipo -- literal. Cor herdada do cabecalho
-   (branco), igual ao prototipo (h2 nao redeclara cor). */
 .modal-lgpd-titulo {
     margin: 0;
     font-size: clamp(24px, 3vw, 36px);
     font-weight: 750;
     line-height: 1.25;
 }
-/* Botao X -- sem equivalente no prototipo (extra ja existente, mantido).
-   Cor branca (var(--action-primary-text)) para contraste sobre o fundo
-   azul do cabecalho, agora colorido igual ao prototipo. */
 .modal-lgpd-fechar {
     min-width: 64px;
     min-height: 64px;
@@ -643,7 +441,6 @@ input.campo-texto {
     color: var(--action-primary-text);
     cursor: pointer;
 }
-/* .modal-body do prototipo -- literal. */
 .modal-lgpd-corpo {
     flex: 1 1 auto;
     overflow-y: auto;
@@ -661,11 +458,6 @@ input.campo-texto {
 .modal-lgpd-corpo li + li { margin-top: 7px; }
 .modal-lgpd-corpo a { color: var(--brand-primary); font-weight: 700; overflow-wrap: anywhere; }
 
-/* .modal-actions do prototipo -- literal (gap, padding, border-top,
-   background). justify-content:flex-end mantido mesmo com 1 unico botao
-   (decisao ja tomada em rodada anterior: manter so "Fechar", nao
-   adicionar um segundo botao "Li e estou ciente" dentro do modal para nao
-   criar um segundo caminho de aceite visualmente parecido com o real). */
 .modal-lgpd-rodape {
     flex: 0 0 auto;
     display: flex;
@@ -675,14 +467,6 @@ input.campo-texto {
     border-top: 1px solid var(--border);
     background: var(--surface);
 }
-/* .modal-button + .accept do prototipo -- literal (min-height, padding,
-   border-radius 12px, font clamp/weight, cor #198754). width:100% e
-   acrescimo estritamente necessario (unico botao do rodape, ocupando toda
-   a largura -- o prototipo so aplica width:100% aos botoes dentro do
-   media query max-width:640px, que e sempre o caso nesta tela retrato
-   estreita). Este botao SO chama fecharModalLgpd(), nunca altera
-   state.lgpdAceito/checkbox nem faz chamada de rede (nao alterado nesta
-   rodada). */
 .modal-lgpd-btn-fechar {
     width: 100%;
     min-height: 64px;
@@ -696,9 +480,6 @@ input.campo-texto {
     font-weight: 750;
 }
 
-/* Tela de revisao dos numeros das notas (demanda captura-notas-sem-interrupcao,
-   impl. 2). Paleta UDLOG + verde #1d7a5f / vermelho #a32d2d ja existentes (sempre
-   com texto branco e icone). Sem position:fixed; rodape sticky dentro do #tela. */
 .rev-wrap { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 640px; margin: auto; }
 .rev-instrucao { margin: 0; font-size: 20px; line-height: 1.35; color: #3A3A3A; background: #FFFFFF; text-align: center; }
 .rev-leitura { font-size: 20px; font-weight: 600; color: var(--text-primary); text-align: center; }
@@ -732,20 +513,14 @@ input.campo-texto {
     background: #0179AD; color: #FFFFFF; border: 2px solid #0179AD;
 }
 
-/* Topo dos modais de numero da nota: identificacao "Nota N de M" + miniatura + instrucao */
 .modal-caixa { max-height: calc(100vh - 40px); overflow-y: auto; }
 .nota-modal-topo { display: flex; align-items: center; justify-content: center; gap: 14px; }
 .nota-modal-mini { flex: 0 0 72px; width: 72px; height: 96px; object-fit: cover; border: 1px solid #B0B0B1; border-radius: 6px; background: #FFFFFF; }
 .nota-modal-id { font-size: 22px; font-weight: 800; color: #3A3A3A; }
 .nota-modal-instrucao { font-size: 20px; line-height: 1.3; color: #3A3A3A; }
 .nota-modal-numero { font-size: 32px; font-weight: 800; line-height: 1.1; color: #3A3A3A; overflow-wrap: anywhere; }
-/* Confirmar e Corrigir do modal de conferir: 20px/700, a mesma fonte dos demais botoes do
-   modal (Voltar, Excluir nota, Cancelar atendimento) e de Continuar; antes herdavam 18px/600. */
 #btnConfirmarNumeroSugerido, #btnCorrigirNumeroSugerido { min-height: 64px; font-size: 20px; font-weight: 700; }
 
-/* Botao Voltar dos modais de numero da nota: contorno NEUTRO (borda e texto
-   #3A3A3A, contraste alto sobre branco; a borda #B0B0B1 nao serve, 2,2:1), sem
-   seta nem X, alvo de 64px. No modal de digitar ocupa a largura do teclado. */
 .btn-voltar-modal-nota {
     min-height: 64px; width: 100%; padding: 0 22px; border-radius: 10px;
     background: #FFFFFF; color: #3A3A3A; border: 2px solid #3A3A3A;
@@ -753,9 +528,6 @@ input.campo-texto {
 }
 .btn-voltar-modal-nota-larga { max-width: 280px; margin: 0 auto; }
 
-/* Toast de erro (fallback; ver mostrarErroTela em app.js). Abaixo da barra
-   Cancelar, no topo, sem receber toque. Recolhido (sem altura) quando vazio,
-   mas sempre presente no DOM para o leitor de tela anunciar o texto novo. */
 .toast-erro {
     position: fixed; top: 72px; left: 16px; right: 16px; z-index: 60;
     max-height: 0; padding: 0 16px; overflow: hidden; opacity: 0;
@@ -765,27 +537,20 @@ input.campo-texto {
 }
 .toast-erro.visivel { max-height: 200px; padding: 14px 16px; opacity: 1; }
 
-/* ---- Fase 3 (hardening-revisao-notas-e-cliente): Excluir nota, Adicionar outra nota, 422, cliente ---- */
-
-/* Adicionar outra nota: contorno azul, na area rolavel abaixo do ultimo cartao (fora do rodape sticky) */
 .rev-adicionar {
     min-height: 64px; width: 100%; padding: 0 22px; border-radius: 10px;
     font-family: inherit; font-size: 20px; font-weight: 700; cursor: pointer;
     background: #FFFFFF; color: #0179AD; border: 2px solid #0179AD;
 }
 
-/* faixa "Nota N excluida." dentro da revisao (role=status), some sozinha */
 .rev-faixa {
     font-size: 20px; font-weight: 700; text-align: center; color: #3A3A3A;
     background: #FFFFFF; border: 2px solid #3A3A3A; border-radius: 10px; padding: 10px 12px;
 }
 
-/* destaque do 422: SO borda e selo (sem tinta de fundo) */
 .rev-cartao-destaque { border: 4px solid #a32d2d; padding: 6px 10px; }
 .rev-selo-destaque { background: #a32d2d; color: #FFFFFF; border-color: #a32d2d; }
 
-/* Excluir nota nos modais de numero: vermelho solido, separado por divisor e folga */
-/* margem de 18px: Voltar -> Excluir nota = 14 (gap) + 18 + 1 + 18 + 14 = 65 px (>= 64) */
 .nota-modal-divisor { height: 1px; background: #B0B0B1; margin: 18px 0; width: 100%; }
 .btn-excluir-nota {
     min-height: 64px; width: 100%; max-width: 280px; margin: 0 auto; padding: 0 22px; border-radius: 10px;
@@ -793,13 +558,10 @@ input.campo-texto {
     font-family: inherit; font-size: 20px; font-weight: 700; cursor: pointer;
 }
 
-/* Secao do atendimento: linha de 2 px + rotulo + folga (>= 64 px entre Excluir nota e Cancelar atendimento) */
 .nota-modal-sep-atendimento { height: 2px; background: #3A3A3A; width: 100%; margin: 24px 0 0; }
 .nota-modal-rotulo-secao { font-size: 22px; font-weight: 700; color: #3A3A3A; }
 .nota-modal-sep-atendimento ~ .btn-saida-modal-nota { font-size: 20px; }
 
-/* confirmacao de exclusao: overlay PROPRIO, acima do modal do numero (50) e da
-   confirmacao de cancelar (55), abaixo do aviso de inatividade (80) */
 .modal-fundo-confirma-excluir { z-index: 56; }
 #modalConfirmExcluirNotaCaixa { max-width: 360px; }
 #modalConfirmExcluirNotaCaixa .titulo { font-size: 22px; font-weight: 700; }
@@ -812,7 +574,6 @@ input.campo-texto {
 .btn-excluir-nao { background: #0179AD; border: 2px solid #0179AD; }
 .btn-excluir-sim { background: #a32d2d; border: 2px solid #a32d2d; margin-top: 24px; }
 
-/* tela rec_cliente: texto e campo em 20 px, alvos de 64 px */
 .cliente-aviso { font-size: 20px; line-height: 1.3; }
 .cliente-campo {
     font-size: 20px; min-height: 64px; padding: 12px; width: 100%; max-width: 420px; margin: 0 auto;
@@ -820,27 +581,18 @@ input.campo-texto {
 }
 .cliente-avancar { min-height: 64px; font-size: 20px; }
 
-/* ---- Botao desabilitado (rodada corretiva F9) ----
-   Sem depender de opacity: fundo #B0B0B1, texto #3A3A3A (contraste 5,25:1) e borda
-   #B0B0B1, distinto de qualquer botao habilitado (azul, vermelho ou branco com
-   contorno escuro). Vale para os botoes da revisao e dos modais de nota. */
 .tecla-numerica-confirmar:disabled, .btn-voltar-modal-nota:disabled, .rev-continuar:disabled,
 .rev-adicionar:disabled, .btn-excluir-nota:disabled, .btn-excluir-nao:disabled, .btn-excluir-sim:disabled {
     background: #B0B0B1; color: #3A3A3A; border-color: #B0B0B1; opacity: 1; cursor: not-allowed;
 }
 
-/* ---- Fase B (hardening-revisao-notas-e-cliente): 409 OCR_EM_ANDAMENTO e nota recuperada sem foto ---- */
-
-/* aviso do 409: NEUTRO (azul UDLOG sobre branco), nunca vermelho; role=status */
 .rev-aguarde {
     font-size: 20px; font-weight: 600; line-height: 1.3; text-align: center; color: #3A3A3A;
     background: #FFFFFF; border: 2px solid #0179AD; border-radius: 10px; padding: 8px 12px;
 }
-/* destaque neutro da nota apontada pelo 409: borda e selo azuis (o numero segue visivel) */
 .rev-cartao-aguardando { border: 4px solid #0179AD; padding: 6px 10px; }
 .rev-selo-aguardando { background: #FFFFFF; color: #3A3A3A; border-color: #0179AD; }
 
-/* nota recuperada do servidor: sem foto (nao ha endpoint de imagem) */
 .rev-sem-foto, .nota-modal-sem-foto, .miniatura-sem-foto {
     display: flex; align-items: center; justify-content: center; text-align: center;
     background: #FFFFFF; color: #3A3A3A; font-weight: 700; overflow: hidden;
@@ -848,8 +600,6 @@ input.campo-texto {
 .rev-sem-foto, .nota-modal-sem-foto { flex: 0 0 72px; width: 72px; height: 96px; font-size: 13px; line-height: 1.2; padding: 2px; box-sizing: border-box; overflow-wrap: anywhere; }
 .miniatura-sem-foto { background: #FFFFFF; border: 2px dashed #878789; box-sizing: border-box; }
 
-/* modal de reprovacao de CNH/CRLV (fluxo QR): mensagem ao motorista + re-escaneio.
-   Reusa #modalFundo/#modalCaixa; so amplia texto e alvos de toque (>= 64px). */
 #modalCaixa.modal-caixa-reprovacao { max-width: min(560px, 100%); width: 100%; }
 .modal-reprovacao-doc { display: flex; flex-direction: column; gap: 18px; }
 .modal-reprovacao-doc .titulo { font-size: 24px; }
@@ -857,14 +607,10 @@ input.campo-texto {
 .modal-reprovacao-botoes { display: flex; flex-direction: column; gap: 14px; }
 .modal-reprovacao-botoes button { width: 100%; min-height: 64px; }
 
-/* confirmacao: campos obrigatorios (marca textual, nao so cor) */
 .obrig-marca { color: #A32D2D; font-weight: 700; }
 .erro-campo { display: block; color: #A32D2D; font-size: 15px; font-weight: 700; margin-top: 2px; }
 .erro-campo::before { content: "! "; }
 
-/* confirmacao: dados do atendimento somente leitura (Placa, Ordem de coleta, Cliente) */
-
-/* ---- tela "Confirme os dados" (exp/rec): cartoes agrupados, valores grandes ---- */
 .tela:has(> .conf-pagina) { justify-content: flex-start; scroll-padding-bottom: 140px; }
 .conf-pagina { flex: 1 0 auto; display: flex; flex-direction: column; gap: 22px; width: 100%; max-width: 900px; margin: 0 auto; }
 .conf-cabecalho { text-align: center; }
@@ -894,28 +640,16 @@ textarea.conf-valor { min-height: 72px; }
     background-repeat: no-repeat; background-position: right 14px center; background-size: 26px; }
 .conf-valor.campo-invalido { border: 3px solid #A32D2D; padding: 13px 15px; }
 .conf-campo .erro-campo { font-size: 19px; margin-top: 0; }
-/* somente leitura: bloco cinza chapado, sem borda de campo, nao parece editavel */
 .conf-valor.conf-leitura { background: #F2F2F2; border: 2px solid transparent; color: var(--text-primary); cursor: default; }
 .conf-origem { text-align: center; font-size: 17px; color: var(--text-primary); }
 .conf-rodape { position: sticky; bottom: 0; margin: auto min(-28px, calc(450px - 50vw)) -20px; padding: 14px 28px 20px; background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -8px 18px rgba(58, 58, 58, 0.10); z-index: 2; }
 .btn-primario.conf-confirmar { display: block; width: 100%; max-width: 640px; margin: 0 auto; min-height: 80px; font-size: 28px; font-weight: 700; border-radius: 16px; }
 
-/* ===================================================================
-   Ampliacao dos alvos de toque e do teclado virtual (2026-10-04, decisao do
-   usuario: botoes e teclado bem grandes para os motoristas). Bloco final de
-   proposito (sobrescreve as medidas antigas acima). A tela LGPD (.lgpd-*,
-   .modal-lgpd-*) e a tela inicial (.tile, .titulo-home) NAO usam nenhum
-   seletor deste bloco e permanecem exatamente como estavam. Sem :hover:
-   o feedback ao toque e :active, cor solida.
-   =================================================================== */
-
-/* barra global "Cancelar atendimento" (so aparece fora de lgpd/home) */
 .barra-cancelar { padding: 12px 20px 0; }
 .btn-cancelar { min-height: 72px; padding: 0 32px; border-radius: 16px; font-size: 28px; touch-action: manipulation; }
 .btn-cancelar:active { background: #6f1c1c; }
 .toast-erro { top: 96px; }
 
-/* botoes de acao: principal >= 96px, secundarios >= 88px */
 .btn-primario, .btn-fantasma, .btn-alerta {
     min-height: 88px; padding: 16px 32px; border-radius: 18px; font-size: 32px; line-height: 1.15;
     touch-action: manipulation;
@@ -924,7 +658,6 @@ textarea.conf-valor { min-height: 72px; }
 .btn-primario:active:not(:disabled) { background: #015a82; border-color: #015a82; }
 .btn-fantasma:active { background: var(--brand-primary); color: #FFFFFF; }
 .btn-alerta:active { background: #a32d2d; color: #FFFFFF; }
-/* botoes com max-width:320px inline (JS) passam a usar a largura util */
 .btn-primario[style*="max-width"], .btn-alerta[style*="max-width"] { width: 100%; max-width: 640px !important; }
 .grupo-botoes:not(:has(> .tile)) { max-width: min(100%, 640px); gap: 24px; }
 .grupo-botoes-linha { gap: 16px; }
@@ -932,7 +665,6 @@ textarea.conf-valor { min-height: 72px; }
 #expCamControles .btn-primario, #recCamControles .btn-primario { min-height: 96px; }
 #expCamControles .btn-fantasma, #recCamControles .btn-fantasma { min-height: 88px; }
 
-/* campos de texto, selects e cartoes de escolha */
 input.campo-texto { font-size: 48px; min-height: 108px; padding: 18px 24px; max-width: 640px; border-width: 3px; border-radius: 16px; }
 .campo { gap: 8px; }
 .campo label { font-size: 22px; }
@@ -949,7 +681,6 @@ input.campo-texto { font-size: 48px; min-height: 108px; padding: 18px 24px; max-
 .cliente-campo { font-size: 30px; min-height: 96px; padding: 16px; max-width: 720px; border-radius: 14px; }
 .cliente-avancar { min-height: 96px; font-size: 32px; }
 
-/* teclado virtual pt-BR: 5 linhas, teclas de 100px, toda a largura util */
 .teclado { padding: 8px 6px 10px; }
 .linha-teclas { gap: 6px; margin-bottom: 8px; justify-content: stretch; }
 .linha-teclas:last-child { margin-bottom: 0; }
@@ -964,17 +695,14 @@ input.campo-texto { font-size: 48px; min-height: 108px; padding: 18px 24px; max-
 .tecla-espaco { flex: 5 1 0; max-width: none; font-size: 30px; }
 .tecla-ok { flex: 3 1 0; max-width: none; font-size: 40px; font-weight: 700; border-color: var(--action-primary); }
 .tecla-ok:active { background: #015a82; border-color: #015a82; }
-/* com o teclado aberto o conteudo nao pode ficar centralizado (o topo ficaria inalcancavel ao rolar) */
 #app:has(.teclado.aberto) > .tela { justify-content: flex-start; }
 
-/* teclado numerico dedicado do modal de numero da nota: teclas >= 120px */
 .teclado-numerico-nota { max-width: 560px; gap: 14px; }
 .tecla-numerica { height: 124px; border-width: 3px; border-radius: 16px; font-size: 52px; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 .tecla-numerica-apagar, .tecla-numerica-confirmar { font-size: 30px; font-weight: 700; }
 .tecla-numerica:active:not(:disabled) { background: var(--brand-primary); border-color: var(--brand-primary); color: #FFFFFF; }
 .tecla-numerica-confirmar:active:not(:disabled) { background: #015a82; border-color: #015a82; }
 
-/* modais: botoes >= 88px */
 .modal-caixa { max-width: min(100%, 680px); width: 100%; padding: 28px; gap: 18px; border-radius: 20px; }
 .modal-caixa .titulo { font-size: 30px; }
 .modal-caixa .subtitulo { font-size: 24px; }
@@ -993,8 +721,6 @@ input.campo-texto { font-size: 48px; min-height: 108px; padding: 18px 24px; max-
 #modalConfirmExcluirNotaCaixa .titulo { font-size: 30px; }
 #modalConfirmExcluirNotaCaixa .subtitulo { font-size: 24px; }
 #btnConfirmarNumeroSugerido, #btnCorrigirNumeroSugerido { min-height: 88px; font-size: 28px; font-weight: 700; border-radius: 16px; touch-action: manipulation; }
-/* Padronizacao dos modais de numero da nota: teclas iguais (grade 3x4, mesmo peso) e botoes de acao
-   com a mesma largura (560px, a do teclado), altura (88px), fonte (28px/700) e cantos (16px). */
 .tecla-numerica { font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; }
 .modal-caixa .grupo-botoes:has(#btnConfirmarNumeroSugerido) { max-width: 560px; gap: 18px; }
 .modal-caixa .btn-saida-modal-nota { width: 100%; margin-left: auto; margin-right: auto; font-weight: 700; }
@@ -1002,7 +728,6 @@ input.campo-texto { font-size: 48px; min-height: 108px; padding: 18px 24px; max-
 .btn-excluir-nota:active:not(:disabled), .btn-excluir-sim:active:not(:disabled) { background: #6f1c1c; border-color: #6f1c1c; }
 .btn-excluir-nao:active:not(:disabled) { background: #015a82; border-color: #015a82; }
 
-/* revisao das notas: cartoes e botoes grandes */
 .rev-wrap { max-width: 720px; }
 .rev-cartao { min-height: 124px; padding: 10px 16px; gap: 18px; border-radius: 16px; }
 .rev-miniatura, .rev-sem-foto { flex: 0 0 84px; width: 84px; height: 108px; }
@@ -1015,7 +740,6 @@ input.campo-texto { font-size: 48px; min-height: 108px; padding: 18px 24px; max-
 .rev-continuar:active:not(:disabled) { background: #015a82; border-color: #015a82; }
 .rev-adicionar:active:not(:disabled) { background: var(--brand-primary); color: #FFFFFF; }
 
-/* confirmacao: botao principal 96px e campos mais altos */
 .btn-primario.conf-confirmar { min-height: 96px; font-size: 32px; }
 .conf-valor, textarea.conf-valor { min-height: 88px; }
 #confMotorista.conf-valor, #confCliente.conf-valor { min-height: 104px; }

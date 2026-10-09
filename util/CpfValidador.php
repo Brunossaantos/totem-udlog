@@ -2,22 +2,11 @@
 
 namespace Util;
 
-/**
- * Validacao/normalizacao de CPF (11 digitos), mesmo padrao de
- * Util\CnpjValidador (digito verificador modulo 11). Entrada tratada como
- * nao confiavel (dado retornado pela VIO Decode ou digitado manualmente pelo
- * atendente) — sempre normalizar/validar antes de qualquer uso.
- */
 class CpfValidador
 {
     private const PESOS_DV1 = [10, 9, 8, 7, 6, 5, 4, 3, 2];
     private const PESOS_DV2 = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2];
 
-    /**
-     * Remove mascara, exige 11 digitos e valida os dois digitos
-     * verificadores. Retorna o CPF normalizado (11 digitos, sem mascara) se
-     * valido, ou null em qualquer caso invalido (nao lanca excecao).
-     */
     public static function normalizarEValidar(?string $bruto): ?string
     {
         if ($bruto === null || $bruto === '') {
@@ -30,8 +19,6 @@ class CpfValidador
             return null;
         }
 
-        // sequencias de digito unico repetido (ex: 00000000000, 11111111111)
-        // passam no modulo 11 mas nao sao CPFs validos — exclusao padrao.
         if (preg_match('/^(\d)\1{10}$/', $digitos)) {
             return null;
         }

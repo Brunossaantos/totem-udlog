@@ -1,23 +1,5 @@
 <?php
 
-/**
- * Helpers de pagina da Gestao Totem (demanda gestao-totem, F1). Incluido pelas
- * paginas de public/gestao/*.php depois do autoload do Composer.
- *
- * Contrato para o frontend (views em app/Views/gestao/):
- *  - gestaoPagina($titulo, $itemMenu, $perfilMinimo, $opcoes) faz o GUARD
- *    (HTTPS, sessao, perfil, CSRF, troca obrigatoria de senha) ANTES de emitir
- *    qualquer HTML e devolve o GestaoContexto.
- *  - gestaoRenderizar($ctx, $resultado) imprime layout_topo + view + layout_base.
- *  - h($texto) escapa para HTML (ENT_QUOTES | ENT_SUBSTITUTE, UTF-8). TODA saida
- *    de dado em view passa por h().
- *  - gestaoHora($valor) formata "HH:MM" dentro de <time> (ex.: Bloqueado ate 14:22).
- *  - gestaoCsrfInput($ctx) devolve <input type="hidden" name="csrf_token">.
- *  - gestaoAsset($nome) devolve /gestao/assets/<nome>?v=<mtime>.
- * Views NAO podem ter <script> nem <style> inline nem atributos style=/on*=
- * (a CSP da gestao bloqueia).
- */
-
 use App\Controller\GestaoContexto;
 
 if (!function_exists('h')) {
@@ -28,10 +10,6 @@ if (!function_exists('h')) {
 }
 
 if (!function_exists('gestaoIcone')) {
-    /**
-     * Icone SVG inline (sprite em layout_topo.php, tracado 2px em currentColor).
-     * $nome vem SO de codigo (lista fixa), nunca de dado externo.
-     */
     function gestaoIcone(string $nome, string $classe = ''): string
     {
         $nome = preg_replace('/[^a-z-]/', '', $nome) ?? '';
@@ -41,7 +19,6 @@ if (!function_exists('gestaoIcone')) {
 }
 
 if (!function_exists('gestaoSprite')) {
-    /** Sprite com os simbolos dos icones (conteudo estatico, sem dado externo). */
     function gestaoSprite(): string
     {
         $icones = [
@@ -82,7 +59,6 @@ if (!function_exists('gestaoSprite')) {
 }
 
 if (!function_exists('gestaoData')) {
-    /** "2026-10-06 14:22:11" (banco) -> <time> "06/10/2026 14:22". Valor invalido volta escapado como veio. */
     function gestaoData(?string $valor, string $vazio = ''): string
     {
         if ($valor === null || $valor === '') {
@@ -97,7 +73,6 @@ if (!function_exists('gestaoData')) {
 }
 
 if (!function_exists('gestaoCnpj')) {
-    /** CNPJ de 14 digitos -> "00.000.000/0000-00" (so exibicao; o banco guarda so digitos). Outro formato volta escapado como veio. */
     function gestaoCnpj(?string $valor): string
     {
         $valor = (string) $valor;
@@ -110,7 +85,6 @@ if (!function_exists('gestaoCnpj')) {
 }
 
 if (!function_exists('gestaoHora')) {
-    /** "2026-10-06 14:22:11" (banco) -> <time> "14:22". Valor invalido volta escapado como veio. */
     function gestaoHora(?string $valor, string $vazio = ''): string
     {
         if ($valor === null || $valor === '') {
@@ -125,10 +99,6 @@ if (!function_exists('gestaoHora')) {
 }
 
 if (!function_exists('gestaoPagina')) {
-    /**
-     * @param string $perfilMinimo 'usuario' (qualquer perfil logado) ou 'admin'
-     * @param array{trocaPendenteOk?:bool,semSessaoRedireciona?:bool,metodos?:list<string>} $opcoes
-     */
     function gestaoPagina(string $titulo, string $itemMenu, string $perfilMinimo, array $opcoes = []): GestaoContexto
     {
         return GestaoContexto::iniciar($titulo, $itemMenu, $perfilMinimo, $opcoes);
@@ -136,7 +106,6 @@ if (!function_exists('gestaoPagina')) {
 }
 
 if (!function_exists('gestaoPaginaPublica')) {
-    /** Pagina sem login obrigatorio (so o login.php). */
     function gestaoPaginaPublica(string $titulo, array $opcoes = []): GestaoContexto
     {
         return GestaoContexto::iniciar($titulo, '', null, $opcoes);
@@ -160,11 +129,6 @@ if (!function_exists('gestaoAsset')) {
 }
 
 if (!function_exists('gestaoRenderizar')) {
-    /**
-     * `titulo` do resultado (quando houver) vence o titulo da pagina: e o texto do topo ($tituloPagina, #gestao-titulo).
-     *
-     * @param array{view:string,dados?:array<string,mixed>,status?:int,cabecalhos?:list<string>,flash?:array{tipo:string,texto:string}|null,titulo?:string} $resultado
-     */
     function gestaoRenderizar(GestaoContexto $ctx, array $resultado): void
     {
         $view = (string) ($resultado['view'] ?? '');
@@ -180,7 +144,6 @@ if (!function_exists('gestaoRenderizar')) {
             header($linha);
         }
 
-        // Variaveis disponiveis em layout_topo.php, na view e em layout_base.php.
         $tituloPagina = (string) ($resultado['titulo'] ?? $ctx->titulo);
         $flash = array_key_exists('flash', $resultado) && $resultado['flash'] !== null ? $resultado['flash'] : $ctx->flash();
         $menu = $ctx->menu();

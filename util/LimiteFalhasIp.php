@@ -2,42 +2,18 @@
 
 namespace Util;
 
-/**
- * Rate limit de FALHAS por IP (demanda gestao-totem, F0, 2026-10-06), usado pela
- * pagina do totem (public/totem/index.php). So conta pedidos que FALHAM: o
- * pedido valido do quiosque nunca incrementa o contador.
- *
- * Mesmo desenho de Util\AuthServidor: um arquivo pequeno por IP numa pasta fora
- * do webroot, com flock para atomicidade, janela que comeca na primeira falha.
- * O nome do arquivo e HMAC-SHA256 do "balde" do IP (IPv4 inteiro; IPv6 = prefixo
- * /64, ver IpCliente::balde) com um sal: nunca o IP em claro e nao reproduzivel
- * de fora. Sem banco: um pedido malformado nao precisa nem abrir conexao. Falha
- * ao ler/gravar o contador NAO bloqueia nem libera nada (so um log fixo, sem IP
- * nem caminho): quem decide e a validacao do codigo, o limite e uma defesa
- * adicional.
- *
- * Sal: `GESTAO_HASH_SALT` quando configurado (>= 16 caracteres); senao a
- * constante fixa SAL_PADRAO (o contador e efemero, entao a constante so serve
- * para o nome do arquivo nao ser o hash puro do IP). A variavel ausente NUNCA
- * quebra o quiosque.
- *
- * O IP deve vir de Util\IpCliente::obter().
- */
 class LimiteFalhasIp
 {
     public const LIMITE_FALHAS = 20;
 
     public const JANELA_SEGUNDOS = 600;
 
-    /** Sal de reserva (publico de proposito): usado quando GESTAO_HASH_SALT falta ou e curta. */
     public const SAL_PADRAO = 'totem-udlog/limite-falhas-ip/v1';
 
-    /** Teto de itens e de tempo da limpeza oportunista. */
     private const LIMPEZA_MAX_ITENS = 5000;
 
     private const LIMPEZA_MAX_SEGUNDOS = 0.5;
 
-    /** @var callable|null */
     private $relogio;
 
     private string $sal;
@@ -53,9 +29,6 @@ class LimiteFalhasIp
         $this->sal = ($sal !== null && strlen($sal) >= GestaoConfig::SAL_MIN_CARACTERES) ? $sal : self::SAL_PADRAO;
     }
 
-    /**
-     * @return int|null null = nao bloqueado, int = segundos ate poder tentar de novo (>= 1)
-     */
     public function segundosBloqueado(string $ip): ?int
     {
         $arquivo = $this->arquivoDoIp($ip);
@@ -158,7 +131,6 @@ class LimiteFalhasIp
         }
         $corte = $this->agora() - $this->janelaSegundos;
         $lidos = 0;
-        // varre ate o teto de itens OU de tempo (nunca so os primeiros 500)
         $limiteTempo = microtime(true) + self::LIMPEZA_MAX_SEGUNDOS;
         while (($nome = readdir($gestor)) !== false && $lidos < self::LIMPEZA_MAX_ITENS && microtime(true) < $limiteTempo) {
             $lidos++;

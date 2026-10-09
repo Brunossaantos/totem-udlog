@@ -1,8 +1,4 @@
 <?php
-/**
- * Tela de login. Variáveis: $token_login (string), $erro (string|null),
- * $login_digitado (string, só o login, NUNCA a senha), $tituloPagina.
- */
 ?>
 <section class="gestao-login" id="gestao-login">
 <img class="gestao-login__logo" src="<?= h(gestaoAsset('udlog.png')) ?>" width="180" height="58" alt="UDLOG">

@@ -2,40 +2,14 @@
 
 namespace Util;
 
-/**
- * Autenticacao servidor-a-servidor (integracao n8n -> totem), SEPARADA do
- * token do totem (Util\Auth::validarTotem). Demanda anexo-ordem-coleta-n8n
- * (2026-10-05).
- *
- * Regras:
- *  - HTTPS obrigatorio (403 HTTPS_OBRIGATORIO), salvo a flag explicita
- *    ORDEM_COLETA_ANEXO_PERMITIR_HTTP=true (uso local/XAMPP; o projeto nao tem
- *    APP_ENV, entao nao ha deteccao automatica de ambiente de dev);
- *  - chave em ORDEM_COLETA_ANEXO_API_KEY; ausente/vazia = 503 INDISPONIVEL
- *    (fail-closed: sem chave configurada ninguem entra);
- *  - header `Authorization: Bearer <chave>` EXATO, comparado em tempo
- *    constante (hash_equals sobre sha256 de tamanho fixo); ausente = invalido
- *    = 401 NAO_AUTORIZADO generico (sem distinguir causa);
- *  - rate limit de FALHAS de autenticacao por IP (REMOTE_ADDR, nunca
- *    X-Forwarded-For): arquivo com flock em STORAGE_PATH/ordens_coleta_ratelimit/
- *    (um arquivo pequeno por IP, hash do IP no nome). Excedido = 429. Falha ao
- *    ler/gravar o contador NAO bloqueia nem libera nada alem do que a chave ja
- *    decide (a chave continua sendo exigida); so e registrada em log fixo;
- *  - nada do request (header, IP, chave) e logado.
- */
 class AuthServidor
 {
     public const LIMITE_FALHAS = 10;
 
     public const JANELA_SEGUNDOS = 900;
 
-    /** @var callable|null */
     private $relogio;
 
-    /**
-     * @param string|null $chave chave configurada (null/'' = 503)
-     * @param string|null $dirRateLimit pasta do contador (null = sem rate limit)
-     */
     public function __construct(
         private ?string $chave,
         private bool $permitirHttp = false,
@@ -47,11 +21,6 @@ class AuthServidor
         $this->relogio = $relogio;
     }
 
-    /**
-     * @param array<string,mixed> $server tipicamente $_SERVER
-     * @param string|null $authorization valor do header Authorization (ou null)
-     * @return array{http:int,codigo:string,retry_after?:int}|null null = autenticado
-     */
     public function verificar(array $server, ?string $authorization): ?array
     {
         if (!$this->permitirHttp && !self::requisicaoHttps($server)) {
@@ -159,7 +128,6 @@ class AuthServidor
 
             return;
         }
-        // contador criado pelo fopen segue o umask: forca 0640 (sem acesso a outros)
         @chmod($arquivo, 0640);
         try {
             if (!@flock($h, LOCK_EX)) {
@@ -182,7 +150,6 @@ class AuthServidor
             @fclose($h);
         }
 
-        // limpeza oportunista (1 em 50 falhas): apaga contadores vencidos
         if (random_int(1, 50) === 1) {
             $this->limparVencidos();
         }

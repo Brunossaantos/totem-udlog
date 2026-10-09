@@ -1,18 +1,3 @@
-/*
- * Gestão Totem - estilos (sem framework, sem fonte/CDN externa).
- * Paleta UDLOG (a ÚNICA permitida):
- *   #0179AD ação/links/foco   #3A3A3A texto   #878789 texto secundário (só >= 14px,
- *   nunca em rótulo/cabeçalho/estado essencial)   #9BA0A5 ícones/info terciária
- *   #B0B0B1 bordas/separadores   #FFFFFF fundo
- * Estados (ativo/inativo, erro, sucesso, atenção, destrutivo) NUNCA dependem só de
- * cor: usam texto, ícone, peso da fonte, espessura/estilo de borda e inversão
- * fundo/texto com as cores acima. Nenhum estado depende de :hover.
- *
- * RISCO ACEITO (sem JS): a confirmação de "Desativar"/"Redefinir senha" (diálogo), o
- * "Copiar" e o "Mostrar senha" dependem de JS. Sem JS as ações continuam funcionando
- * (são formulários com CSRF, o servidor valida), só sem confirmação/atalhos; a senha
- * temporária segue selecionável com um clique (user-select: all).
- */
 :root {
     --azul: #0179AD;
     --texto: #3A3A3A;
@@ -45,15 +30,12 @@ ul { padding: 0; list-style: none; }
 
 a { color: var(--azul); text-decoration: underline; text-underline-offset: 3px; }
 
-/* ---------- foco (3px, sempre visível) ---------- */
 :focus { outline: none; }
 :focus-visible { outline: 3px solid var(--azul); outline-offset: 2px; }
 main:focus { outline: none; }
-/* sobre fundo #3A3A3A o anel azul mede ~2,35:1 (< 3:1, WCAG 1.4.11): ali o anel e branco (~11:1) */
 .gestao-flash--erro :focus-visible,
 .gestao-erro-caixa :focus-visible { outline-color: var(--branco); }
 
-/* ---------- utilitários ---------- */
 .gestao-sr {
     position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
@@ -75,7 +57,6 @@ main:focus { outline: none; }
 }
 .gestao-pular:focus { top: 16px; outline: 3px solid var(--azul); outline-offset: 2px; }
 
-/* ---------- estrutura ---------- */
 .gestao-app {
     display: grid;
     grid-template-columns: var(--sidebar) minmax(0, 1fr);
@@ -87,7 +68,6 @@ main:focus { outline: none; }
 
 .gestao-principal { min-width: 0; display: flex; flex-direction: column; }
 
-/* ---------- sidebar ---------- */
 .gestao-sidebar {
     position: sticky; top: 0; height: 100vh;
     display: flex; flex-direction: column; gap: 16px;
@@ -99,9 +79,6 @@ main:focus { outline: none; }
 
 .gestao-marca { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0 4px 12px; border-bottom: 2px solid var(--borda); min-height: 80px; }
 .gestao-marca__logo { display: block; width: 140px; height: auto; }
-/* MINI MARCA da sidebar recolhida: leão da UDLOG (udlog-leao.png, recorte do símbolo
-   de udlog.png, 80x80 = 2x). O favicon do navegador segue sendo o pictograma do totem. Para trocar o asset, mexa SÓ no <img class="gestao-marca__mini">
-   de layout_topo.php (src) e nesta regra (tamanho). */
 .gestao-marca__mini { display: none; width: 40px; height: 40px; }
 .gestao-marca__texto { font-size: 16px; font-weight: 600; color: var(--texto); }
 
@@ -128,7 +105,6 @@ main:focus { outline: none; }
 .gestao-recolher:hover { border-color: var(--azul); }
 .gestao-recolher .gestao-icone { transition: transform .15s ease; }
 
-/* sidebar recolhida: só ícones (o texto continua no DOM para leitores de tela) */
 .gestao-app--recolhida .gestao-sidebar { padding-left: 6px; padding-right: 6px; }
 .gestao-app--recolhida .gestao-marca { align-items: center; padding: 0 0 12px; }
 .gestao-app--recolhida .gestao-marca__logo { display: none; }
@@ -142,7 +118,6 @@ main:focus { outline: none; }
 .gestao-app--recolhida .gestao-recolher { justify-content: center; padding: 0; }
 .gestao-app--recolhida .gestao-recolher .gestao-icone { transform: rotate(180deg); }
 
-/* ---------- topo ---------- */
 .gestao-topo {
     display: flex; align-items: center; gap: 16px;
     padding: 16px max(32px, calc((100% - 1600px) / 2));
@@ -157,7 +132,6 @@ main:focus { outline: none; }
 .gestao-usuario__perfil { font-size: 14px; color: var(--texto); }
 .gestao-form-sair { margin: 0; }
 
-/* ---------- conteúdo ---------- */
 .gestao-conteudo {
     flex: 1;
     width: 100%;
@@ -167,7 +141,6 @@ main:focus { outline: none; }
 }
 .gestao-conteudo > * { max-width: 100%; }
 
-/* ---------- botões (sempre com cor sólida visível) ---------- */
 .gestao-botao {
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     min-height: 44px; padding: 0 20px;
@@ -193,7 +166,6 @@ form[aria-busy="true"] .gestao-botao {
 
 .gestao-barra-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 
-/* ---------- formulários ---------- */
 .gestao-form { display: grid; gap: 20px; width: 100%; max-width: 480px; }
 .gestao-form-linha { display: contents; }
 .gestao-campo { display: flex; flex-direction: column; gap: 6px; }
@@ -217,13 +189,9 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-ajuda { display: flex; align-items: flex-start; gap: 10px; font-size: 15px; max-width: 480px; }
 .gestao-ajuda .gestao-icone { margin-top: 2px; color: var(--azul); }
 
-/* mostrar senha (inserido por JS) */
-/* a área de clique é o rótulo inteiro: >= 44px de altura */
 .gestao-mostrar { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding-right: 12px; font-size: 14px; cursor: pointer; width: fit-content; }
 .gestao-mostrar input { flex: none; width: 24px; height: 24px; margin: 0; accent-color: var(--azul); }
 
-/* requisitos da senha */
-/* estado inicial NEUTRO (instrução); só depois de digitar vira atendido/não atendido */
 .gestao-requisitos__titulo { font-size: 14px; font-weight: 600; margin-top: 4px; }
 .gestao-requisitos { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
 .gestao-requisitos__item { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
@@ -235,7 +203,6 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-requisitos__item--falha { font-weight: 500; font-style: italic; }
 .gestao-requisitos__item--falha .gestao-icone { color: var(--texto); }
 
-/* ---------- avisos, erros e flash ---------- */
 .gestao-aviso-caixa,
 .gestao-erro-caixa {
     display: flex; align-items: flex-start; gap: 12px;
@@ -255,10 +222,8 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-flash .gestao-icone { margin-top: 2px; }
 .gestao-flash__tipo { font-weight: 700; }
 .gestao-flash__texto { flex: 1; }
-/* sucesso e info NÃO somem sozinhos (WCAG 2.2.1): ficam até "Dispensar"; sem deslocar o layout */
 .gestao-flash--sucesso { border: 2px solid var(--azul); background: var(--branco); color: var(--texto); }
 .gestao-flash--sucesso .gestao-icone { color: var(--azul); }
-/* info = neutro: ícone + rótulo "Informação:" + borda pontilhada com barra lateral grossa (nunca só cor) */
 .gestao-flash--info { border: 2px dashed var(--borda); border-left: 6px solid var(--azul); background: var(--branco); color: var(--texto); }
 .gestao-flash--info .gestao-icone { color: var(--azul); }
 .gestao-flash--erro { border: 3px solid var(--texto); background: var(--texto); color: var(--branco); font-weight: 600; }
@@ -273,7 +238,6 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-flash--sucesso .gestao-flash__fechar,
 .gestao-flash--info .gestao-flash__fechar { border-color: var(--azul); }
 
-/* ---------- cartões e dados ---------- */
 .gestao-colunas { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; width: 100%; }
 .gestao-colunas > .gestao-cartao { flex: 1 1 380px; }
 .gestao-cartao {
@@ -282,13 +246,11 @@ form[aria-busy="true"] .gestao-botao {
     display: flex; flex-direction: column; gap: 20px; align-items: flex-start;
 }
 .gestao-cartao__titulo { font-size: 20px; font-weight: 600; }
-/* troca obrigatória: cartão único, em destaque (borda azul grossa) */
 .gestao-cartao--foco { border: 3px solid var(--azul); }
 .gestao-dados { display: grid; grid-template-columns: max-content 1fr; gap: 10px 24px; width: 100%; }
 .gestao-dados dt { font-weight: 600; }
 .gestao-dados dd { overflow-wrap: anywhere; }
 
-/* senha temporária (exibida uma vez) */
 .gestao-senha-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .gestao-senha-temporaria {
     display: inline-block; padding: 12px 16px;
@@ -301,7 +263,6 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-saida-senha { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 .gestao-saida-senha__aviso { font-weight: 700; font-size: 15px; }
 
-/* ---------- tabela ---------- */
 .gestao-tabela-wrap { width: 100%; overflow-x: auto; border: 2px solid var(--borda); border-radius: 8px; }
 .gestao-tabela { width: 100%; border-collapse: collapse; font-size: 14px; }
 .gestao-tabela__legenda { padding: 12px 16px; text-align: left; font-size: 14px; font-weight: 600; color: var(--texto); border-bottom: 2px solid var(--borda); }
@@ -317,14 +278,11 @@ form[aria-busy="true"] .gestao-botao {
 .col-nome { font-weight: 600; overflow-wrap: anywhere; min-width: 160px; }
 .col-login { white-space: nowrap; }
 .col-ultimo-acesso { min-width: 80px; }
-/* ações: alvos de 44px, >= 12px entre vizinhas; a ação DESTRUTIVA fica em grupo próprio, SEMPRE o último botão,
-   com 24px de afastamento e SEM separador (nem vertical nem horizontal): se a linha quebrar, ela só desce para a 2ª linha 
-   (a diferenciação é por espaço, borda grossa #3A3A3A, ícone de alerta e rótulo) */
 .col-acoes { min-width: 280px; }
 @media (min-width: 1280px) { .col-acoes { min-width: 400px; } }
 .gestao-acoes-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: flex-start; padding: 0; }
 .gestao-acoes-grupo { display: contents; }
-.gestao-acoes-grupo--destrutivo .gestao-botao { margin-inline-start: 12px; } /* 12px do gap + 12px = 24px de afastamento */
+.gestao-acoes-grupo--destrutivo .gestao-botao { margin-inline-start: 12px; }
 .gestao-acoes-linha .gestao-form-linha { display: contents; }
 .gestao-acoes-dica { font-size: 14px; color: var(--texto); }
 
@@ -334,7 +292,6 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-situacao__nota { display: block; font-size: 14px; color: var(--texto); }
 .gestao-situacao__bloqueio { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 14px; font-weight: 700; color: var(--texto); }
 
-/* ---------- estados simples ---------- */
 .gestao-estado { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 32px 16px; font-size: 16px; }
 .gestao-estado .gestao-icone { width: 28px; height: 28px; color: var(--terc); }
 .gestao-estado--erro { border: 3px solid var(--texto); border-radius: 8px; font-weight: 700; }
@@ -342,7 +299,6 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-estado--carregando { font-weight: 600; }
 .gestao-estado--carregando::after { content: "..."; }
 
-/* ---------- login ---------- */
 .gestao--publica { display: block; }
 .gestao--publica .gestao-conteudo { align-items: center; justify-content: center; min-height: 100vh; padding: 32px 16px; }
 .gestao-login {
@@ -355,7 +311,6 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-login .gestao-form { max-width: none; }
 .gestao-login .gestao-erro-caixa { max-width: none; padding: 12px 14px; }
 
-/* ---------- páginas de erro (403/404/sessão expirada) ---------- */
 .gestao--erro { display: grid; place-items: center; min-height: 100vh; padding: 24px; }
 .gestao-erro {
     width: 480px; max-width: 100%; padding: 32px;
@@ -367,7 +322,6 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-erro__texto { font-size: 16px; }
 .gestao-erro .gestao-botao { margin-top: 8px; }
 
-/* ---------- diálogo de confirmação ---------- */
 .gestao-dialogo {
     width: 460px; max-width: calc(100vw - 32px); padding: 0;
     border: 2px solid var(--borda); border-radius: 8px;
@@ -380,12 +334,10 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-dialogo__alvo { font-weight: 700; overflow-wrap: anywhere; }
 .gestao-dialogo__acoes { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 8px; }
 
-/* ---------- movimento reduzido ---------- */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
 
-/* ---------- telas estreitas (fallback; uso alvo é desktop >= 1366) ---------- */
 @media (max-width: 1099px) {
     .gestao-topo, .gestao-conteudo { padding-left: 20px; padding-right: 20px; }
 }
@@ -395,12 +347,6 @@ form[aria-busy="true"] .gestao-botao {
     .gestao-dados dd { margin-bottom: 10px; }
 }
 
-/* ==========================================================================
-   Totens (demanda gestao-totem, F2): lista, novo totem e tela da URL.
-   Mesma paleta/estados da lista de usuarios (texto + icone + peso + borda).
-   ========================================================================== */
-
-/* ---------- lista de totens: tabela densa (linha ~53-65px a partir de 1366px) ---------- */
 .gestao-tabela--totens { table-layout: fixed; }
 .gestao-tabela--totens th,
 .gestao-tabela--totens td { padding-left: 6px; padding-right: 6px; }
@@ -415,12 +361,10 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-tabela--totens .col-acoes { min-width: 0; }
 .gestao-tabela--totens .col-criado time { white-space: nowrap; }
 .gestao-tabela--totens th { white-space: normal; }
-/* totem inativo: texto "Inativo" + italico no nome/empresa + barra pontilhada na borda esquerda (nunca so cor) */
 .gestao-tabela--totens .gestao-tabela__linha--inativa td:first-child { border-left: 5px dotted var(--texto); }
 .gestao-tabela--totens .gestao-tabela__linha--inativa .col-nome,
 .gestao-tabela--totens .gestao-tabela__linha--inativa .col-empresa { font-style: italic; }
 
-/* URL do quiosque: caixa de codigo com quebra segura (anywhere); botao "Copiar URL" na linha de baixo */
 .gestao-url-celula { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .gestao-totem-url {
     flex: 1 1 100%; min-width: 0; max-width: 100%;
@@ -430,17 +374,14 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-url-celula .gestao-botao { flex: none; }
 .gestao-url-copiar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .gestao-url-celula__nota { flex: 1 1 100%; }
-/* atendimento em andamento: icone + negrito (sem cor nova) */
 .gestao-situacao__nota--destaque { display: flex; align-items: flex-start; gap: 4px; font-weight: 700; }
 .gestao-situacao__nota--destaque .gestao-icone { flex: none; width: 16px; height: 16px; margin-top: 1px; }
 
-/* confirmacao do formulario da linha (sem JS: aparece em linha propria; com JS o dialogo a substitui) */
 .gestao-confirmacao-inline { flex: 1 1 100%; max-width: 260px; font-size: 14px; }
 .gestao-confirmacao-inline--caixa { max-width: 100%; font-weight: 600; }
 .gestao-confirmacao-inline--caixa input { width: 20px; height: 20px; margin-right: 6px; vertical-align: middle; accent-color: var(--azul); }
 .gestao-confirmacao-inline--oculta { display: none; }
 
-/* ---------- novo totem ---------- */
 .gestao-ajuda__corpo { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .gestao-totem-previa {
     display: block; padding: 8px 12px; width: fit-content; max-width: 100%;
@@ -449,7 +390,6 @@ form[aria-busy="true"] .gestao-botao {
     overflow-wrap: anywhere;
 }
 
-/* ---------- tela da URL (pos-criacao / regerar / "Copiar URL") ---------- */
 .gestao-cartao--url { max-width: 880px; }
 .gestao-cartao--url .gestao-aviso-caixa { max-width: none; }
 .gestao-dados--url { grid-template-columns: 1fr; gap: 8px; }
@@ -460,7 +400,6 @@ form[aria-busy="true"] .gestao-botao {
     font-size: 20px; line-height: 1.5; font-weight: 700; letter-spacing: .02em;
     user-select: all; -webkit-user-select: all; overflow-wrap: anywhere;
 }
-/* nota permanente (URL ja regerada): informativa e neutra, sem a caixa de 3px dos avisos/flash */
 .gestao-nota-permanente {
     display: flex; align-items: flex-start; gap: 10px; max-width: none; padding: 10px 14px;
     border: 1px solid var(--borda); border-left: 6px solid var(--borda); border-radius: 6px;
@@ -471,20 +410,12 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-ajuda--url { max-width: none; }
 @media (max-width: 700px) { .gestao-totem-url--destaque { font-size: 16px; padding: 12px 14px; } }
 
-/* ---------- dialogo com confirmacao extra (nome do totem / atendimento em andamento) ---------- */
 .gestao-dialogo [hidden] { display: none; }
 .gestao-dialogo__extra { gap: 8px; }
 .gestao-dialogo__estado { min-height: 21px; font-size: 14px; font-weight: 700; }
 .gestao-dialogo__caixa { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; font-size: 15px; font-weight: 600; cursor: pointer; }
 .gestao-dialogo__caixa input { flex: none; width: 24px; height: 24px; margin: 0; accent-color: var(--azul); }
 
-/* ==========================================================================
-   Logs (F3c): /gestao/logs.php e /gestao/log.php (so admin, so leitura).
-   Mesma paleta/estados do resto da gestao: o NIVEL nunca depende so de cor
-   (rotulo textual + icone + peso + espessura/estilo de borda + barra lateral).
-   ========================================================================== */
-
-/* ---------- abas (links; ativa = fundo #0179AD, texto branco, 700) ---------- */
 .gestao-abas { width: 100%; }
 .gestao-abas__lista { display: flex; flex-wrap: wrap; gap: 12px; }
 .gestao-abas__item { display: block; }
@@ -503,10 +434,8 @@ form[aria-busy="true"] .gestao-botao {
     font-size: 13px; font-weight: 700; text-align: center;
 }
 
-/* campo de data: o foco fica nos sub-campos internos (dia/mes/ano), entao o anel vai no :focus-within */
 .gestao-filtros .gestao-campo__entrada[type="date"]:focus-within { outline: 3px solid var(--azul); outline-offset: 1px; border-color: var(--azul); }
 
-/* ---------- painel, filtros e contador ---------- */
 .gestao-painel-logs { width: 100%; display: flex; flex-direction: column; gap: 16px; }
 .gestao-descricao { max-width: 90ch; font-size: 15px; }
 .gestao-filtros {
@@ -515,13 +444,10 @@ form[aria-busy="true"] .gestao-botao {
     border: 2px solid var(--borda); border-radius: 8px;
 }
 .gestao-filtros .gestao-campo { flex: 1 1 180px; min-width: 150px; max-width: 240px; }
-/* alinha com os campos: altura do rotulo (15px x 1,5) + gap de 6px */
 .gestao-filtros .gestao-atalhos,
 .gestao-filtros .gestao-barra-acoes { margin-top: calc(15px * 1.5 + 6px); }
 .gestao-atalhos { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-/* atalho do periodo em uso: negrito + borda de 3px + aria-current (nunca so cor) */
 .gestao-botao--ativo { font-weight: 700; border-width: 3px; box-shadow: inset 0 0 0 1px var(--azul); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
-/* paginacao desabilitada: <span aria-disabled="true">, borda tracejada, sem cursor de clique */
 .gestao-botao--desabilitado,
 .gestao-botao--desabilitado:hover {
     background: var(--branco); color: var(--texto);
@@ -531,7 +457,6 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-contador { font-size: 15px; font-weight: 600; }
 .gestao-link { font-weight: 600; }
 
-/* ---------- tabela de logs (colunas fixas; a mensagem leva o resto) ---------- */
 .gestao-tabela--logs { table-layout: fixed; min-width: 886px; }
 .gestao-tabela--logs:has(th.col-totem) { min-width: 1006px; }
 .gestao-tabela--logs th,
@@ -548,19 +473,15 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-tabela--logs .col-totem { overflow-wrap: anywhere; }
 .gestao-tabela--logs .col-categoria { overflow-wrap: break-word; }
 .gestao-tabela--logs .col-repeticoes { position: relative; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
-/* o texto .gestao-sr (absoluto) fica contido na celula: sem isso ele estica a rolagem da PAGINA quando a tabela rola */
 .gestao-tabela--logs .col-detalhe { text-align: left; }
-/* "Ver detalhe" fixo na borda direita: continua visivel e clicavel quando a tabela rola na horizontal (ex.: 1000x700) */
 .gestao-tabela--logs th.col-detalhe,
 .gestao-tabela--logs td.col-detalhe { position: sticky; right: 0; background: var(--branco); box-shadow: -1px 0 0 var(--borda); }
 .gestao-tabela--logs .col-detalhe .gestao-botao { padding: 0 8px; }
-/* mensagem: ate 2 linhas; o texto inteiro fica no detalhe (title nao funciona em toque) */
 .gestao-mensagem-texto {
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
     overflow: hidden; overflow-wrap: anywhere;
 }
 
-/* nivel: rotulo (texto) + icone + peso + borda; INFO e o mais discreto */
 .gestao-nivel {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 3px 6px; border-radius: 4px;
@@ -570,16 +491,13 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-nivel--erro { background: var(--texto); color: var(--branco); border: 3px solid var(--texto); font-weight: 700; }
 .gestao-nivel--aviso { background: var(--branco); color: var(--texto); border: 3px solid var(--texto); font-weight: 700; }
 .gestao-nivel--info { background: var(--branco); color: var(--texto); border: 1px dashed var(--borda); padding: 5px 8px; font-weight: 500; }
-/* barra esquerda da linha: ERRO solida 6px, AVISO tracejada 6px, INFO sem barra */
 .gestao-tabela--logs tr[data-nivel="erro"] td:first-child { border-left: 6px solid var(--texto); }
 .gestao-tabela--logs tr[data-nivel="aviso"] td:first-child { border-left: 6px dashed var(--texto); }
 .gestao-tabela--logs tr[data-nivel="erro"] .col-mensagem { font-weight: 700; }
 
-/* ---------- paginacao ---------- */
 .gestao-paginacao { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
 .gestao-paginacao__posicao { font-size: 15px; font-weight: 600; text-align: center; }
 
-/* ---------- detalhe do registro ---------- */
 #log-mensagem { font-size: 16px; font-weight: 600; }
 .gestao-cartao__titulo .gestao-nivel { margin-right: 8px; vertical-align: middle; }
 .gestao-cartao__subtitulo { width: 100%; padding-top: 20px; border-top: 2px solid var(--borda); font-size: 17px; font-weight: 700; }
@@ -597,15 +515,6 @@ form[aria-busy="true"] .gestao-botao {
     .gestao-paginacao__posicao { flex: 1 1 100%; order: -1; }
 }
 
-/* ==========================================================================
-   Ordens de coleta (F4): /gestao/ordens.php (4 abas) e /gestao/ordem.php.
-   Reaproveita abas, filtros, tabela, paginacao, cartoes, botoes e a nota
-   permanente da F2/F3c. Estado NUNCA so por cor: texto + icone + peso + borda
-   (ATIVA = azul 700; INATIVA = italico 500 so no rotulo da situacao; "Pendente" 700; "Resolvida" 500;
-   OC ativa ha mais de 15 dias = etiqueta com icone, borda 3px + barra tracejada).
-   ========================================================================== */
-
-/* ---------- painel, aviso fixo, erro e vazio ---------- */
 .gestao-painel-ordens { width: 100%; display: flex; flex-direction: column; gap: 16px; }
 #ordens-aviso-retencao, #ordens-erro-carga { width: 100%; }
 @media (min-width: 1100px) {
@@ -615,14 +524,12 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-filtros select.gestao-campo__entrada { text-overflow: ellipsis; }
 .gestao-estado--vazio { width: 100%; flex-wrap: wrap; border: 2px dashed var(--borda); border-radius: 8px; font-weight: 600; text-align: center; }
 .gestao-estado .gestao-link { display: inline-flex; align-items: center; min-height: 44px; }
-/* aviso com confirmacao (detalhe): caixa de 3px, texto a esquerda, nunca so cor */
 .gestao-estado--aviso {
     align-self: stretch; justify-content: flex-start; align-items: flex-start; width: 100%;
     padding: 14px 16px; border: 3px solid var(--texto); border-radius: 8px;
     background: var(--branco); color: var(--texto); font-weight: 700; text-align: left;
 }
 .gestao-estado--aviso .gestao-icone { width: 24px; height: 24px; margin-top: 0; color: var(--texto); }
-/* nota informativa neutra (aviso do PDF) */
 .gestao-nota {
     align-self: stretch; display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px;
     border: 1px solid var(--borda); border-left: 6px solid var(--borda); border-radius: 6px;
@@ -630,7 +537,6 @@ form[aria-busy="true"] .gestao-botao {
 }
 .gestao-nota .gestao-icone { margin-top: 2px; color: var(--texto); }
 
-/* ---------- tabelas (colunas fixas; rolagem horizontal so no .gestao-tabela-wrap abaixo de ~1100px) ---------- */
 .gestao-tabela--ordens, .gestao-tabela--baixas { table-layout: fixed; min-width: 1000px; }
 .gestao-tabela--ordens th, .gestao-tabela--baixas th { padding: 0 6px; height: 48px; white-space: normal; }
 .gestao-tabela--ordens td, .gestao-tabela--baixas td { padding: 6px; height: 56px; }
@@ -652,11 +558,9 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-tabela--ordens .col-numero, .gestao-tabela--baixas .col-numero-oc { overflow-wrap: anywhere; }
 .gestao-tabela--ordens .col-numero { font-weight: 600; }
 .gestao-tabela--ordens .col-cliente, .gestao-tabela--ordens .col-transportadora, .gestao-tabela--ordens .col-pdf { overflow-wrap: anywhere; }
-/* "Acoes" fixa na borda direita: continua visivel e clicavel quando a tabela rola (ex.: 1000x700) */
 .gestao-tabela--ordens th.col-acoes, .gestao-tabela--ordens td.col-acoes,
 .gestao-tabela--baixas th.col-acoes, .gestao-tabela--baixas td.col-acoes { position: sticky; right: 0; background: var(--branco); box-shadow: -1px 0 0 var(--borda); }
 
-/* celula em duas linhas: principal (600) + secundaria (400) */
 .gestao-celula-principal { display: block; font-weight: 600; }
 .gestao-celula-sec { display: block; font-size: 14px; font-weight: 400; color: var(--texto); }
 .gestao-tabela--ordens .col-cliente .gestao-celula-principal,
@@ -664,15 +568,12 @@ form[aria-busy="true"] .gestao-botao {
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
 }
 .gestao-acoes-linha .gestao-celula-sec { white-space: nowrap; }
-/* baixa sem ordem unica: icone + texto (600), pode quebrar em 2 linhas */
 .gestao-acoes-linha .gestao-oc-estado { display: flex; align-items: flex-start; gap: 6px; max-width: 150px; white-space: normal; font-weight: 600; }
 .gestao-oc-estado .gestao-icone { width: 16px; height: 16px; margin-top: 2px; flex: none; }
 
-/* barra esquerda: ativa ha mais de 15 dias = tracejada 6px; as demais reservam o mesmo espaco (transparente) */
 .gestao-tabela--ordens td:first-child { border-left: 6px solid transparent; }
 .gestao-tabela--ordens tr[data-idade="atencao"] td:first-child { border-left: 6px dashed var(--texto); }
 
-/* situacao */
 .gestao-situacao--ativa { color: var(--azul); font-weight: 700; }
 .gestao-situacao--inativa { color: var(--texto); font-weight: 500; font-style: italic; }
 .gestao-situacao--pendente { color: var(--texto); font-weight: 700; }
@@ -680,12 +581,10 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-tabela--baixas .gestao-situacao { white-space: normal; align-items: flex-start; }
 .gestao-tabela--baixas .gestao-situacao .gestao-icone { margin-top: 2px; }
 
-/* idade: "Ha N dias" (500) ou, em ativa ha mais de 15 dias, etiqueta com icone + borda 3px + 700 */
 .gestao-idade { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
 .gestao-idade .gestao-icone { width: 16px; height: 16px; }
 .gestao-idade--atencao { padding: 1px 6px; border: 3px solid var(--texto); border-radius: 6px; font-weight: 700; font-style: normal; }
 
-/* sinal "Mesmo numero em outros clientes": icone + texto + borda tracejada */
 .gestao-sinal {
     display: flex; align-items: flex-start; gap: 6px; width: fit-content; max-width: 100%; margin-top: 4px;
     padding: 2px 6px; border: 1px dashed var(--texto); border-radius: 4px;
@@ -694,18 +593,15 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-sinal .gestao-icone { width: 16px; height: 16px; margin-top: 1px; }
 p.gestao-sinal { margin-top: 0; padding: 8px 12px; border-width: 2px; font-size: 15px; }
 
-/* cabecalho ordenavel: link de 44px; a direcao fica no aria-sort e na seta (alem da espessura do sublinhado) */
 .gestao-ordenar { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 700; color: var(--azul); }
 th[aria-sort="ascending"] .gestao-ordenar, th[aria-sort="descending"] .gestao-ordenar { text-decoration-thickness: 3px; }
 th[aria-sort="ascending"] .gestao-ordenar::after { content: "\25B2"; content: "\25B2" / ""; font-size: 11px; }
 th[aria-sort="descending"] .gestao-ordenar::after { content: "\25BC"; content: "\25BC" / ""; font-size: 11px; }
 
-/* ---------- acoes da linha: Abrir + Ativar/Inativar lado a lado, sem quebra ---------- */
 .gestao-tabela--ordens .gestao-acoes-linha, .gestao-tabela--baixas .gestao-acoes-linha { flex-wrap: nowrap; }
-.gestao-tabela--ordens .gestao-acoes-grupo--destrutivo .gestao-botao { margin-inline-start: 12px; } /* 12px do gap + 12px = 24px */
+.gestao-tabela--ordens .gestao-acoes-grupo--destrutivo .gestao-botao { margin-inline-start: 12px; }
 .gestao-tabela--ordens .col-acoes .gestao-botao--pequeno { padding: 0 10px; }
 
-/* ---------- detalhe: cartoes em 2 colunas (>= 1100px) ou 1 ---------- */
 .gestao-ordem { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
 .gestao-ordem .gestao-cartao { max-width: none; min-width: 0; }
 .gestao-ordem .gestao-cartao__titulo { max-width: 100%; overflow-wrap: anywhere; }
@@ -717,21 +613,11 @@ th[aria-sort="descending"] .gestao-ordenar::after { content: "\25BC"; content: "
     #ordem-cartao-ordem { grid-column: 1 / -1; }
 }
 
-/* ==========================================================================
-   Cadastros (F6): /gestao/clientes.php, cliente-form.php, empresas.php e empresa-form.php
-   (so admin). Reaproveita tabela, filtros, campos, botoes, paginacao, nota permanente,
-   situacao e a confirmacao em dois passos da F4. Estado NUNCA so por cor: Ativo/Inativo =
-   texto + icone + peso (inativo = italico 500 no nome e no rotulo); excluir = borda 3px
-   #3A3A3A + icone; CNPJ somente leitura = borda tracejada #3A3A3A + peso 700.
-   ========================================================================== */
-
-/* ---------- avisos fixos e filtros ---------- */
 #clientes-aviso, #empresas-aviso { width: 100%; }
 @media (min-width: 1100px) {
     .gestao-filtros .gestao-campo:has(#filtro-busca) { flex-basis: 320px; max-width: 420px; }
 }
 
-/* ---------- tabelas (colunas fixas; rolagem horizontal so no .gestao-tabela-wrap abaixo de ~1100px) ---------- */
 .gestao-tabela--clientes, .gestao-tabela--empresas { table-layout: fixed; }
 .gestao-tabela--clientes { min-width: 930px; }
 .gestao-tabela--empresas { min-width: 1000px; }
@@ -745,36 +631,28 @@ th[aria-sort="descending"] .gestao-ordenar::after { content: "\25BC"; content: "
 .gestao-tabela--clientes .gestao-col-acoes, .gestao-tabela--empresas .gestao-col-acoes { width: 352px; }
 .gestao-tabela--clientes .col-nome, .gestao-tabela--empresas .col-nome { min-width: 0; overflow-wrap: anywhere; }
 .gestao-tabela--clientes .col-acoes, .gestao-tabela--empresas .col-acoes { min-width: 0; }
-/* CNPJ formatado em fonte tabular (digitos alinhados), sem quebra */
 .col-cnpj { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .gestao-tabela--clientes .col-criado time, .gestao-tabela--empresas .col-criada time { white-space: nowrap; }
 .gestao-tabela--empresas .col-totens { overflow-wrap: anywhere; font-weight: 500; }
 .gestao-tabela--empresas .col-totens[data-totens-total="0"] { font-weight: 400; font-style: italic; }
 .gestao-tabela--clientes .col-situacao, .gestao-tabela--empresas .col-situacao { overflow-wrap: anywhere; }
 .gestao-tabela__vazio td { height: auto; padding: 16px; }
-/* "Acoes" fixa na borda direita: continua visivel e clicavel quando a tabela rola (ex.: 1000x700 e 680) */
 .gestao-tabela--clientes thead th:last-child, .gestao-tabela--clientes td.col-acoes,
 .gestao-tabela--empresas thead th:last-child, .gestao-tabela--empresas td.col-acoes { position: sticky; right: 0; background: var(--branco); box-shadow: -1px 0 0 var(--borda); }
-/* Editar, Inativar/Ativar e Excluir na MESMA linha; Excluir sempre o ultimo, com 24px de afastamento */
 .gestao-tabela--clientes .gestao-acoes-linha, .gestao-tabela--empresas .gestao-acoes-linha { flex-wrap: nowrap; }
 .gestao-tabela--clientes .col-acoes .gestao-botao--pequeno, .gestao-tabela--empresas .col-acoes .gestao-botao--pequeno { padding: 0 10px; }
-/* Ativar e Inativar com a mesma largura: o Excluir fica sempre alinhado na coluna */
 .gestao-tabela--clientes .col-acoes button.gestao-botao--secundario, .gestao-tabela--empresas .col-acoes button.gestao-botao--secundario { min-width: 100px; }
 
-/* ---------- confirmacao em dois passos (inativar/excluir): Cancelar ANTES do destrutivo ---------- */
 .gestao-estado__corpo { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .gestao-estado__corpo p { max-width: 100%; overflow-wrap: anywhere; }
 .gestao-estado__corpo p:not(:first-child) { font-weight: 600; }
 .gestao-estado__corpo .gestao-form-acao { margin-top: 4px; }
-/* o icone dentro do botao herda a cor do botao (sem isso o #3A3A3A da caixa some no fundo #3A3A3A) e mede 18px como nos demais botoes */
 .gestao-estado__corpo .gestao-botao .gestao-icone { width: 18px; height: 18px; color: inherit; }
 @media (min-width: 721px) {
-    .gestao-estado__corpo .gestao-botao--destrutivo-cheio { margin-inline-start: 12px; } /* 12px do gap + 12px = 24px do Cancelar */
+    .gestao-estado__corpo .gestao-botao--destrutivo-cheio { margin-inline-start: 12px; }
 }
 
-/* ---------- formularios ---------- */
 .gestao-cartao > .gestao-nota-permanente { align-self: stretch; max-width: 480px; }
-/* CNPJ somente leitura: distinto SEM cor nova (borda tracejada #3A3A3A + peso 700 + digitos tabulares) */
 #cliente-cnpj[readonly], #empresa-cnpj[readonly] {
     border: 2px dashed var(--texto); font-weight: 700; font-variant-numeric: tabular-nums; cursor: default;
 }

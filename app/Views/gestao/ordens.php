@@ -1,18 +1,4 @@
 <?php
-/**
- * Ordens de coleta (perfis usuario e admin). Variáveis (GestaoOrdemController::listar):
- * $erroCarga (bool; true = só o aviso fixo e o erro, nenhuma das demais existe), $aba (slug:
- * ativas | ativas_15d | inativas | baixas), $abas (list: slug, id, rotulo, contagem, contagem_sr,
- * href, ativa), $abaDescricao, $filtros (aba, cliente, numero, de, ate, inativada_de, inativada_ate,
- * mostrar, ordem, dir, pagina), $errosFiltro (campo => mensagem), $opcoesCliente (list: valor, rotulo),
- * $opcoesMostrar (valor => rótulo, só em Baixas pendentes), $itens (ordens da página), $linhasBaixa
- * (baixas da página), $cabecalhos (numero|cliente|criado_em => href, aria, rotulo, ativo; vazio em
- * Baixas), $contador (texto pronto), $total, $temFiltros, $pagina, $paginas, $urlAnterior,
- * $urlProxima (ou null), $urlLimpar, $retorno (query validada que volta nos formulários),
- * $diasRetencaoPdf. $errosFiltro também pode trazer `cliente` (cliente inválido ou inexistente: a lista fica vazia).
- *
- * Tudo é link GET ou <form>: funciona sem JS. Sem script nem style inline. Todo dado passa por h().
- */
 ?>
 <?php if (!isset($aba) || $aba !== 'baixas'): ?>
 <div class="gestao-nota-permanente" id="ordens-aviso-retencao"><?= gestaoIcone('info') ?><p>Depois que uma ordem é inativada, o PDF dela é apagado em 15 dias.</p></div>

@@ -6,16 +6,6 @@ use App\Rn\TotemGestaoRn;
 use Util\GestaoHttp;
 use Util\TotemUrlBase;
 
-/**
- * Totens da Gestao Totem (SO admin; o guard esta em GestaoContexto): listar,
- * criar, ativar/desativar e regerar a URL (demanda gestao-totem, F2). Os metodos
- * devolvem o resultado de pagina que `gestaoRenderizar()` imprime, ou redirecionam
- * (PRG com ?msg=codigo).
- *
- * Fail-closed: sem TOTEM_URL_BASE valida no ambiente a gestao de totens responde
- * 503 (nunca monta URL a partir do cabecalho Host). O token do quiosque nunca
- * passa por este controller.
- */
 final class GestaoTotemController
 {
     private TotemGestaoRn $rn;
@@ -36,13 +26,6 @@ final class GestaoTotemController
         $this->rn = new TotemGestaoRn($ctx->pdo, $base);
     }
 
-    /**
-     * totens.php: GET lista. POST acao=ativar|desativar|regerar-url + id_totem.
-     *  - desativar: confirmar_atendimento=1 (so exigido se ha atendimento recente);
-     *  - regerar-url: versao_url (a `url_versao` que a tela mostrou) + nome_confirmacao.
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function listar(): array
     {
         if ($this->ctx->auth->metodoSeguro()) {
@@ -75,11 +58,6 @@ final class GestaoTotemController
         return [];
     }
 
-    /**
-     * totem-form.php: GET mostra o formulario (empresas ativas). POST cria o totem.
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function formulario(): array
     {
         if ($this->ctx->auth->metodoSeguro()) {
@@ -100,12 +78,6 @@ final class GestaoTotemController
         return [];
     }
 
-    /**
-     * totem-url.php (GET, ?id=): mostra a URL completa do totem (so admin) com o
-     * botao de copiar. E o destino do PRG depois de criar e de regerar.
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function url(): array
     {
         $id = GestaoContexto::inteiroPositivo(GestaoContexto::query('id'));
@@ -124,13 +96,6 @@ final class GestaoTotemController
         ];
     }
 
-    /**
-     * Cada linha de `totens` traz: id_totem, nome, empresa_nome, ativo, criado_em,
-     * criado_por_nome, criado_por_login, url (completa), legado (bool), url_versao,
-     * url_regerada_em, atualizado_em, atendimentos_recentes (int). Nunca o token.
-     *
-     * @param array{tipo:string,texto:string}|null $flashLocal
-     */
     private function pagina(int $status, ?array $flashLocal = null): array
     {
         return [
@@ -144,10 +109,6 @@ final class GestaoTotemController
         ];
     }
 
-    /**
-     * @param array{empresa:string,nome:string} $valores
-     * @param array<string,string> $erros
-     */
     private function formularioView(int $status, array $valores, array $erros): array
     {
         return [

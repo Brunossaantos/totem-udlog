@@ -9,14 +9,6 @@ use Util\Bootstrap;
 use Util\GestaoConfig;
 use Util\GestaoHttp;
 
-/**
- * Contexto de uma requisicao da Gestao Totem (demanda gestao-totem, F1): faz o
- * GUARD (HTTPS, host, metodo, origem, sessao, perfil, troca obrigatoria de
- * senha, CSRF) ANTES de qualquer saida HTML e entrega ao controller a conexao,
- * o AuthGestao e a sessao validada.
- *
- * Usado pelo helper de pagina `gestaoPagina()` (app/Views/gestao/_helpers.php).
- */
 final class GestaoContexto
 {
     public const CAMINHO_CONTA = '/gestao/conta.php';
@@ -31,12 +23,6 @@ final class GestaoContexto
 
     public const CAMINHO_EMPRESAS = '/gestao/empresas.php';
 
-    /**
-     * Itens do menu lateral. `disponivel` false = ainda nao existe (fica oculto
-     * ate a fase que o cria). `perfil` = perfil MINIMO para ver o item.
-     *
-     * @var list<array{id:string,rotulo:string,href:string,perfil:string,disponivel:bool}>
-     */
     public const MENU = [
         ['id' => 'painel', 'rotulo' => 'Painel', 'href' => '/gestao/painel.php', 'perfil' => 'admin', 'disponivel' => false],
         ['id' => 'totens', 'rotulo' => 'Totens', 'href' => '/gestao/totens.php', 'perfil' => 'admin', 'disponivel' => true],
@@ -50,14 +36,6 @@ final class GestaoContexto
         ['id' => 'conta', 'rotulo' => 'Minha conta', 'href' => '/gestao/conta.php', 'perfil' => 'usuario', 'disponivel' => true],
     ];
 
-    /**
-     * Mensagens de retorno por codigo fixo (?msg=codigo): nunca texto livre na URL.
-     * tipo: sucesso | erro | info (info = neutro: "nada a alterar", avisos que
-     * nao sao nem sucesso nem erro). Estilo: voz ativa, o que aconteceu, o efeito
-     * e o proximo passo.
-     *
-     * @var array<string,array{0:string,1:string}>
-     */
     public const MENSAGENS = [
         'usuario_editado' => ['sucesso', 'Usuário atualizado. As alterações já valem.'],
         'usuario_ativado' => ['sucesso', 'Usuário ativado. Ele já pode entrar.'],
@@ -125,12 +103,10 @@ final class GestaoContexto
         'erro_interno' => ['erro', 'Não foi possível concluir. Nada foi alterado. Tente novamente.'],
     ];
 
-    /** Codigos que a tela de login (visitante anonimo, sem sessao) aceita em ?msg=; os demais sao ignorados. */
     public const MENSAGENS_LOGIN = ['sessao_expirada', 'saiu', 'senha_alterada_entrar'];
 
     public const TIPOS_MENSAGEM =['sucesso', 'erro', 'info'];
 
-    /** @param array<string,mixed>|null $sessao */
     private function __construct(
         public PDO $pdo,
         public AuthGestao $auth,
@@ -140,14 +116,8 @@ final class GestaoContexto
     ) {
     }
 
-    /**
-     * @param string|null $perfilMinimo null = pagina publica (login). 'usuario' = qualquer perfil logado. 'admin'.
-     * @param array{trocaPendenteOk?:bool,semSessaoRedireciona?:bool,metodos?:list<string>} $opcoes
-     */
     public static function iniciar(string $titulo, string $itemMenu, ?string $perfilMinimo, array $opcoes = []): self
     {
-        // M1: um stack trace nunca leva os argumentos (senha digitada, hash, token) e
-        // uma excecao nao tratada vira resposta generica com log so da classe.
         ini_set('zend.exception_ignore_args', '1');
         GestaoHttp::cabecalhosSeguranca();
         GestaoHttp::registrarTratadorDeExcecao();
@@ -205,7 +175,6 @@ final class GestaoContexto
         return new self($pdo, $auth, $sessao, $titulo, $itemMenu);
     }
 
-    /** Botao da pagina de erro quando o erro nao e de sessao/CSRF: Voltar ao inicio (com sessao) ou Ir para o login. */
     private static function acaoSemSessao(AuthGestao $auth): string
     {
         return $auth->sessaoAtual() !== null ? GestaoHttp::ACAO_INICIO : GestaoHttp::ACAO_LOGIN;
@@ -231,7 +200,6 @@ final class GestaoContexto
         return $this->auth->ipCliente();
     }
 
-    /** Campo de formulario (POST) como string, '' se ausente ou nao for string. */
     public static function post(string $nome): string
     {
         $v = $_POST[$nome] ?? '';
@@ -239,7 +207,6 @@ final class GestaoContexto
         return is_string($v) ? $v : '';
     }
 
-    /** Parametro de query (GET) como string, '' se ausente ou nao for string. */
     public static function query(string $nome): string
     {
         $v = $_GET[$nome] ?? '';
@@ -247,7 +214,6 @@ final class GestaoContexto
         return is_string($v) ? $v : '';
     }
 
-    /** Inteiro positivo vindo de texto (so digitos), ou null. */
     public static function inteiroPositivo(string $texto): ?int
     {
         if (preg_match('/\A[1-9][0-9]{0,9}\z/D', $texto) !== 1) {
@@ -257,11 +223,6 @@ final class GestaoContexto
         return (int) $texto;
     }
 
-    /**
-     * Itens do menu que o perfil logado pode ver e que ja existem.
-     *
-     * @return list<array{id:string,rotulo:string,href:string,atual:bool}>
-     */
     public function menu(): array
     {
         if ($this->sessao === null || $this->sessao['deve_trocar_senha']) {
@@ -281,14 +242,12 @@ final class GestaoContexto
         return $itens;
     }
 
-    /** @return array{tipo:string,texto:string}|null mensagem de retorno (?msg=codigo) */
     public function flash(): ?array
     {
         $codigo = self::query('msg');
         if ($codigo === '' || !isset(self::MENSAGENS[$codigo])) {
             return null;
         }
-        // Sem sessao (login, anonimo): so os codigos seguros da tela de login.
         if ($this->sessao === null && !in_array($codigo, self::MENSAGENS_LOGIN, true)) {
             return null;
         }

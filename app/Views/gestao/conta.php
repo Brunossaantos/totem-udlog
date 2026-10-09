@@ -1,11 +1,5 @@
 <?php
-/**
- * Minha conta. Variáveis: $usuario (array login, nome, perfil, ultimo_login_em),
- * $troca_obrigatoria (bool), $erros (array campo => mensagem; campos:
- * senha_atual, senha_nova, senha_confirmacao, geral).
- */
 $perfilRotulo = $usuario['perfil'] === 'admin' ? 'Administrador' : 'Usuário';
-/** Mensagem de erro de campo: ícone + texto (o estado nunca depende só de cor). */
 $erroCampo = static function (string $campo) use ($erros): string {
     if (!isset($erros[$campo])) {
         return '';
@@ -19,7 +13,7 @@ $atributosCampo = static fn (string $campo): string => isset($erros[$campo]) ? '
 <div class="gestao-aviso-caixa"><?= gestaoIcone('alerta') ?><span class="gestao-sr">Atenção: </span><p class="gestao-aviso" id="aviso-troca-obrigatoria" role="alert">Troca de senha obrigatória: por segurança, defina uma nova senha antes de continuar.</p></div>
 <?php endif; ?>
 <div class="gestao-colunas<?= $troca_obrigatoria ? ' gestao-colunas--foco' : '' ?>">
-<?php if (!$troca_obrigatoria): /* na troca obrigatória o formulário é o único foco da página */ ?>
+<?php if (!$troca_obrigatoria): ?>
 <section class="gestao-cartao" id="conta-perfil">
 <h2 class="gestao-cartao__titulo">Meu perfil</h2>
 <dl class="gestao-dados">

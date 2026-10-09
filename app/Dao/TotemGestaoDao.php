@@ -4,34 +4,19 @@ namespace App\Dao;
 
 use PDO;
 
-/**
- * Acesso a tb_totem para a Gestao Totem (demanda gestao-totem, F2).
- *
- * REGRA DE SEGURANCA: este DAO NUNCA seleciona `token_api` (colunas EXPLICITAS,
- * nunca SELECT *): o token do quiosque so e gravado no INSERT (`inserir`) e nunca
- * volta para a gestao, para log ou para auditoria. Todas as consultas usam
- * prepared statements.
- */
 class TotemGestaoDao
 {
-    /** Prefixo do lock nomeado (o nome real inclui MD5(DATABASE()): um lock por banco). */
     private const LOCK_TOTENS = 'totem_gestao_totens_';
 
     private const COLUNAS = 't.id_totem, t.codigo, t.nome, t.id_empresa, t.ativo, t.criado_em, t.criado_por,
         t.atualizado_em, t.url_regerada_em, t.url_versao';
 
-    /** Janela, em minutos, que define "atendimento com atividade recente". */
     public const JANELA_ATENDIMENTO_MIN = 30;
 
     public function __construct(private PDO $pdo)
     {
     }
 
-    /**
-     * Lista para a tela de totens (inclui `codigo`, que e a base da URL mostrada so ao admin).
-     *
-     * @return list<array<string,mixed>>
-     */
     public function listar(): array
     {
         $stmt = $this->pdo->prepare(
@@ -53,7 +38,6 @@ class TotemGestaoDao
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** @return array<string,mixed>|null */
     public function buscarPorId(int $idTotem, bool $paraAtualizar = false): ?array
     {
         $stmt = $this->pdo->prepare(
@@ -66,13 +50,11 @@ class TotemGestaoDao
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    /** @return list<array{id_empresa:int|string,nome:string}> empresas ATIVAS para o seletor */
     public function empresasAtivas(): array
     {
         return $this->pdo->query('SELECT id_empresa, nome FROM tb_empresa WHERE ativo = 1 ORDER BY nome ASC, id_empresa ASC')->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** @return array{id_empresa:int|string,nome:string,ativo:int|string}|null */
     public function buscarEmpresa(int $idEmpresa, bool $soAtiva): ?array
     {
         $stmt = $this->pdo->prepare('SELECT id_empresa, nome, ativo FROM tb_empresa WHERE id_empresa = :id' . ($soAtiva ? ' AND ativo = 1' : ''));
@@ -81,7 +63,6 @@ class TotemGestaoDao
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    /** Ja existe totem com esse nome (normalizado) na empresa? Trava a linha se houver (FOR UPDATE). */
     public function existeNomeNaEmpresa(int $idEmpresa, string $nome): bool
     {
         $stmt = $this->pdo->prepare('SELECT id_totem FROM tb_totem WHERE id_empresa = :empresa AND nome = :nome LIMIT 1 FOR UPDATE');
@@ -90,10 +71,6 @@ class TotemGestaoDao
         return $stmt->fetchColumn() !== false;
     }
 
-    /**
-     * INSERT do totem. `$tokenApi` e gravado e nunca mais lido pela gestao. Pode
-     * lancar PDOException 1062 (codigo ou token repetido): quem chama decide o retry.
-     */
     public function inserir(string $codigo, string $nome, int $idEmpresa, #[\SensitiveParameter] string $tokenApi, int $criadoPor): int
     {
         $stmt = $this->pdo->prepare(
@@ -118,7 +95,6 @@ class TotemGestaoDao
         $stmt->execute();
     }
 
-    /** Troca SO o codigo (nunca o token), marca a regeracao e incrementa a versao. Pode lancar 1062. */
     public function atualizarCodigo(int $idTotem, string $codigo): void
     {
         $stmt = $this->pdo->prepare(
@@ -129,7 +105,6 @@ class TotemGestaoDao
         $stmt->execute();
     }
 
-    /** Atendimentos `em_andamento` do totem com atividade nos ultimos JANELA_ATENDIMENTO_MIN minutos. */
     public function contarAtendimentosRecentes(int $idTotem): int
     {
         $stmt = $this->pdo->prepare(
@@ -143,7 +118,6 @@ class TotemGestaoDao
         return (int) $stmt->fetchColumn();
     }
 
-    /** Lock nomeado (por banco) que serializa as mutacoes de totens. @return bool true se obteve */
     public function obterLock(int $segundos): bool
     {
         $stmt = $this->pdo->prepare('SELECT GET_LOCK(CONCAT(:nome, MD5(DATABASE())), :segundos)');

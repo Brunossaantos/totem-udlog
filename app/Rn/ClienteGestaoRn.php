@@ -11,30 +11,14 @@ use Util\LogSistema;
 use Util\NomeCadastro;
 use Util\RazaoSocialMatcher;
 
-/**
- * Cadastro de CLIENTES (tb_cliente, banco do TOTEM) da Gestao Totem (F6). So admin.
- *
- * O OCR e o autocomplete leem esta tabela em tempo real (ClienteDao): criar, inativar,
- * ativar, excluir e renomear valem na hora. Regras (decisoes do usuario):
- *  - exclusao FISICA, separada da acao reversivel INATIVAR/ATIVAR; excluir SEMPRE pede
- *    confirmacao em dois passos; inativar so pede se ha atendimento EM ANDAMENTO que
- *    depende do cliente (cliente_cnpj do atendimento ou cnpj_emitente de nota);
- *  - CNPJ IMUTAVEL depois de criado; o CNPJ da UDLOG e BLOQUEADO como cliente;
- *  - `razao_social_normalizada` sai de RazaoSocialMatcher::normalizar (o mesmo algoritmo
- *    do OCR), na criacao e a cada mudanca de nome; vazia ou igual a de outro cliente =
- *    recusa (geraria RAZAO_SOCIAL_AMBIGUA no OCR);
- *  - nunca altera tb_atendimento/tb_atendimento_nota (historicos guardam copia em texto).
- */
 class ClienteGestaoRn extends CadastroGestaoBase
 {
     public const NOME_MIN = 2;
 
     public const NOME_MAX = 150;
 
-    /** Tamanho da coluna razao_social_normalizada. */
     public const RAZAO_MAX = 150;
 
-    /** Acima disto de clientes ATIVOS a simulacao de ambiguidade do OCR e pulada. */
     public const SIMULACAO_MAX_CLIENTES = 500;
 
     private ClienteGestaoDao $clientes;
@@ -65,15 +49,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         $this->clientes->liberarLock();
     }
 
-    // ------------------------------------------------------------------ leitura
-
-    /**
-     * Filtros por whitelist: situacao ativos|inativos|todos (padrao todos); q = busca por
-     * prefixo do nome ou parte do CNPJ (so digitos), minimo 3 caracteres (menos que isso
-     * ou texto invalido = sem busca, e `busca_curta` avisa a tela).
-     *
-     * @return array{situacao:string,q:string,busca_curta:bool}
-     */
     public static function filtrosValidos(string $situacao, string $qBruto): array
     {
         $situacao = in_array($situacao, ClienteGestaoDao::SITUACOES, true) ? $situacao : 'todos';
@@ -87,12 +62,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return ['situacao' => $situacao, 'q' => $q, 'busca_curta' => $curta];
     }
 
-    /**
-     * Pagina da lista (25 por pagina; a pagina pedida e limitada ao total real de paginas).
-     *
-     * @param array{situacao:string,q:string} $filtros
-     * @return array{linhas:list<array<string,mixed>>,total:int,pagina:int,paginas:int}
-     */
     public function listarPagina(array $filtros, int $paginaPedida): array
     {
         $filtro = ['situacao' => $filtros['situacao'], 'q' => $filtros['q']];
@@ -103,7 +72,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return ['linhas' => $total === 0 ? [] : $this->clientes->listar($filtro, $pagina), 'total' => $total, 'pagina' => $pagina, 'paginas' => $paginas];
     }
 
-    /** @return array<string,mixed>|null (sem a razao normalizada) */
     public function obter(int $idCliente): ?array
     {
         $c = $this->clientes->buscarPorId($idCliente);
@@ -115,18 +83,11 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return $c;
     }
 
-    /** Atendimentos em andamento que dependem do cliente (so para a tela de confirmacao). */
     public function andamentoDoCliente(string $cnpj): int
     {
         return $this->clientes->contarAtendimentosEmAndamento($cnpj);
     }
 
-    /**
-     * Ambiguidade do OCR que ATIVAR o cliente causaria (so para a tela de confirmacao; a
-     * execucao refaz a simulacao sob lock). Cliente ausente, ja ativo ou sem razao = 0.
-     *
-     * @return array{total:int,nomes:list<string>}
-     */
     public function ambiguidadeAoAtivar(int $idCliente): array
     {
         $c = $this->clientes->buscarPorId($idCliente);
@@ -137,11 +98,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return $this->ambiguidadeOcr($idCliente, (string) $c['nome'], (string) $c['razao_social_normalizada']);
     }
 
-    // ------------------------------------------------------------------ validacao
-
-    /**
-     * @return array{0:?string,1:?string,2:?string} [nome, razao normalizada, erro]
-     */
     private function validarNome(string $bruto): array
     {
         $nome = NomeCadastro::normalizar($bruto, self::NOME_MIN, self::NOME_MAX);
@@ -159,20 +115,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return [$nome, $razao, null];
     }
 
-    // ------------------------------------------------------------------ ambiguidade do OCR
-
-    /**
-     * Simula o OCR (RazaoSocialMatcher::melhorCandidato sobre a lista de clientes ATIVOS, como
-     * ClienteDao::listarParaFuzzy) ANTES e DEPOIS de a mudanca valer (`$idAlvo` null = cliente
-     * novo; senao o alvo e trocado/acrescentado com a razao nova). Conta os clientes que
-     * deixariam de ser identificados sem ambiguidade (ambiguo, ou identificado como outro) POR
-     * CAUSA da mudanca: os que estavam bem antes e ficam mal depois, mais o proprio alvo se ele
-     * nasce/fica mal e antes estava bem (ou nao existia na lista). Chamar sob o lock e dentro
-     * da transacao. Falha segura para disponibilidade: lista vazia, mais de
-     * SIMULACAO_MAX_CLIENTES ativos ou erro = sem aviso (o erro vai para o LogSistema sem PII).
-     *
-     * @return array{total:int,nomes:list<string>} `nomes`: ate 5, so para a tela do passo 1
-     */
     private function ambiguidadeOcr(?int $idAlvo, string $nomeNovo, string $razaoNova): array
     {
         $vazio = ['total' => 0, 'nomes' => []];
@@ -225,16 +167,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         }
     }
 
-    // ------------------------------------------------------------------ criar
-
-    /**
-     * Cliente ATIVO cujo nome faria o OCR deixar de identificar algum cliente (ver
-     * ambiguidadeOcr) exige `$confirmou`: sem ela devolve `confirmacao_ambiguidade` (com
-     * `ambiguidade`) e NADA e gravado.
-     *
-     * @param string $ativoTexto '' ou '1' = ativo (padrao), '0' = inativo; outro valor = erro
-     * @return array{ok:bool,codigo?:string,erros?:array<string,string>,id?:int,ambiguidade?:array{total:int,nomes:list<string>}}
-     */
     public function criar(int $idAdmin, string $nomeBruto, string $cnpjBruto, string $ativoTexto, ?string $ip = null, bool $confirmou = false): array
     {
         $erros = [];
@@ -261,7 +193,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return $this->comLock(fn (): array => $this->criarSobLock($idAdmin, (string) $nome, (string) $razao, (string) $cnpj, $ativoTexto !== '0', $ip, $confirmou));
     }
 
-    /** @return array<string,mixed> */
     private function criarSobLock(int $idAdmin, string $nome, string $razao, string $cnpj, bool $ativo, ?string $ip, bool $confirmou): array
     {
         $idAuditoria = 0;
@@ -298,7 +229,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
                     throw $e;
                 }
 
-                // outro processo gravou o mesmo CNPJ entre a checagem e o INSERT
                 return $this->recusaCriarDuplicado($idAdmin, 'cnpj', $ip);
             }
             $idAuditoria = $this->auditoria->abrir($idAdmin, 'CLIENTE_CRIAR', 'cliente', $idNovo, $detalhe, $ip);
@@ -313,7 +243,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return ['ok' => true, 'id' => $idNovo];
     }
 
-    /** @return array<string,mixed> */
     private function recusaCriarDuplicado(int $idAdmin, string $campo, ?string $ip): array
     {
         $this->desfazer();
@@ -325,15 +254,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return ['ok' => false, 'codigo' => 'validacao', 'erros' => [$campo => $msg]];
     }
 
-    // ------------------------------------------------------------------ editar
-
-    /**
-     * Edita SO o nome (e recalcula a razao normalizada). O CNPJ e a situacao nao mudam aqui.
-     * Cliente ATIVO renomeado de forma que o OCR deixe de identificar algum cliente exige
-     * `$confirmou` (senao `confirmacao_ambiguidade` com `ambiguidade` e NADA muda).
-     *
-     * @return array{ok:bool,codigo?:string,erros?:array<string,string>,sem_mudanca?:bool,ambiguidade?:array{total:int,nomes:list<string>}}
-     */
     public function editar(int $idAdmin, int $idCliente, string $nomeBruto, ?string $ip = null, bool $confirmou = false): array
     {
         [$nome, $razao, $erroNome] = $this->validarNome($nomeBruto);
@@ -344,7 +264,6 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return $this->comLock(fn (): array => $this->editarSobLock($idAdmin, $idCliente, (string) $nome, (string) $razao, $ip, $confirmou));
     }
 
-    /** @return array<string,mixed> */
     private function editarSobLock(int $idAdmin, int $idCliente, string $nome, string $razao, ?string $ip, bool $confirmou): array
     {
         $idAuditoria = 0;
@@ -399,22 +318,11 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return ['ok' => true];
     }
 
-    // ------------------------------------------------------------------ ativar / inativar
-
-    /**
-     * Inativar com atendimento em andamento que depende do cliente exige `$confirmou`: sem
-     * ela devolve `confirmacao_necessaria` (com `andamento`) e NADA muda. Ativar so pede se o
-     * nome do cliente faria o OCR deixar de identificar algum cliente (`confirmacao_ambiguidade`
-     * com `ambiguidade`; nada muda sem `$confirmou`).
-     *
-     * @return array{ok:bool,codigo?:string,sem_mudanca?:bool,andamento?:int,ambiguidade?:array{total:int,nomes:list<string>}}
-     */
     public function definirAtivo(int $idAdmin, int $idCliente, bool $ativo, bool $confirmou, ?string $ip = null): array
     {
         return $this->comLock(fn (): array => $this->definirAtivoSobLock($idAdmin, $idCliente, $ativo, $confirmou, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function definirAtivoSobLock(int $idAdmin, int $idCliente, bool $ativo, bool $confirmou, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -475,21 +383,11 @@ class ClienteGestaoRn extends CadastroGestaoBase
         return ['ok' => true];
     }
 
-    // ------------------------------------------------------------------ excluir
-
-    /**
-     * Exclusao FISICA e definitiva. SEMPRE exige `$confirmou` (sem ela devolve
-     * `confirmacao_necessaria` com `andamento` e NADA muda). Excluir um cliente que ja nao
-     * existe devolve `cliente_nao_encontrado` (idempotente, sem erro).
-     *
-     * @return array{ok:bool,codigo?:string,andamento?:int}
-     */
     public function excluir(int $idAdmin, int $idCliente, bool $confirmou, ?string $ip = null): array
     {
         return $this->comLock(fn (): array => $this->excluirSobLock($idAdmin, $idCliente, $confirmou, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function excluirSobLock(int $idAdmin, int $idCliente, bool $confirmou, ?string $ip): array
     {
         $idAuditoria = 0;

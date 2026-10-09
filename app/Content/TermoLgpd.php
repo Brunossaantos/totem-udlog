@@ -2,65 +2,8 @@
 
 namespace App\Content;
 
-/**
- * Fonte canonica UNICA do texto do Aviso de Privacidade / Termo LGPD
- * exibido na tela inicial do Totem (demanda tela-inicial-lgpd-totem,
- * /01-implementacao, 2026-09-24).
- *
- * ============================================================
- * APROVACAO DO DPO — REGISTRO FACTUAL
- * ============================================================
- * Em 25/09/2026, Bruno Santos confirmou ao projeto que o texto do
- * termo LGPD (versao 2026-09-25-v2, ver VERSAO abaixo) foi aprovado
- * por Flavio Carvalho, Encarregado pelo Tratamento de Dados (DPO) da
- * UDLOG. O canal e a data original da manifestacao do DPO nao foram
- * fornecidos ao repositorio; nenhuma evidencia documental adicional
- * foi inventada ou versionada (ver ia_development_state.md e o
- * handoff da demanda, secao "Ajuste final de texto do botao...", para
- * o mesmo registro). Esta aprovacao vale exclusivamente para o
- * conteudo exato desta versao — se o texto canonico mudar novamente
- * no futuro, devera receber NOVA versao e NOVA aprovacao formal antes
- * de qualquer ativacao em producao. Nenhuma alteracao de texto deve
- * ser feita aqui sem: (a) atualizar VERSAO abaixo, e (b) registrar a
- * mudanca em ia_development_state.md.
- *
- * ============================================================
- * Interface para consumo (backend E front-end via server-side render)
- * ============================================================
- *   TermoLgpd::texto(): string   — texto integral (HTML simples, mesmas
- *                                   tags usadas no protótipo: <h3>/<p>/<ul>/<li>/<strong>/<a>).
- *   TermoLgpd::versao(): string  — identificador de versao fixo
- *                                   ('2026-09-24-v1'), definido SOMENTE
- *                                   aqui, nunca aceito do front-end.
- *   TermoLgpd::hash(): string    — SHA-256 (hex, 64 caracteres) do texto
- *                                   retornado por texto(), SEMPRE
- *                                   calculado a partir do proprio texto
- *                                   (nunca hardcoded a mao) — usado para
- *                                   detectar se o termo mudou depois de um
- *                                   aceite ja registrado.
- *
- * public/totem/index.php (fora do escopo desta implementacao de backend)
- * deve incluir esta classe diretamente e injetar texto()/versao()/hash()
- * no HTML renderizado no servidor (ex.: via <script type="application/json">
- * ou atributos data-*), nunca duplicar o texto em JS.
- */
 class TermoLgpd
 {
-    /**
-     * Identificador de versao do termo — MUDAR sempre que o texto()
-     * abaixo for alterado de forma que afete o conteudo/sentido exibido
-     * ao motorista (mesmo alteracoes pequenas de texto juridico contam).
-     * Formato livre (nao interpretado por logica alguma), so precisa ser
-     * unico e crescente no tempo.
-     *
-     * HISTORICO: v2026-09-24-v1 teve o texto aprovado pelo DPO (Flavio
-     * Carvalho, registro em ia_development_state.md/handoff de
-     * 2026-09-25). v2026-09-25-v2 alterou a clausula 9 (rotulo do botao
-     * citado passou de "Li e estou ciente — Continuar" para "Iniciar",
-     * para bater com o texto real do botao apos ajuste de UI) -- essa
-     * aprovacao do DPO NAO se estende automaticamente a v2, precisa de
-     * nova confirmacao formal antes de ativacao em producao.
-     */
     private const VERSAO = '2026-09-25-v2';
 
     private static ?string $hashCache = null;
@@ -70,12 +13,6 @@ class TermoLgpd
         return self::VERSAO;
     }
 
-    /**
-     * SHA-256 (hex) do texto retornado por texto() — calculado uma unica
-     * vez por processo (cache estatico em memoria, nunca persistido em
-     * arquivo/config separado) e sempre derivado do proprio conteudo, para
-     * garantir que hash() nunca possa divergir de texto().
-     */
     public static function hash(): string
     {
         if (self::$hashCache === null) {

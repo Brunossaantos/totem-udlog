@@ -1,11 +1,4 @@
 <?php
-/**
- * Detalhe de um registro de log (só admin, só leitura). Variáveis (GestaoLogController::detalhe):
- * $erroCarga (bool), $urlVoltar (lista com os filtros já validados), $registro (id_log, nivel,
- * origem, categoria, mensagem, contador, criado_em, ultima_ocorrencia; sem código/token do totem),
- * $nivelSlug, $nivelRotulo, $abaRotulo, $mostrarTotem, $totemRotulo, $tecnico (list de [chave, valor]).
- * Sem "revelar": os logs não têm dado pessoal. Sem script nem style inline.
- */
 ?>
 <?php if ($erroCarga): ?>
 <div class="gestao-estado gestao-estado--erro" id="logs-erro-carga" role="alert"><?= gestaoIcone('alerta') ?><span>Não foi possível carregar os logs agora. Tente novamente em instantes.</span></div>

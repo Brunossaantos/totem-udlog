@@ -1,16 +1,4 @@
 <?php
-/**
- * Logs do sistema (só admin, só leitura). Variáveis (GestaoLogController::listar):
- * $erroCarga (bool; true = só o aviso de erro, nenhuma das demais existe), $aba (slug),
- * $abas (list: slug, rotulo, total, href, ativa), $abaDescricao, $filtros (aba, nivel,
- * totem, categoria, de, ate, pagina), $errosFiltro (campo => mensagem), $niveis,
- * $mostrarTotem (bool; false em Cron e Gestão), $opcoesTotem (list: valor, rotulo; nunca
- * código nem token), $categoriasAba (list de códigos), $atalhos (list: id, rotulo, href, ativo),
- * $hojeIso, $limiteIso, $urlLimpar, $itens, $total, $temFiltros, $primeiro, $ultimo, $pagina,
- * $paginas, $urlAnterior, $urlProxima (ou null), $queryVolta (query validada para o "Voltar" do detalhe).
- *
- * Tudo é link GET e <form method=get>: funciona sem JS. Sem script nem style inline.
- */
 ?>
 <?php if ($erroCarga): ?>
 <div class="gestao-estado gestao-estado--erro" id="logs-erro-carga" role="alert"><?= gestaoIcone('alerta') ?><span>Não foi possível carregar os logs agora. Tente novamente em instantes.</span></div>

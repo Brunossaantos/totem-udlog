@@ -4,23 +4,12 @@ namespace App\Dao;
 
 use PDO;
 
-/**
- * Acesso a tb_empresa (banco do TOTEM) para o cadastro da Gestao Totem (F6).
- * Separado de EmpresaDao (leitura do Talent). Nunca altera tb_totem: as contagens de
- * totens vinculados so LEEM. A serializacao com a criacao de totens usa o MESMO lock
- * nomeado de TotemGestaoDao (ver EmpresaGestaoRn), nao um lock proprio.
- */
 class EmpresaGestaoDao
 {
     public function __construct(private PDO $pdo)
     {
     }
 
-    /**
-     * Todas as empresas (sao poucas), com a contagem de totens ativos e total.
-     *
-     * @return list<array<string,mixed>>
-     */
     public function listar(): array
     {
         return $this->pdo->query(
@@ -34,7 +23,6 @@ class EmpresaGestaoDao
         )->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** @return array<string,mixed>|null */
     public function buscarPorId(int $idEmpresa, bool $paraAtualizar = false): ?array
     {
         $stmt = $this->pdo->prepare('SELECT id_empresa, nome, cnpj, ativo, criado_em FROM tb_empresa WHERE id_empresa = :id' . ($paraAtualizar ? ' FOR UPDATE' : ''));
@@ -43,12 +31,6 @@ class EmpresaGestaoDao
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    /**
-     * Nomes de TODAS as outras empresas (qualquer situacao), para a checagem de slug
-     * equivalente. `$exceto` = id ignorado (edicao); null = nenhum.
-     *
-     * @return list<string>
-     */
     public function nomesDeOutras(?int $exceto): array
     {
         $stmt = $this->pdo->prepare('SELECT nome FROM tb_empresa WHERE id_empresa <> :exceto');
@@ -66,7 +48,6 @@ class EmpresaGestaoDao
         return $stmt->fetchColumn() !== false;
     }
 
-    /** Pode lancar PDOException 1062 (CNPJ repetido): quem chama decide. */
     public function inserir(string $nome, string $cnpj): int
     {
         $stmt = $this->pdo->prepare('INSERT INTO tb_empresa (nome, cnpj, ativo) VALUES (:nome, :cnpj, 1)');
@@ -77,7 +58,6 @@ class EmpresaGestaoDao
         return (int) $this->pdo->lastInsertId();
     }
 
-    /** O CNPJ nunca e alterado. */
     public function atualizarNome(int $idEmpresa, string $nome): void
     {
         $stmt = $this->pdo->prepare('UPDATE tb_empresa SET nome = :nome WHERE id_empresa = :id');
@@ -94,7 +74,6 @@ class EmpresaGestaoDao
         $stmt->execute();
     }
 
-    /** Exclusao FISICA (a FK de tb_totem ainda recusa se sobrar totem). @return int linhas apagadas */
     public function excluir(int $idEmpresa): int
     {
         $stmt = $this->pdo->prepare('DELETE FROM tb_empresa WHERE id_empresa = :id');
@@ -104,7 +83,6 @@ class EmpresaGestaoDao
         return $stmt->rowCount();
     }
 
-    /** @return array{ativos:int,total:int} totens vinculados (ativos e todos) */
     public function contarTotens(int $idEmpresa): array
     {
         $stmt = $this->pdo->prepare('SELECT COALESCE(SUM(ativo = 1), 0) AS ativos, COUNT(*) AS total FROM tb_totem WHERE id_empresa = :id');

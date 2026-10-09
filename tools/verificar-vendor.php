@@ -1,14 +1,4 @@
 <?php
-/**
- * Verifica a integridade dos arquivos de terceiros versionados em
- * public/totem/assets/vendor/ (Tesseract.js 5.1.1 e jsQR) contra o manifesto
- * public/totem/assets/vendor/MANIFEST.sha256 (formato `sha256sum -c`, caminhos
- * relativos a assets/vendor/).
- *
- * Somente linha de comando: php tools/verificar-vendor.php
- * Saida: 0 = todos os arquivos conferem; 1 = divergencia, arquivo ausente,
- * manifesto invalido ou arquivo fora do manifesto.
- */
 
 if (PHP_SAPI !== 'cli') {
     http_response_code(404);
@@ -28,7 +18,6 @@ foreach (file($manifesto, FILE_IGNORE_NEW_LINES) as $n => $linha) {
     if (trim($linha) === '') {
         continue;
     }
-    // "<sha256 hex 64>" + " *" (binario) ou "  " (texto) + caminho relativo
     if (!preg_match('/^([0-9a-f]{64}) [ *](\S.*)$/', $linha, $m)) {
         fwrite(STDERR, 'Linha invalida no manifesto: ' . ($n + 1) . "\n");
         exit(1);
@@ -62,7 +51,6 @@ foreach ($esperados as $caminho => $hashEsperado) {
     echo $caminho . ": OK\n";
 }
 
-// Arquivo em vendor/ que nao consta do manifesto tambem e divergencia.
 $iterador = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($raiz, FilesystemIterator::SKIP_DOTS));
 foreach ($iterador as $arquivo) {
     if (!$arquivo->isFile()) {

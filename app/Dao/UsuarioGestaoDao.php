@@ -4,13 +4,8 @@ namespace App\Dao;
 
 use PDO;
 
-/**
- * Acesso a tb_gestao_usuario (migration 020). Todas as consultas usam prepared
- * statements. Usuarios nunca sao apagados: so `ativo` muda.
- */
 class UsuarioGestaoDao
 {
-    /** Prefixo do lock nomeado. O nome real inclui MD5(DATABASE()): o lock vale pelo servidor inteiro, entao cada banco tem o seu. */
     private const LOCK_ADMINS = 'totem_gestao_admins_';
 
     private const COLUNAS = 'id_usuario, login, nome, perfil, senha_hash, ativo, deve_trocar_senha, tentativas_falhas,
@@ -20,7 +15,6 @@ class UsuarioGestaoDao
     {
     }
 
-    /** @return array<string,mixed>|null */
     public function buscarPorLogin(string $login): ?array
     {
         $stmt = $this->pdo->prepare('SELECT ' . self::COLUNAS . ' FROM tb_gestao_usuario WHERE login = :login');
@@ -29,7 +23,6 @@ class UsuarioGestaoDao
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    /** @return array<string,mixed>|null */
     public function buscarPorId(int $idUsuario, bool $paraAtualizar = false): ?array
     {
         $stmt = $this->pdo->prepare(
@@ -40,13 +33,6 @@ class UsuarioGestaoDao
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    /**
-     * Lista para a tela de usuarios: nunca devolve o hash da senha. `bloqueado_ate`
-     * vem preenchido SO quando o bloqueio ainda vale (hora do BANCO); caso contrario
-     * NULL. `senha_versao` alimenta o campo oculto do formulario de redefinicao.
-     *
-     * @return list<array<string,mixed>>
-     */
     public function listar(): array
     {
         $stmt = $this->pdo->query(
@@ -88,7 +74,6 @@ class UsuarioGestaoDao
         $stmt->execute(['ativo' => $ativo ? 1 : 0, 'id' => $idUsuario]);
     }
 
-    /** Define senha nova, incrementa a versao da senha e zera o bloqueio por conta. */
     public function atualizarSenha(int $idUsuario, #[\SensitiveParameter] string $senhaHash, bool $deveTrocarSenha): void
     {
         $stmt = $this->pdo->prepare(
@@ -103,14 +88,12 @@ class UsuarioGestaoDao
         $stmt->execute();
     }
 
-    /** Regrava so o hash (rehash transparente no login), sem mexer em mais nada. */
     public function atualizarHashApenas(int $idUsuario, #[\SensitiveParameter] string $senhaHash): void
     {
         $stmt = $this->pdo->prepare('UPDATE tb_gestao_usuario SET senha_hash = :hash WHERE id_usuario = :id');
         $stmt->execute(['hash' => $senhaHash, 'id' => $idUsuario]);
     }
 
-    /** Desbloqueio manual (admin): zera o bloqueio e o contador de falhas. Nao mexe na senha. */
     public function desbloquear(int $idUsuario): void
     {
         $stmt = $this->pdo->prepare('UPDATE tb_gestao_usuario SET tentativas_falhas = 0, bloqueado_ate = NULL WHERE id_usuario = :id');
@@ -125,14 +108,6 @@ class UsuarioGestaoDao
         $stmt->execute(['id' => $idUsuario]);
     }
 
-    /**
-     * Conta uma falha de senha na conta, atomicamente, SO se a conta nao estiver
-     * bloqueada agora. Ao atingir o limite, grava bloqueado_ate e zera o contador.
-     * `bloqueado_ate` e atribuido ANTES de `tentativas_falhas` de proposito (as
-     * duas expressoes leem o valor antigo do contador).
-     *
-     * @return bool true se a conta esta bloqueada depois desta falha
-     */
     public function registrarFalhaSenha(int $idUsuario, int $limite, int $bloqueioMinutos): bool
     {
         $stmt = $this->pdo->prepare(
@@ -150,7 +125,6 @@ class UsuarioGestaoDao
         return $this->estaBloqueada($idUsuario);
     }
 
-    /** A conta esta bloqueada AGORA? (hora do banco) */
     public function estaBloqueada(int $idUsuario): bool
     {
         $stmt = $this->pdo->prepare('SELECT bloqueado_ate IS NOT NULL AND bloqueado_ate > NOW() FROM tb_gestao_usuario WHERE id_usuario = :id');
@@ -159,13 +133,6 @@ class UsuarioGestaoDao
         return (int) $stmt->fetchColumn() === 1;
     }
 
-    /**
-     * Trava (FOR UPDATE) e devolve os admins ATIVOS. Base da protecao do ultimo
-     * admin: todo fluxo que pode remover um admin ativo passa por aqui dentro da
-     * mesma transacao, o que serializa as requisicoes concorrentes.
-     *
-     * @return list<int> ids
-     */
     public function travarAdminsAtivos(): array
     {
         $stmt = $this->pdo->query("SELECT id_usuario FROM tb_gestao_usuario WHERE perfil = 'admin' AND ativo = 1 ORDER BY id_usuario FOR UPDATE");
@@ -173,7 +140,6 @@ class UsuarioGestaoDao
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
-    /** Lock nomeado (por banco) que serializa as mutacoes de admin. @return bool true se obteve */
     public function obterLockAdmins(int $segundos): bool
     {
         $stmt = $this->pdo->prepare('SELECT GET_LOCK(CONCAT(:nome, MD5(DATABASE())), :segundos)');

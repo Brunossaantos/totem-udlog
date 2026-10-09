@@ -9,10 +9,6 @@ use App\Dao\AceiteLgpdDao;
 use App\Rn\LgpdRn;
 use App\Controller\LgpdController;
 
-// Bootstrap isolado: mesma protecao aplicada em public/api/documento.php/
-// nota.php -- Util\Bootstrap::conectar() cobre .env ausente/malformado,
-// variavel obrigatoria de banco ausente/invalida e falha de conexao (ver
-// util/Bootstrap.php e util/Conexao.php).
 try {
     $pdo = Bootstrap::conectar(__DIR__ . '/../../');
 } catch (\Throwable $e) {

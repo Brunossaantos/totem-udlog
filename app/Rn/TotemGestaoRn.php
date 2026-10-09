@@ -13,20 +13,6 @@ use Util\LogSistema;
 use Util\TotemCodigo;
 use Util\TotemUrlBase;
 
-/**
- * Regras de negocio da gestao de totens (demanda gestao-totem, F2). SO admin
- * (o guard esta em GestaoContexto / nas paginas).
- *
- * Toda mutacao: (1) valida a entrada, (2) toma o lock nomeado dos totens, (3) abre
- * a transacao e reconfere que o ator ainda e admin ativo (FOR UPDATE nos admins),
- * (4) abre a auditoria PENDENTE dentro da transacao, (5) fecha como OK depois do
- * COMMIT. Recusas por regra viram SEM_EFEITO. Falha tecnica vira log fixo (SO a
- * classe da excecao) e uma linha ERRO.
- *
- * SEGREDOS: o `token_api` e gerado aqui (CSPRNG) e gravado, nunca devolvido, logado
- * nem auditado. O codigo/HASH da URL tambem nunca vai para log nem para auditoria
- * (a auditoria so guarda a allowlist do AuditoriaDao).
- */
 class TotemGestaoRn
 {
     public const TENTATIVAS_CODIGO = 5;
@@ -37,13 +23,8 @@ class TotemGestaoRn
 
     private AuditoriaDao $auditoria;
 
-    /** @var callable():string */
     private $geradorHash;
 
-    /**
-     * @param string $urlBase TOTEM_URL_BASE ja validada (TotemUrlBase::doAmbiente)
-     * @param callable():string|null $geradorHash so para teste (colisao forcada); padrao TotemCodigo::hash (CSPRNG)
-     */
     public function __construct(private PDO $pdo, private string $urlBase, ?callable $geradorHash = null)
     {
         $this->totens = new TotemGestaoDao($pdo);
@@ -52,14 +33,6 @@ class TotemGestaoRn
         $this->geradorHash = $geradorHash ?? [TotemCodigo::class, 'hash'];
     }
 
-    // ------------------------------------------------------------------ leitura
-
-    /**
-     * Cada linha traz `url` (URL completa, so para o admin), `legado` (codigo fora do
-     * padrao NOME-EMPRESA-HASH16) e NUNCA o token nem o `codigo` solto.
-     *
-     * @return list<array<string,mixed>>
-     */
     public function listar(): array
     {
         $saida = [];
@@ -70,7 +43,6 @@ class TotemGestaoRn
         return $saida;
     }
 
-    /** @return array<string,mixed>|null */
     public function obter(int $idTotem): ?array
     {
         $t = $this->totens->buscarPorId($idTotem);
@@ -78,16 +50,11 @@ class TotemGestaoRn
         return $t === null ? null : $this->enriquecer($t);
     }
 
-    /** @return list<array{id_empresa:int|string,nome:string}> */
     public function empresasAtivas(): array
     {
         return $this->totens->empresasAtivas();
     }
 
-    /**
-     * @param array<string,mixed> $t
-     * @return array<string,mixed>
-     */
     private function enriquecer(array $t): array
     {
         $codigo = (string) $t['codigo'];
@@ -98,11 +65,6 @@ class TotemGestaoRn
         return $t;
     }
 
-    // ------------------------------------------------------------------ criar
-
-    /**
-     * @return array{ok:bool,codigo?:string,erros?:array<string,string>,id?:int}
-     */
     public function criar(int $idAdmin, ?int $idEmpresa, string $nomeBruto, ?string $ip = null): array
     {
         $erros = [];
@@ -120,7 +82,6 @@ class TotemGestaoRn
         return $this->comLock(fn (): array => $this->criarSobLock($idAdmin, (int) $idEmpresa, (string) $nome, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function criarSobLock(int $idAdmin, int $idEmpresa, string $nome, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -168,14 +129,12 @@ class TotemGestaoRn
                     if (!$this->ehChaveDuplicada($e)) {
                         throw $e;
                     }
-                    // Nome repetido que escapou da checagem (ex.: outro processo sem o lock)? Recusa clara.
                     if ($this->totens->existeNomeNaEmpresa($idEmpresa, $nome)) {
                         $this->pdo->rollBack();
                         $this->auditarRecusa('TOTEM_CRIAR', $idAdmin, null, ['empresa' => $idEmpresa], $ip);
 
                         return ['ok' => false, 'codigo' => 'validacao', 'erros' => ['nome' => 'Já existe um totem com esse nome nesta empresa. Escolha outro nome.']];
                     }
-                    // senao: colisao de codigo (ou de token) -> tenta de novo com outro HASH
                 }
             }
             $idAuditoria = $this->auditoria->abrir($idAdmin, 'TOTEM_CRIAR', 'totem', $idNovo, ['empresa' => $idEmpresa], $ip);
@@ -190,21 +149,11 @@ class TotemGestaoRn
         return ['ok' => true, 'id' => $idNovo];
     }
 
-    // ------------------------------------------------------------------ ativar / desativar
-
-    /**
-     * Desativar com atendimento recente (em_andamento com atividade nos ultimos 30
-     * min) exige `$confirmouAtendimento`: sem ela devolve `totem_atendimento_em_andamento`
-     * e NADA muda. Efeito imediato: a pagina do totem responde 404 e Util\Auth 401.
-     *
-     * @return array{ok:bool,codigo?:string,sem_mudanca?:bool}
-     */
     public function definirAtivo(int $idAdmin, int $idTotem, bool $ativo, bool $confirmouAtendimento, ?string $ip = null): array
     {
         return $this->comLock(fn (): array => $this->definirAtivoSobLock($idAdmin, $idTotem, $ativo, $confirmouAtendimento, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function definirAtivoSobLock(int $idAdmin, int $idTotem, bool $ativo, bool $confirmouAtendimento, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -246,24 +195,11 @@ class TotemGestaoRn
         return ['ok' => true];
     }
 
-    // ------------------------------------------------------------------ regerar URL
-
-    /**
-     * Troca SO o sufixo HASH do codigo (a URL antiga deixa de funcionar na hora) e
-     * NAO muda o token_api. `$versaoEsperada` e a `url_versao` que a tela mostrou
-     * (recusa reenvio/duplo clique) e `$nomeDigitado` a confirmacao pelo NOME do
-     * totem. Totem legado (codigo fora do padrao, ex.: RECEPCAO-01) vira
-     * `<NOME-NORMALIZADO>-<EMPRESA>-<HASH16>` a partir de tb_totem.nome e da empresa:
-     * se o nome nao normaliza ou nao ha empresa valida, recusa SEM alterar nada.
-     *
-     * @return array{ok:bool,codigo?:string,id?:int}
-     */
     public function regerarUrl(int $idAdmin, int $idTotem, int $versaoEsperada, string $nomeDigitado, ?string $ip = null): array
     {
         return $this->comLock(fn (): array => $this->regerarUrlSobLock($idAdmin, $idTotem, $versaoEsperada, $nomeDigitado, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function regerarUrlSobLock(int $idAdmin, int $idTotem, int $versaoEsperada, string $nomeDigitado, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -295,7 +231,6 @@ class TotemGestaoRn
 
                 return ['ok' => false, 'codigo' => 'totem_nome_confirmacao'];
             }
-            // O codigo atual so e lido aqui dentro (nunca sai desta funcao nem vai a log).
             $codigoAtual = (string) $totem['codigo'];
             $prefixo = TotemCodigo::prefixoDoPadrao($codigoAtual);
             if ($prefixo === null) {
@@ -342,12 +277,6 @@ class TotemGestaoRn
         return ['ok' => true, 'id' => $idTotem];
     }
 
-    /**
-     * Prefixo NOME-EMPRESA de um totem legado a partir de tb_totem.nome e da empresa,
-     * ou null se o nome nao normaliza (2..24) ou nao ha empresa com slug de 1..16.
-     *
-     * @param array<string,mixed> $totem
-     */
     private function prefixoDoLegado(array $totem): ?string
     {
         $nome = TotemCodigo::nome((string) $totem['nome']);
@@ -366,9 +295,6 @@ class TotemGestaoRn
         return $nome . '-' . $slug;
     }
 
-    // ------------------------------------------------------------------ internos
-
-    /** HASH do gerador, validado (um gerador defeituoso vira erro de programacao, nunca codigo ruim). */
     private function novoHash(): string
     {
         $hash = ($this->geradorHash)();
@@ -379,13 +305,6 @@ class TotemGestaoRn
         return $hash;
     }
 
-    /**
-     * Serializa as mutacoes de totens com um lock NOMEADO do MySQL tomado ANTES da
-     * transacao (mesmo padrao da F1). Falha ou timeout viram `erro_interno` (log so
-     * da classe da excecao).
-     *
-     * @return array<string,mixed>
-     */
     private function comLock(callable $fn): array
     {
         try {
@@ -423,7 +342,6 @@ class TotemGestaoRn
         return isset($e->errorInfo[1]) && (int) $e->errorInfo[1] === 1062;
     }
 
-    /** @return array{ok:false,codigo:string} */
     private function semPermissao(string $acao, int $idAdmin, ?int $idAlvo, ?string $ip): array
     {
         $this->auditarRecusa($acao, $idAdmin, $idAlvo, [], $ip);
@@ -431,7 +349,6 @@ class TotemGestaoRn
         return ['ok' => false, 'codigo' => 'sem_permissao'];
     }
 
-    /** @param array<string,string|int> $detalhe */
     private function auditarRecusa(string $acao, int $idAdmin, ?int $idAlvo, array $detalhe, ?string $ip): void
     {
         try {
@@ -452,7 +369,6 @@ class TotemGestaoRn
         }
     }
 
-    /** @return array{ok:false,codigo:string} */
     private function falhaTecnica(string $operacao, Throwable $e, string $acao, int $idAtor, ?int $idAlvo, ?string $ip): array
     {
         error_log('TotemGestaoRn: ' . $operacao . '_falhou ' . get_class($e));

@@ -1,12 +1,5 @@
 'use strict';
 
-/**
- * Health check simples. Sem dado sensivel na resposta (nem token, nem
- * nomes de impressora) -- so confirma que o processo esta de pe. Nao
- * exige autenticacao de proposito (mesmo padrao de health check comum),
- * mas continua sujeito a CORS/PNA como qualquer outra rota.
- */
-
 const express = require('express');
 const pkg = require('../../package.json');
 

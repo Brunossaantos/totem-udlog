@@ -5,13 +5,6 @@ namespace App\Controller;
 use App\Rn\EmpresaGestaoRn;
 use Util\GestaoHttp;
 
-/**
- * Empresas (tb_empresa do totem) da Gestao Totem (SO admin; o guard esta em
- * GestaoContexto): listar, criar, editar o nome, ativar/inativar e excluir (F6). Mesmo
- * desenho do GestaoClienteController: PRG com ?msg=codigo e confirmacao em dois passos
- * por pagina GET (`empresas.php?confirmar=<acao>&id=<id>`) com um formulario
- * `confirmar=1`; o servidor so executa no segundo passo. Nunca mexe em totens.
- */
 final class GestaoEmpresaController
 {
     private EmpresaGestaoRn $rn;
@@ -21,22 +14,11 @@ final class GestaoEmpresaController
         $this->rn = new EmpresaGestaoRn($ctx->pdo);
     }
 
-    /**
-     * empresas.php (GET): todas as empresas (poucas) com a contagem de totens e, se vier
-     * `confirmar` + `id`, o aviso do segundo passo.
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function listar(): array
     {
         return $this->pagina(200, null);
     }
 
-    /**
-     * empresa-acao.php (POST): acao=inativar|ativar|excluir + id_empresa (+ confirmar=1).
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function acao(): array
     {
         $acao = GestaoContexto::post('acao');
@@ -70,16 +52,8 @@ final class GestaoEmpresaController
         return [];
     }
 
-    /**
-     * empresa-form.php: GET (?id= para editar) mostra o formulario. POST salva (cria se
-     * nao ha id_empresa, edita o nome se ha).
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function formulario(): array
     {
-        // Em POST vale SO o id do corpo (`?id=` na URL de um POST de criacao e ignorado e a
-        // criacao segue); `query('id')` so vale em GET.
         $ehGet = $this->ctx->auth->metodoSeguro();
         $idTexto = $ehGet ? GestaoContexto::query('id') : GestaoContexto::post('id_empresa');
         $idAlvo = null;
@@ -124,12 +98,6 @@ final class GestaoEmpresaController
         return [];
     }
 
-    /**
-     * Cada linha de `empresas` traz id_empresa, nome, cnpj, ativo, criado_em,
-     * totens_ativos e totens_total.
-     *
-     * @param array{tipo:string,texto:string}|null $flashLocal
-     */
     private function pagina(int $status, ?array $flashLocal): array
     {
         return [
@@ -143,12 +111,6 @@ final class GestaoEmpresaController
         ];
     }
 
-    /**
-     * Aviso do segundo passo (so se a acao ainda faz sentido para o estado atual):
-     * excluir so de empresa SEM totem; inativar so de empresa ativa com totens ativos.
-     *
-     * @return array{acao:string,id_empresa:int,nome:string,texto:string,rotulo:string,totens_ativos:int}|null
-     */
     private function confirmacao(): ?array
     {
         $acao = GestaoContexto::query('confirmar');
@@ -183,11 +145,6 @@ final class GestaoEmpresaController
         ];
     }
 
-    /**
-     * @param array{nome:string,cnpj:string} $valores
-     * @param array<string,string> $erros
-     * @param array<string,mixed>|null $atual empresa em edicao (com totens_ativos/totens_total)
-     */
     private function formularioView(int $status, ?int $idAlvo, array $valores, array $erros, ?array $atual): array
     {
         return [

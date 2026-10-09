@@ -2,41 +2,16 @@
 
 namespace Util;
 
-/**
- * Acesso controlado aos PDFs de Ordem de Coleta em
- * STORAGE_PATH/ordens_coleta/<cnpj 14 digitos>/ (demanda
- * anexo-ordem-coleta-n8n, 2026-10-05). Modelado em Util\NotaArquivoStorage
- * (que NAO e alterada).
- *
- * Seguranca (a pasta pode conter dado pessoal/comercial):
- *  - o nome final do arquivo e gerado SO no servidor:
- *    <parte do numero>_<AAAAMMDDHHMMSS>.pdf, com a parte do numero restrita a
- *    [A-Za-z0-9._-] (qualquer outro caractere vira '-'; o numero real fica so
- *    no banco). Nenhum valor do request vira separador de caminho;
- *  - todo caminho relativo (vindo do banco ou gerado aqui) e validado por
- *    regex com modificador D antes de qualquer acesso a disco;
- *  - o diretorio do cliente tem de resolver (realpath) exatamente para
- *    raiz + cnpj (rejeita symlink e ".."); arquivo symlink e rejeitado;
- *  - gravacao atomica e EXCLUSIVA: arquivo temporario ('xb') no MESMO
- *    diretorio publicado com link() (falha se o destino existe) + unlink do
- *    tmp; colisao de nome => proximo segundo (ate 30 tentativas); nunca
- *    sobrescreve; pasta 0750, arquivo 0640;
- *  - nenhum metodo loga caminho, numero da OC ou cnpj.
- *
- * Injetavel (nao final, metodos publicos) para os testes simularem falhas.
- */
 class OrdemColetaArquivoStorage
 {
     public const SUBPASTA = 'ordens_coleta';
 
     public const FUSO = 'America/Sao_Paulo';
 
-    // Com D: `$` so casa no fim REAL da string (sem newline final).
     private const REGEX_CAMINHO = '#^(\d{14})/([A-Za-z0-9._-]{1,60})_(\d{14})\.pdf$#D';
 
     private const MAX_TENTATIVAS_NOME = 30;
 
-    /** @var callable|null retorna \DateTimeImmutable (testes) */
     private $relogio;
 
     public function __construct(private ?string $raizStorage = null, ?callable $relogio = null)
@@ -49,24 +24,18 @@ class OrdemColetaArquivoStorage
         return is_string($caminho) && strlen($caminho) <= 255 && preg_match(self::REGEX_CAMINHO, $caminho) === 1;
     }
 
-    /**
-     * Parte do nome derivada do numero da OC: so [A-Za-z0-9._-], resto vira
-     * '-' (por caractere UTF-8), no maximo 60 caracteres, nunca vazia.
-     */
     public static function parteDoNumero(string $numero): string
     {
         $parte = @preg_replace('/[^A-Za-z0-9._-]/u', '-', $numero);
         if (!is_string($parte) || $parte === '') {
             $parte = @preg_replace('/[^A-Za-z0-9._-]/', '-', $numero);
         }
-        // nunca comeca com '.' (evita arquivo oculto e nomes como "." ou "..")
         $parte = (string) preg_replace('/\A\.+/', '-', (string) $parte);
         $parte = substr($parte, 0, 60);
 
         return $parte === '' ? '-' : $parte;
     }
 
-    /** Raiz real de STORAGE_PATH (sem a subpasta), ou null. */
     public function storageReal(): ?string
     {
         $bruta = $this->raizStorage ?? (string) ($_ENV['STORAGE_PATH'] ?? '');
@@ -79,7 +48,6 @@ class OrdemColetaArquivoStorage
         return $real === false ? null : $real;
     }
 
-    /** Raiz real de ordens_coleta (precisa existir), ou null. */
     public function raizReal(): ?string
     {
         $storage = $this->storageReal();
@@ -98,14 +66,6 @@ class OrdemColetaArquivoStorage
         return $real;
     }
 
-    /**
-     * Grava o PDF e devolve o caminho relativo (<cnpj>/<nome>.pdf).
-     * Lanca \RuntimeException com codigo fixo em qualquer falha (o arquivo
-     * temporario e removido). Nunca sobrescreve nem apaga arquivo existente.
-     *
-     * @param callable|null $caminhoReservado fn(string $relativo): bool; true =
-     *        nome ja registrado no banco (pula para o proximo segundo)
-     */
     public function gravar(string $cnpj, string $numero, string $bytes, ?callable $caminhoReservado = null): string
     {
         if (preg_match('/\A\d{14}\z/D', $cnpj) !== 1) {
@@ -135,14 +95,9 @@ class OrdemColetaArquivoStorage
             throw new \RuntimeException('pasta_fora_da_raiz');
         }
 
-        // 1) conteudo completo em arquivo temporario exclusivo (nome aleatorio)
         $tmp = $dirReal . DIRECTORY_SEPARATOR . '.tmp_' . bin2hex(random_bytes(8));
         $this->escreverExclusivo($tmp, $bytes);
 
-        // 2) publicacao do nome final de forma EXCLUSIVA e atomica: link() falha
-        // se o destino existe (nunca sobrescreve, sem janela checagem->uso).
-        // Colisao (mesmo segundo/mesma parte do numero, ou nome ja registrado
-        // no banco) => proximo segundo, ate MAX_TENTATIVAS_NOME.
         $parte = self::parteDoNumero($numero);
         $base = $this->agora();
         try {
@@ -164,11 +119,8 @@ class OrdemColetaArquivoStorage
                 }
                 clearstatcache(true, $final);
                 if (is_link($final) || file_exists($final)) {
-                    continue; // perdeu a corrida por este nome
+                    continue;
                 }
-                // sistema de arquivos sem hard link: criacao exclusiva direta
-                // ('xb' tambem falha se existir). O leitor valida %PDF- e sha256,
-                // entao um arquivo parcial so geraria "sem anexo".
                 try {
                     $this->escreverExclusivo($final, $bytes);
 
@@ -187,20 +139,11 @@ class OrdemColetaArquivoStorage
         }
     }
 
-    /**
-     * Cria $final como hard link de $tmp. Atomico e exclusivo: retorna false se
-     * $final ja existe. Metodo separado para os testes simularem FS sem link.
-     */
     protected function criarLinkExclusivo(string $tmp, string $final): bool
     {
         return @link($tmp, $final);
     }
 
-    /**
-     * Cria $caminho de forma exclusiva ('xb'), grava tudo, 0640 e confere o
-     * tamanho. Em qualquer falha apaga o que ELA criou e lanca. Nunca abre um
-     * arquivo existente.
-     */
     private function escreverExclusivo(string $caminho, string $bytes): void
     {
         $h = @fopen($caminho, 'xb');
@@ -232,11 +175,6 @@ class OrdemColetaArquivoStorage
         }
     }
 
-    /**
-     * Caminho absoluto do arquivo derivado so de valor do banco, ou null se
-     * QUALQUER validacao falhar (regex, raiz, pasta symlink/fora da raiz,
-     * arquivo symlink). O arquivo em si pode nao existir.
-     */
     public function caminhoAbsoluto(mixed $relativo): ?string
     {
         if (!self::caminhoRelativoValido($relativo)) {
@@ -266,7 +204,6 @@ class OrdemColetaArquivoStorage
         return $caminho;
     }
 
-    /** True se o arquivo existe (regular, nao symlink) e tem o tamanho dado. */
     public function existeComTamanho(string $relativo, int $tamanho): bool
     {
         $caminho = $this->caminhoAbsoluto($relativo);
@@ -278,14 +215,6 @@ class OrdemColetaArquivoStorage
         return @filesize($caminho) === $tamanho;
     }
 
-    /**
-     * Leitura segura para o check-in. Retorna ['bytes' => string, 'motivo' =>
-     * null] ou ['bytes' => null, 'motivo' => <codigo fixo>]. Nunca lanca.
-     * Valida: regex/realpath/symlink, is_file, tamanho <= $maximo, assinatura
-     * %PDF- e sha256 igual ao do banco.
-     *
-     * @return array{bytes:?string, motivo:?string}
-     */
     public function ler(string $relativo, int $maximo, string $sha256Esperado): array
     {
         $caminho = $this->caminhoAbsoluto($relativo);
@@ -320,10 +249,6 @@ class OrdemColetaArquivoStorage
         return ['bytes' => $bytes, 'motivo' => null];
     }
 
-    /**
-     * Apaga o arquivo (ausente = ok). Retorno: 'removido' | 'ausente' |
-     * 'invalido' (caminho nao passou na validacao: nada e tocado) | 'falha'.
-     */
     public function remover(string $relativo): string
     {
         $caminho = $this->caminhoAbsoluto($relativo);

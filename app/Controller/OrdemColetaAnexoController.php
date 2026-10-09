@@ -7,16 +7,6 @@ use Util\AuthServidor;
 use Util\LogSistema;
 use Util\Resposta;
 
-/**
- * POST public/api/ordem-coleta-anexo.php — recebe o PDF da Ordem de Coleta do
- * n8n (demanda anexo-ordem-coleta-n8n, 2026-10-05). Autenticacao propria
- * servidor-a-servidor (Util\AuthServidor), distinta do token do totem.
- *
- * Ordem: metodo (405) -> HTTPS/chave/rate limit/autenticacao -> limite do
- * corpo ANTES de decodificar (Content-Length e leitura com teto) -> JSON ->
- * OrdemColetaArquivoRn. Respostas no formato Util\Resposta com codigo estavel
- * e mensagem fixa; nunca ecoa entrada, caminho ou mensagem de excecao.
- */
 class OrdemColetaAnexoController
 {
     public function __construct(
@@ -25,11 +15,6 @@ class OrdemColetaAnexoController
         private int $tetoCorpoBytes
     ) {}
 
-    /**
-     * @param array<string,mixed> $server tipicamente $_SERVER
-     * @param string|null $authorization header Authorization recebido
-     * @param callable $abrirCorpo devolve o recurso do corpo (php://input)
-     */
     public function processar(array $server, ?string $authorization, callable $abrirCorpo): void
     {
         header('Cache-Control: no-store');
@@ -68,8 +53,6 @@ class OrdemColetaAnexoController
             self::responder(413, 'ARQUIVO_MUITO_GRANDE', 'Arquivo acima do limite permitido.');
         }
         if ($corpo === '') {
-            // Content-Length > 0 mas nada chegou em php://input: o PHP descarta
-            // o corpo quando excede post_max_size (nao e JSON invalido).
             if ($declarado !== null && $declarado > 0) {
                 self::responder(413, 'ARQUIVO_MUITO_GRANDE', 'Arquivo acima do limite permitido.');
             }
@@ -79,7 +62,6 @@ class OrdemColetaAnexoController
         $entrada = json_decode($corpo, true, 8);
         unset($corpo);
         if (!is_array($entrada)) {
-            // JSON invalido ou escalar (5, "x", true, null)
             self::responder(400, 'CORPO_INVALIDO', 'Corpo da requisicao invalido.');
         }
 
@@ -98,9 +80,6 @@ class OrdemColetaAnexoController
         Resposta::sucesso($resultado['dados'] ?? []);
     }
 
-    /**
-     * Le php://input em blocos com teto (tetoCorpoBytes). Null = excedeu o teto.
-     */
     private function lerCorpoLimitado(callable $abrirCorpo): ?string
     {
         $h = $abrirCorpo();
@@ -127,10 +106,6 @@ class OrdemColetaAnexoController
         return $acumulado;
     }
 
-    /**
-     * Log central (so codigo HTTP e motivo do catalogo; nunca CNPJ, numero da OC,
-     * caminho, corpo nem mensagem). 4xx = recusa (AVISO); 5xx = erro (ERRO).
-     */
     private static function registrarLog(int $http, string $codigo, ?\Throwable $excecao): void
     {
         if ($http >= 500) {
@@ -162,6 +137,6 @@ class OrdemColetaAnexoController
     private static function responder(int $http, string $codigo, string $mensagem, array $dados = [], ?\Throwable $excecao = null): void
     {
         self::registrarLog($http, $codigo, $excecao);
-        Resposta::erroComDados($mensagem, $codigo, $dados, $http); // encerra (exit)
+        Resposta::erroComDados($mensagem, $codigo, $dados, $http);
     }
 }

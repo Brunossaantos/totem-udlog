@@ -2,50 +2,24 @@
 
 namespace Util;
 
-/**
- * Politica e hash de senha da Gestao Totem (demanda gestao-totem, F1).
- *
- * Politica (decisao do plano): minimo 12 caracteres, maximo 72 BYTES (limite
- * real do bcrypt, usado como teto unico para qualquer algoritmo), diferente do
- * login, fora de uma lista curta de senhas comuns, nao so de espacos, nao um
- * unico caractere repetido e com pelo menos 5 caracteres distintos. SEM regras
- * de composicao (maiuscula, digito, simbolo): comprimento e a regra.
- *
- * Todo parametro que carrega senha ou hash leva #[\SensitiveParameter] (PHP
- * 8.2+ o remove dos stack traces; no 8.0/8.1 o atributo e inerte e a defesa e
- * `zend.exception_ignore_args`, ligado pela gestao).
- *
- * Hash: PASSWORD_ARGON2ID quando o PHP do servidor o oferece (defined()), senao
- * PASSWORD_BCRYPT cost 12. O algoritmo e as opcoes podem mudar com o tempo:
- * `precisaRehash()` + regravacao no login migram o hash sem o usuario perceber.
- */
 final class SenhaPolitica
 {
     public const MIN_CARACTERES = 12;
 
     public const MAX_BYTES = 72;
 
-    /** Teto defensivo para a senha DIGITADA no login (evita hash de entrada gigante). */
     public const MAX_BYTES_LOGIN = 1024;
 
-    /** Minimo de caracteres DISTINTOS (recusa "aaaaaaaaaaaa", "abababababab"). */
     public const MIN_DISTINTOS = 5;
 
     private const ARGON_OPCOES = ['memory_cost' => 19456, 'time_cost' => 2, 'threads' => 1];
 
     private const BCRYPT_OPCOES = ['cost' => 12];
 
-    /**
-     * Hashes de uma senha aleatoria descartada (nunca existiu usuario com ela),
-     * um por algoritmo e MESMAS opcoes do hash real: `password_verify` contra
-     * este hash gasta o mesmo tempo de uma verificacao real, para o login
-     * inexistente (ou bloqueado) nao ser distinguivel por tempo.
-     */
     private const DUMMY_ARGON2ID = '$argon2id$v=19$m=19456,t=2,p=1$LkphTzFYdmI3QmJYenJCbg$L7jL2+7nCxCCUR3K99G6WZGfj1Imr61b6dB8A9Id8JA';
 
     private const DUMMY_BCRYPT = '$2y$12$bg7z6YFGtQ.KdC.xrsmCZu6xZrB5CcEnUFFNC89PmI0yaf5mlNTpO';
 
-    /** Senhas comuns com 12+ caracteres (comparacao em minusculas, sem espacos). */
     private const COMUNS = [
         '123456789012', '1234567890123', '12345678901234', '123456789123',
         '111111111111', '000000000000', '123123123123', '121212121212',
@@ -73,7 +47,6 @@ final class SenhaPolitica
         return defined('PASSWORD_ARGON2ID') ? PASSWORD_ARGON2ID : PASSWORD_BCRYPT;
     }
 
-    /** @return array<string,int> */
     public static function opcoes(): array
     {
         return defined('PASSWORD_ARGON2ID') ? self::ARGON_OPCOES : self::BCRYPT_OPCOES;
@@ -99,17 +72,11 @@ final class SenhaPolitica
         return password_needs_rehash($hash, self::algoritmo(), self::opcoes());
     }
 
-    /** Verificacao "de mentira" com custo igual ao real (usuario inexistente ou bloqueado). */
     public static function verificarDummy(#[\SensitiveParameter] string $senha): void
     {
         password_verify($senha, defined('PASSWORD_ARGON2ID') ? self::DUMMY_ARGON2ID : self::DUMMY_BCRYPT);
     }
 
-    /**
-     * @param string|null $login      login do usuario (a senha nao pode ser igual a ele)
-     * @param string|null $senhaAtual senha atual (a nova nao pode ser igual a ela)
-     * @return string|null mensagem de erro para o usuario, ou null se a senha e aceita
-     */
     public static function validar(#[\SensitiveParameter] string $senha, ?string $login = null, #[\SensitiveParameter] ?string $senhaAtual = null): ?string
     {
         if (strlen($senha) > self::MAX_BYTES) {
@@ -145,11 +112,6 @@ final class SenhaPolitica
         return null;
     }
 
-    /**
-     * Senha temporaria gerada no SERVIDOR (CSPRNG): 16 caracteres de um
-     * alfabeto sem ambiguidade (sem 0/O/1/l/I), em 4 grupos separados por
-     * hifen (19 caracteres, bem abaixo do teto de 72 bytes).
-     */
     public static function gerarTemporaria(): string
     {
         $alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';

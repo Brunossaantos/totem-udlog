@@ -11,10 +11,6 @@ use App\Dao\RateLimitVioStatusDao;
 use App\Rn\DocumentoRn;
 use App\Controller\DocumentoController;
 
-// Bootstrap isolado: mesma protecao aplicada em public/api/nota.php --
-// Util\Bootstrap::conectar() cobre .env ausente/malformado, variavel
-// obrigatoria de banco ausente/invalida e falha de conexao (ver
-// util/Bootstrap.php e util/Conexao.php).
 try {
     $pdo = Bootstrap::conectar(__DIR__ . '/../../');
 } catch (\Throwable $e) {
@@ -22,16 +18,6 @@ try {
 }
 $totem = Auth::validarTotem($pdo);
 
-// Fronteira global COMPLEMENTAR (nunca substituta dos catches especificos ja
-// existentes em App\Controller\DocumentoController) — demanda
-// remocao-legado-serpro-e-hardening-documentos, 2026-09-28: rede de
-// seguranca final contra qualquer excecao NAO PREVISTA (ex.: PDOException de
-// uma chamada ao AtendimentoDao sem try/catch dedicado neste fluxo) que
-// escape de todos os pontos ja tratados no Controller. Toda chamada real de
-// Controller termina em Util\Resposta::sucesso()/erro() (ambas fazem
-// exit()) — este catch so dispara para uma falha genuinamente imprevista, e
-// nunca expõe getMessage()/trace/SQL/payload/credencial, mesmo padrao
-// sanitizado ja usado em Util\Bootstrap/DocumentoController::logFalhaTecnica().
 try {
     $documentoRn = new DocumentoRn(new VioCacheDao($pdo), new AtendimentoDao($pdo));
     $controller = new DocumentoController(new AtendimentoDao($pdo), $documentoRn, $pdo, new RateLimitVioStatusDao($pdo));
@@ -50,8 +36,6 @@ try {
             $controller->iniciarProcessamento($entrada, $idTotem);
             break;
         case 'validar-qr':
-            // Acao legada removida do fluxo QR-only: responde 404 'Acao invalida'
-            // sem escrita, assim como 'upload' e 'definir-modo-cnh'.
             Resposta::erro('Acao invalida', 404);
             break;
         case 'status-processamento':

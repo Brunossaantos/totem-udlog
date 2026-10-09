@@ -5,62 +5,6 @@ namespace Util;
 use App\Dao\LogSistemaDao;
 use Throwable;
 
-/**
- * Log central do sistema (tb_log_sistema, migration 023), consultado pela tela
- * de logs da Gestao Totem. Convive com os error_log() existentes: o error_log
- * continua sendo o registro bruto de infra, este e o registro CONSULTAVEL e
- * SEM DADO PESSOAL.
- *
- *     LogSistema::registrar('erro_banco_pdo', ['id_atendimento' => 12, 'id_totem' => 3,
- *                                              'tipo' => 'recebimento', 'excecao' => $e]);
- *
- * Contrato de seguranca (nao negociavel):
- *  - Categoria, origem, nivel, mensagem e janela vem do catalogo (Util\LogCatalogo).
- *    Nao existe parametro de mensagem, trace, arquivo, linha, IP nem token.
- *  - $ctx aceita SO: id_atendimento (int > 0), id_totem (int > 0, de totem JA
- *    autenticado pelo chamador), tipo ('expedicao'|'recebimento'), excecao
- *    (Throwable), http (100..599) e as chaves de dominio do catalogo, cada uma
- *    com regra fechada. Throwable NUNCA vira mensagem: so o nome da classe
- *    (validado por regex) e, na PDOException, o SQLSTATE (5 caracteres A-Z0-9).
- *  - Categoria/chave/valor fora do catalogo descarta o evento e conta como
- *    `log_parametro_invalido`. Nunca lanca (try/catch de Throwable, inclusive
- *    Error/TypeError, por isso os parametros nao tem tipo declarado: um TypeError
- *    na chamada ja seria uma excecao saindo daqui).
- *  - A escrita nao acontece na hora: os eventos ficam numa fila em memoria e sao
- *    gravados por uma CONEXAO PROPRIA (Conexao::criarDedicada, timeout curto,
- *    sem retry), FORA da transacao do chamador (um rollback dele nao apaga o log),
- *    no shutdown da requisicao (depois de fastcgi_finish_request quando existir).
- *    CLI chama descarregar() explicitamente.
- *  - Falha ao gravar (banco fora do ar, tabela ausente, qualquer erro): so um
- *    error_log fixo ("LogSistema: gravacao falhou categoria=<cat> classe=<X>"),
- *    no maximo 1 por categoria por minuto. Sem spool. Esta classe nunca chama
- *    AuditoriaDao nem a si mesma na falha, e um guard de reentrancia ignora
- *    chamadas feitas de dentro dela (ex.: um tratador de erro que logue).
- *  - Volume: no maximo 10 eventos DISTINTOS por requisicao; deduplicacao atomica
- *    no banco (UNIQUE dedup_chave+janela, contador incrementado por
- *    INSERT ... ON DUPLICATE KEY UPDATE); teto global de linhas novas por dia e
- *    total de linhas: estourado, nao cria linha nova (so soma na existente) e
- *    incrementa a categoria `log_suprimido`. Os tetos sao conferidos por
- *    contagem na descarga, SO para linha nova (o 1o passo e o UPDATE da linha
- *    existente da mesma dedup_chave+janela, sem COUNT): processos simultaneos
- *    podem passar do teto por poucas linhas (aceito).
- *  - Teto diario POR CATEGORIA (TETO_DIARIO_POR_CATEGORIA linhas novas/dia; `cron_*`
- *    e `log_suprimido` ficam fora): uma categoria com cardinalidade alta (ids
- *    variaveis) nao esgota o teto global das demais. Estourado: sem linha nova, so
- *    soma em `log_suprimido` (motivo=teto_categoria). 1 COUNT por categoria por
- *    descarga, so para linha nova.
- *  - Throttle de escrita pre-auth (flag `throttle_escrita` no catalogo, so no web, nao
- *    em CLI/cron): 1 tentativa de escrita por categoria por 60 s por servidor,
- *    marcador em STORAGE_PATH/log_throttle/<hmac da categoria>.json (so timestamp).
- *    Dentro da janela, ou se o marcador/pasta nao puder ser lido/gravado, o evento
- *    e DESCARTADO em silencio (nunca amplifica): nem conexao dedicada nem UPDATE. O
- *    contador dessas categorias fica SUBESTIMADO (conta ~1 por minuto por servidor,
- *    nao o total real de tentativas).
- *  - O contador em memoria por requisicao (repeticoes da mesma entrada antes do
- *    flush) e TRUNCADO em OCORRENCIAS_MAXIMAS_POR_ENTRADA (1000) por
- *    entrada/requisicao: acima disso as repeticoes nao somam mais nada.
- *  - Util\Conexao e Util\Bootstrap NAO referenciam esta classe (teste estatico).
- */
 final class LogSistema
 {
     public const TETO_POR_REQUISICAO = 10;
@@ -73,12 +17,10 @@ final class LogSistema
 
     public const THROTTLE_SEGUNDOS = 60;
 
-    /** Teto de repeticoes somadas na memoria para uma mesma entrada antes do flush. */
     private const OCORRENCIAS_MAXIMAS_POR_ENTRADA = 1000;
 
     private const INTERVALO_FALLBACK_SEGUNDOS = 60;
 
-    /** @var array<string,array<string,mixed>> */
     private static array $fila = [];
 
     private static bool $ocupado = false;
@@ -87,13 +29,8 @@ final class LogSistema
 
     private static bool $shutdownRegistrado = false;
 
-    /** @var array<string,int> */
     private static array $fallbackEm = [];
 
-    /**
-     * @param mixed $categoria string do catalogo (LogCatalogo::CATEGORIAS)
-     * @param mixed $ctx array com as chaves permitidas da categoria
-     */
     public static function registrar($categoria, $ctx = []): void
     {
         if (self::$ocupado) {
@@ -109,10 +46,6 @@ final class LogSistema
         }
     }
 
-    /**
-     * Grava a fila em memoria (conexao propria). No web roda sozinho no shutdown;
-     * scripts CLI (cron) chamam explicitamente antes de sair. Nunca lanca.
-     */
     public static function descarregar(): void
     {
         if (self::$ocupado) {
@@ -128,9 +61,6 @@ final class LogSistema
         }
     }
 
-    // ------------------------------------------------------------------
-    // Registro (validacao e fila)
-    // ------------------------------------------------------------------
 
     private static function registrarInterno($categoria, $ctx): void
     {
@@ -164,12 +94,6 @@ final class LogSistema
         self::enfileirar($categoria, $def, $norm);
     }
 
-    /**
-     * 1 escrita por categoria por THROTTLE_SEGUNDOS por servidor. Falha segura =
-     * descartar (false). Publico so para os testes em CLI.
-     *
-     * @param int|null $agora so para teste
-     */
     public static function throttlePermiteEscrita(string $categoria, ?int $agora = null): bool
     {
         try {
@@ -216,11 +140,6 @@ final class LogSistema
         }
     }
 
-    /**
-     * @param list<string> $permitidas
-     * @param array<mixed> $ctx
-     * @return array<string,mixed>|string array normalizado, ou o motivo da rejeicao
-     */
     private static function validar(array $permitidas, array $ctx)
     {
         $idAtendimento = null;
@@ -259,7 +178,6 @@ final class LogSistema
                         return 'valor_invalido';
                     }
                     $nome = get_class($valor);
-                    // classe anonima (contem NUL e caminho) ou longa demais: omite, nao descarta
                     $classe = preg_match('/\A[A-Za-z0-9_\\\\]{1,80}\z/D', $nome) === 1 ? $nome : null;
                     if ($valor instanceof \PDOException) {
                         $codigo = $valor->getCode();
@@ -289,7 +207,6 @@ final class LogSistema
         ];
     }
 
-    /** @param array<int,mixed> $regra */
     private static function valorDominioValido(array $regra, $valor): bool
     {
         if ($regra[0] === 'enum') {
@@ -299,7 +216,6 @@ final class LogSistema
         return is_int($valor) && $valor >= $regra[1] && $valor <= $regra[2];
     }
 
-    /** @param array<string,string|int> $dominio */
     private static function montarDetalhe(?string $classe, ?string $sqlstate, ?int $http, array $dominio): ?string
     {
         $partes = [];
@@ -321,7 +237,6 @@ final class LogSistema
         return $partes === [] ? null : implode(';', $partes);
     }
 
-    /** Descarta a chamada invalida e registra (na fila) `log_parametro_invalido`. */
     private static function rejeitar(string $motivo, ?string $alvo): void
     {
         $dominio = ['motivo' => $motivo];
@@ -337,10 +252,6 @@ final class LogSistema
         ]);
     }
 
-    /**
-     * @param array<string,mixed> $def
-     * @param array<string,mixed> $norm
-     */
     private static function enfileirar(string $categoria, array $def, array $norm): void
     {
         $segundos = (int) ($def['janela'] ?? 0);
@@ -379,16 +290,12 @@ final class LogSistema
                         fastcgi_finish_request();
                     }
                 } catch (Throwable $e) {
-                    // sem efeito: so deixa de liberar a resposta antes da gravacao
                 }
                 self::descarregar();
             });
         }
     }
 
-    // ------------------------------------------------------------------
-    // Descarga (conexao propria, fora da transacao do chamador)
-    // ------------------------------------------------------------------
 
     private static function descarregarInterno(): void
     {
@@ -422,7 +329,6 @@ final class LogSistema
             try {
                 self::gravar($dao, $item, $estado);
             } catch (Throwable $e) {
-                // qualquer falha de banco: nao insiste nesta requisicao
                 self::$bancoIndisponivel = true;
                 foreach (array_slice($itens, $indice) as $restante) {
                     self::fallback($restante['categoria'], $e);
@@ -433,10 +339,6 @@ final class LogSistema
         }
     }
 
-    /**
-     * @param array<string,mixed> $item
-     * @param array{hoje:?int,total:?int,cat:array<string,int>} $estado
-     */
     private static function gravar(LogSistemaDao $dao, array $item, array &$estado): void
     {
         $def = LogCatalogo::CATEGORIAS[$item['categoria']];
@@ -453,13 +355,10 @@ final class LogSistema
         $chave = sha1(implode('|', [$origem, $item['categoria'], (string) $item['id_totem'], (string) $item['id_atendimento'], (string) $item['detalhe']]));
         $ocorrencias = (int) $item['ocorrencias'];
 
-        // 1) Linha da mesma (dedup_chave, janela) ja existe: so soma (UPDATE, sem COUNT).
-        //    Os tetos globais so impedem linha NOVA, entao evento ja agrupado nao paga contagem.
         if ($dao->incrementarSeExistir($chave, $item['janela'], $ocorrencias)) {
             return;
         }
 
-        // 2) Linha nova: confere os tetos (contagem 1x por descarga, depois estimativa local).
         $estado['hoje'] ??= $dao->contarCriadosHoje();
         $teto = null;
         if ($estado['hoje'] >= self::TETO_DIARIO) {
@@ -493,7 +392,6 @@ final class LogSistema
             'dedup_chave' => $chave,
             'janela' => $item['janela'],
         ], $ocorrencias);
-        // estimativa local (corrida: outro processo pode ter criado a linha entre o UPDATE e o INSERT)
         $estado['hoje']++;
         if (isset($estado['cat'][$item['categoria']])) {
             $estado['cat'][$item['categoria']]++;
@@ -521,14 +419,7 @@ final class LogSistema
         ], $ocorrencias);
     }
 
-    // ------------------------------------------------------------------
-    // Falha de gravacao: so error_log fixo, com limite de taxa
-    // ------------------------------------------------------------------
 
-    /**
-     * Texto FIXO: categoria so se for do catalogo, classe so se passar na regex.
-     * Nunca getMessage()/trace. Nao chama o banco, a auditoria nem registrar().
-     */
     private static function fallback(?string $categoria, ?Throwable $e): void
     {
         try {
@@ -548,7 +439,6 @@ final class LogSistema
             }
             error_log('LogSistema: gravacao falhou categoria=' . $cat . ' classe=' . $classe);
         } catch (Throwable $ignorado) {
-            // nada a fazer: o log nunca derruba quem o chamou
         }
     }
 }

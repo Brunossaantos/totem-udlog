@@ -20,13 +20,10 @@ namespace Util;
  */
 final class NomeCadastro
 {
-    /** Entrada acima disto (bytes) e recusada sem processar. */
     private const ENTRADA_MAX_BYTES = 1000;
 
-    /** Cc, Cf, Zl, Zp + invisiveis fora delas (ver docblock da classe). */
     private const PROIBIDOS = '/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\x{3164}\x{2800}\x{FE0F}\x{034F}\x{115F}\x{1160}\x{FFA0}\x{E0000}-\x{E007F}]/u';
 
-    /** Nome normalizado, ou null se invalido. */
     public static function normalizar(string $bruto, int $min, int $max): ?string
     {
         if (strlen($bruto) > self::ENTRADA_MAX_BYTES || preg_match('//u', $bruto) !== 1) {
@@ -48,10 +45,6 @@ final class NomeCadastro
         return $nome;
     }
 
-    /**
-     * Texto de busca (filtro de lista): mesma limpeza, sem limite minimo/maximo
-     * proprio; devolve '' se invalido.
-     */
     public static function textoBusca(string $bruto, int $max = 60): string
     {
         if (strlen($bruto) > $max * 4 || preg_match('//u', $bruto) !== 1 || preg_match('/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u', $bruto) === 1) {

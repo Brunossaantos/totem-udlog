@@ -6,14 +6,6 @@ use App\Dao\ClienteGestaoDao;
 use App\Rn\ClienteGestaoRn;
 use Util\GestaoHttp;
 
-/**
- * Clientes (tb_cliente do totem) da Gestao Totem (SO admin; o guard esta em
- * GestaoContexto): listar, criar, editar o nome, ativar/inativar e excluir (F6). Os
- * metodos devolvem o resultado de pagina que `gestaoRenderizar()` imprime, ou
- * redirecionam (PRG com ?msg=codigo). A confirmacao em dois passos de inativar/excluir
- * e uma pagina GET (`clientes.php?confirmar=<acao>&id=<id>`) com o aviso e um formulario
- * `confirmar=1`; o servidor so executa no segundo passo.
- */
 final class GestaoClienteController
 {
     private ClienteGestaoRn $rn;
@@ -23,22 +15,11 @@ final class GestaoClienteController
         $this->rn = new ClienteGestaoRn($ctx->pdo);
     }
 
-    /**
-     * clientes.php (GET): lista com filtros por whitelist (situacao, q), 25 por pagina,
-     * e, se vier `confirmar` + `id`, o aviso do segundo passo.
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function listar(): array
     {
         return $this->pagina(200, null);
     }
 
-    /**
-     * cliente-acao.php (POST): acao=inativar|ativar|excluir + id_cliente (+ confirmar=1).
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function acao(): array
     {
         $acao = GestaoContexto::post('acao');
@@ -72,16 +53,8 @@ final class GestaoClienteController
         return [];
     }
 
-    /**
-     * cliente-form.php: GET (?id= para editar) mostra o formulario. POST salva (cria se
-     * nao ha id_cliente, edita o nome se ha).
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function formulario(): array
     {
-        // Em POST vale SO o id do corpo (`?id=` na URL de um POST de criacao e ignorado e a
-        // criacao segue); `query('id')` so vale em GET.
         $ehGet = $this->ctx->auth->metodoSeguro();
         $idTexto = $ehGet ? GestaoContexto::query('id') : GestaoContexto::post('id_cliente');
         $idAlvo = null;
@@ -140,9 +113,6 @@ final class GestaoClienteController
         return [];
     }
 
-    /**
-     * @param array{tipo:string,texto:string}|null $flashLocal
-     */
     private function pagina(int $status, ?array $flashLocal): array
     {
         $f = ClienteGestaoRn::filtrosValidos(GestaoContexto::query('situacao'), GestaoContexto::query('q'));
@@ -173,12 +143,6 @@ final class GestaoClienteController
         ];
     }
 
-    /**
-     * Aviso do segundo passo (so se a acao ainda faz sentido para o estado atual):
-     * excluir sempre; inativar so de cliente ativo com atendimento em andamento.
-     *
-     * @return array{acao:string,id_cliente:int,nome:string,texto:string,rotulo:string,andamento:int}|null
-     */
     private function confirmacao(): ?array
     {
         $acao = GestaoContexto::query('confirmar');
@@ -235,7 +199,6 @@ final class GestaoClienteController
         return ($total === 1 ? '1 cliente' : $total . ' clientes') . ($paginas > 1 ? ' (mostrando ' . $de . ' a ' . $ate . ')' : '');
     }
 
-    /** @param array{situacao:string,q:string} $filtros */
     private function urlLista(array $filtros, int $pagina): string
     {
         $q = [];
@@ -252,12 +215,6 @@ final class GestaoClienteController
         return GestaoContexto::CAMINHO_CLIENTES . ($q === [] ? '' : '?' . http_build_query($q, '', '&', PHP_QUERY_RFC3986));
     }
 
-    /**
-     * @param array{nome:string,cnpj:string,ativo:string} $valores
-     * @param array<string,string> $erros
-     * @param array<string,mixed>|null $atual cliente em edicao
-     * @param array{total:int,nomes:list<string>}|null $ambiguidade passo 1 da confirmacao de ambiguidade do OCR
-     */
     private function formularioView(int $status, ?int $idAlvo, array $valores, array $erros, ?array $atual, ?array $ambiguidade = null): array
     {
         return [
@@ -277,7 +234,6 @@ final class GestaoClienteController
         ];
     }
 
-    /** Mensagem FIXA do aviso de ambiguidade do OCR (so o numero varia; nunca lista nomes). */
     private static function textoAmbiguidade(int $total): string
     {
         return 'Este nome é parecido com o de outros clientes e pode fazer o OCR das notas não identificar automaticamente ' . $total . ' cliente(s) (cairá no preenchimento manual). Confirme para continuar.';

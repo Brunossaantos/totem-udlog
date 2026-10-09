@@ -10,35 +10,6 @@ use App\Rn\UsuarioGestaoRn;
 use PDO;
 use Throwable;
 
-/**
- * Autenticacao humana da Gestao Totem (demanda gestao-totem, F1). SEPARADA do
- * token do totem (Util\Auth) e da chave servidor-a-servidor (Util\AuthServidor).
- *
- * Sessao: cookie OPACO `gestao_sid` (32 bytes de random_bytes, em hex) com
- * HttpOnly, Secure, SameSite=Strict, Path=/gestao e sem Domain. No banco fica so
- * o sha256 do token (tb_gestao_sessao.id_sessao). Id novo a cada login e a cada
- * troca de senha. Inatividade e teto absoluto vem do .env (Util\GestaoConfig).
- * `ativo` e `perfil` sao relidos do BANCO a toda requisicao.
- *
- * CSRF: token por sessao (random_bytes 32), comparado com hash_equals, exigido
- * em todo metodo diferente de GET/HEAD (header X-CSRF-Token ou campo de
- * formulario csrf_token), mais verificacao de Origin/Sec-Fetch-Site contra o
- * Host da requisicao. O formulario de login (ainda sem sessao) usa um token
- * assinado por HMAC com validade de 2 h, cuja CHAVE e derivada do sal
- * (hash_hmac(sha256, "gestao-login-token-v1", GESTAO_HASH_SALT)): o sal nunca
- * assina nada diretamente. O token e SEM ESTADO (pode ser reusado dentro da
- * validade; protege contra CSRF de login, nao contra repeticao).
- *
- * Login: mensagem unica generica, password_verify contra hash dummy quando o
- * usuario nao existe/esta inativo/bloqueado (custo igual), bloqueio por conta
- * (5 falhas = 15 min) e limite por IP (10 falhas / 15 min, hash do "balde" do
- * IP + sal; balde = IPv4 inteiro ou prefixo /64 do IPv6). Qualquer excecao
- * dentro do login vira resposta 500 generica com log so da classe da excecao
- * (a senha digitada nunca chega a log, resposta ou stack trace).
- *
- * Esta classe nao emite HTML nem chama exit: devolve resultados. Quem emite
- * resposta e Util\GestaoHttp / os controllers.
- */
 class AuthGestao
 {
     public const COOKIE = 'gestao_sid';
@@ -55,7 +26,6 @@ class AuthGestao
 
     public const TOKEN_LOGIN_VALIDADE_SEG = 7200;
 
-    /** Limpeza oportunista: 1 chance em N a cada tentativa de login (falha ou sucesso), em lote limitado. */
     public const LIMPEZA_UMA_EM = 50;
 
     public const MSG_LOGIN_GENERICA = 'Login ou senha incorretos. Confira e tente de novo; se esqueceu a senha, peça a um administrador.';
@@ -70,14 +40,8 @@ class AuthGestao
 
     private AuditoriaDao $auditoria;
 
-    /** @var array<string,mixed>|null|false false = ainda nao resolvida */
     private $sessao = false;
 
-    /**
-     * @param array<string,mixed>  $server  tipicamente $_SERVER
-     * @param array<string,mixed>  $cookies tipicamente $_COOKIE
-     * @param callable|null        $relogio unix time (so para a janela de IP e o token de login, em testes)
-     */
     public function __construct(
         private PDO $pdo,
         private GestaoConfig $config,
@@ -91,9 +55,6 @@ class AuthGestao
         $this->auditoria = new AuditoriaDao($pdo);
     }
 
-    // ------------------------------------------------------------------ transporte
-
-    /** HTTPS obrigatorio, igual a AuthServidor::requisicaoHttps, salvo a flag explicita de dev local. */
     public function transporteAceito(): bool
     {
         return $this->config->permitirHttp || AuthServidor::requisicaoHttps($this->server);
@@ -121,7 +82,6 @@ class AuthGestao
         return $this->metodo() === 'GET';
     }
 
-    /** Host da requisicao validado e normalizado (minusculo, sem porta padrao), ou null. */
     public function hostDaRequisicao(): ?string
     {
         $host = strtolower((string) ($this->server['HTTP_HOST'] ?? ''));
@@ -129,11 +89,6 @@ class AuthGestao
         return $this->normalizarAutoridade($host);
     }
 
-    /**
-     * Origin (quando presente) tem de ser o proprio Host da requisicao, com o
-     * esquema coerente. Sem Origin: se o navegador mandou Sec-Fetch-Site, so
-     * same-origin/none passam. Sem nenhum dos dois, o token CSRF decide.
-     */
     public function origemPermitida(): bool
     {
         $host = $this->hostDaRequisicao();
@@ -181,15 +136,6 @@ class AuthGestao
         return $porta === null ? $nome : $nome . ':' . $porta;
     }
 
-    // ------------------------------------------------------------------ sessao
-
-    /**
-     * Sessao valida da requisicao (ou null). Efeitos: revoga a sessao se o
-     * usuario foi desativado ou o User-Agent mudou e atualiza o ultimo acesso
-     * (no maximo 1x/min).
-     *
-     * @return array{id_sessao:string,id_usuario:int,csrf_token:string,login:string,nome:string,perfil:string,deve_trocar_senha:bool}|null
-     */
     public function sessaoAtual(): ?array
     {
         if ($this->sessao !== false) {
@@ -203,7 +149,6 @@ class AuthGestao
         $id = hash('sha256', $token);
         $linha = $this->sessoes->buscarValida($id, $this->config->idleMin);
         if ($linha === null) {
-            // expirada por inatividade/teto (ou inexistente): apaga o resto, se houver
             $this->sessoes->excluir($id);
 
             return null;
@@ -227,18 +172,11 @@ class AuthGestao
         return $this->sessao;
     }
 
-    /** Descarta o cache da sessao (apos login/logout/troca de senha na mesma requisicao). */
     public function esquecerSessao(): void
     {
         $this->sessao = false;
     }
 
-    /**
-     * Exige sessao valida. Sem sessao: GET de pagina = 302 para o login,
-     * qualquer outro metodo ou pedido JSON = 401.
-     *
-     * @return array<string,mixed> sessao
-     */
     public function exigirLogin(): array
     {
         $sessao = $this->sessaoAtual();
@@ -255,11 +193,6 @@ class AuthGestao
         return $sessao;
     }
 
-    /**
-     * Exige login E um dos perfis (403 se o perfil nao atende).
-     *
-     * @return array<string,mixed> sessao
-     */
     public function exigirPerfil(string ...$perfis): array
     {
         $sessao = $this->exigirLogin();
@@ -281,8 +214,6 @@ class AuthGestao
             || strtolower((string) ($this->server['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
     }
 
-    // ------------------------------------------------------------------ CSRF
-
     public function csrfToken(): string
     {
         $sessao = $this->sessaoAtual();
@@ -290,7 +221,6 @@ class AuthGestao
         return $sessao['csrf_token'] ?? '';
     }
 
-    /** @param string|null $enviado valor recebido (header X-CSRF-Token ou campo csrf_token) */
     public function csrfValido(#[\SensitiveParameter] ?string $enviado): bool
     {
         $sessao = $this->sessaoAtual();
@@ -301,16 +231,11 @@ class AuthGestao
         return hash_equals($sessao['csrf_token'], $enviado);
     }
 
-    /**
-     * Chave do HMAC do token do formulario de login, DERIVADA do sal (o sal em si
-     * nunca assina o token). Trocar o rotulo de versao invalida os tokens antigos.
-     */
     private function chaveTokenLogin(): string
     {
         return hash_hmac('sha256', 'gestao-login-token-v1', $this->config->sal);
     }
 
-    /** Token CSRF do formulario de login (sem sessao): "<ts>.<hmac>". Valido por 2 h, sem estado. */
     public function tokenLogin(): string
     {
         $ts = (string) $this->agora();
@@ -332,15 +257,6 @@ class AuthGestao
         return hash_equals(hash_hmac('sha256', 'gestao-login|' . $m[1], $this->chaveTokenLogin()), $m[2]);
     }
 
-    // ------------------------------------------------------------------ login / logout
-
-    /**
-     * Tenta o login. Nao emite cookie nem resposta.
-     *
-     * @return array{ok:bool,status:int,token?:string,usuario?:array<string,mixed>,deve_trocar_senha?:bool,retry_after?:int}
-     *         status 200 = ok, 401 = credenciais (mensagem unica), 429 = limite por IP,
-     *         500 = falha tecnica (excecao capturada; log so da classe)
-     */
     public function login(string $login, #[\SensitiveParameter] string $senha): array
     {
         try {
@@ -352,11 +268,9 @@ class AuthGestao
         }
     }
 
-    /** @return array<string,mixed> */
     private function loginInterno(string $login, #[\SensitiveParameter] string $senha): array
     {
         $ip = $this->ipCliente();
-        // chave do contador = IPv4 inteiro ou prefixo /64 do IPv6 (B5); a auditoria grava o IP completo
         $ipHash = IpCliente::hash(IpCliente::balde($ip), $this->config->sal);
         $janela = intdiv($this->agora(), self::JANELA_IP_SEGUNDOS);
 
@@ -409,7 +323,6 @@ class AuthGestao
                     $ip
                 )
             );
-            // B4: um atacante que so falha tambem enche as tabelas; a limpeza roda neste caminho (lote limitado)
             if (random_int(1, self::LIMPEZA_UMA_EM) === 1) {
                 $this->limpezaOportunista($janela);
             }
@@ -422,7 +335,6 @@ class AuthGestao
             $this->usuarios->atualizarHashApenas($idUsuario, SenhaPolitica::gerarHash($senha));
         }
         $this->usuarios->registrarLoginOk($idUsuario);
-        // Fixacao de sessao: um login SEMPRE gera token novo e descarta o que o cliente trazia.
         $anterior = $this->cookies[self::COOKIE] ?? null;
         if (is_string($anterior) && preg_match('/\A[a-f0-9]{64}\z/D', $anterior) === 1) {
             $this->sessoes->excluir(hash('sha256', $anterior));
@@ -445,7 +357,6 @@ class AuthGestao
         ];
     }
 
-    /** Cria uma sessao nova para o usuario e devolve o TOKEN do cookie (nunca gravado). */
     public function criarSessao(int $idUsuario): string
     {
         $token = bin2hex(random_bytes(32));
@@ -461,7 +372,6 @@ class AuthGestao
         return $token;
     }
 
-    /** Destroi a sessao atual no servidor e audita. Quem chama limpa o cookie. */
     public function logout(): void
     {
         $sessao = $this->sessaoAtual();
@@ -486,8 +396,6 @@ class AuthGestao
         return $n;
     }
 
-    // ------------------------------------------------------------------ cookie
-
     public function emitirCookie(#[\SensitiveParameter] string $token): void
     {
         setcookie(self::COOKIE, $token, $this->opcoesCookie(0));
@@ -498,20 +406,16 @@ class AuthGestao
         setcookie(self::COOKIE, '', $this->opcoesCookie(1));
     }
 
-    /** @return array{expires:int,path:string,secure:bool,httponly:bool,samesite:string} */
     private function opcoesCookie(int $expira): array
     {
         return [
             'expires' => $expira,
             'path' => self::COOKIE_PATH,
-            // Em dev local por HTTP (flag explicita) o navegador descartaria um cookie Secure.
             'secure' => $this->requisicaoEhHttps() || !$this->config->permitirHttp,
             'httponly' => true,
             'samesite' => 'Strict',
         ];
     }
-
-    // ------------------------------------------------------------------ internos
 
     private function uaHash(): string
     {
@@ -533,7 +437,6 @@ class AuthGestao
         }
     }
 
-    /** A auditoria de LOGIN/LOGOUT nunca derruba o fluxo: falha vira log fixo sem dado. */
     private function auditarSemFalhar(callable $acao): void
     {
         try {

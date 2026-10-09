@@ -4,19 +4,6 @@ namespace Util;
 
 use FPDF;
 
-/**
- * Layout compartilhado das etiquetas (producao: ImpressaoAtendimentoController,
- * diagnostico: ImpressaoTesteController). So desenho/medicao no FPDF: sem I/O,
- * sem banco, sem dado pessoal proprio (so desenha o texto recebido).
- *
- * Regras: conteudo colado no topo (TOPO_MM), restrito a uma AREA UTIL de
- * largura maxima 48 mm (env opcional ETIQUETA_AREA_UTIL_MM, 20 a largura da
- * pagina; invalido => 48) que comeca a 1 mm da borda esquerda (a impressora
- * corta em ~50,8 mm), centralizado nela; margem inferior de 3 mm; fontes base definidas para uma pagina de 80 mm de largura
- * (escala inicial 1, independente da pagina). Cada bloco e reduzido de 1 em 1 pt
- * ate caber na largura util (e no maximo de linhas); se a altura total ainda
- * estourar, todo o conjunto e reduzido proporcionalmente. Nunca cria 2a pagina.
- */
 final class EtiquetaLayout
 {
     private const MARGEM_ESQUERDA_MM = 1.0;
@@ -29,11 +16,6 @@ final class EtiquetaLayout
     private const ENTRELINHA = 1.15;
     private const PT_MINIMO_ABSOLUTO = 5;
 
-    /**
-     * Largura util (mm) do conteudo para uma pagina: ETIQUETA_AREA_UTIL_MM
-     * (opcional; numerico entre 20 e a largura da pagina, senao 48), limitada
-     * a (largura da pagina - 2 mm) para manter 1 mm de folga em cada borda.
-     */
     public static function areaUtilMm(float $larguraPaginaMm): float
     {
         $area = self::AREA_UTIL_PADRAO_MM;
@@ -48,19 +30,11 @@ final class EtiquetaLayout
         return max(1.0, min($area, $larguraPaginaMm - 2 * self::MARGEM_ESQUERDA_MM));
     }
 
-    /**
-     * @param array $blocos lista de ['texto'=>string,'estilo'=>''|'B','pt'=>int base (pagina 80 mm),
-     *                      'max_linhas'=>int,'espaco_antes_mm'=>float base]
-     * @return array medidas: escala, x_inicio, x_fim, y_final, limite_y, largura_util, blocos[] (pt, linhas, largura_max)
-     */
     public static function desenhar(FPDF $pdf, array $blocos): array
     {
         $larguraUtil = self::areaUtilMm($pdf->GetPageWidth());
-        // Area util [x0, x0 + larguraUtil], com x0 = 1 mm (centralizada nela).
         $x0 = self::MARGEM_ESQUERDA_MM;
         $limiteY = $pdf->GetPageHeight() - self::MARGEM_INFERIOR_MM;
-        // Fontes base ja sao dimensionadas para a area util (nao para a pagina):
-        // escala inicial 1; a reducao por largura/altura acontece abaixo.
         $kBase = 1.0;
 
         $plano = null;
@@ -76,8 +50,6 @@ final class EtiquetaLayout
         foreach ($plano['blocos'] as $i => $b) {
             $y += $b['espaco'];
             $pdf->SetFont('Arial', $blocos[$i]['estilo'], $b['pt']);
-            // MultiCell tem 1 mm de margem interna por lado: compensa para o
-            // texto ocupar exatamente a largura util.
             $pdf->SetXY($x0 - 1, $y);
             $pdf->MultiCell($larguraUtil + 2, $b['lh'], $blocos[$i]['texto'], 0, 'C');
             $y += $b['linhas'] * $b['lh'];
@@ -113,7 +85,7 @@ final class EtiquetaLayout
                 $pt--;
             } while (true);
 
-            if ($info === null) { // palavra maior que a largura mesmo no minimo: MultiCell quebra por caractere
+            if ($info === null) {
                 $info = [
                     'linhas' => (int) ceil($pdf->GetStringWidth((string) $bloco['texto']) / $larguraUtil),
                     'largura_max' => $larguraUtil,
@@ -130,7 +102,6 @@ final class EtiquetaLayout
         return ['blocos' => $saida, 'altura' => $altura];
     }
 
-    /** Quebra gulosa por palavras (igual ao MultiCell); null se alguma palavra nao couber na largura. */
     private static function medir(FPDF $pdf, string $texto, float $larguraUtil): ?array
     {
         $linhas = 1;

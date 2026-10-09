@@ -1,18 +1,9 @@
-/*
- * Gestão Totem - comportamento da interface (vanilla, sem dependências).
- * CSP da gestão: script-src 'self' (sem inline, sem eval). Regras:
- *  - todo texto dinâmico entra por textContent/setAttribute (NUNCA innerHTML);
- *  - o HTML funciona sem JS (as ações são formulários com CSRF); aqui só há
- *    melhorias: recolher menu, mostrar senha, confirmação, copiar, flash,
- *    indicador de requisitos e anti duplo clique.
- */
 (function () {
     'use strict';
 
     var SVG_NS = 'http://www.w3.org/2000/svg';
     var CHAVE_SIDEBAR = 'gestao.sidebar';
 
-    /** Ícone do sprite (símbolos definidos em layout_topo.php). */
     function icone(nome) {
         var svg = document.createElementNS(SVG_NS, 'svg');
         svg.setAttribute('class', 'gestao-icone');
@@ -36,12 +27,9 @@
     }
 
     function gravarPreferencia(valor) {
-        try { window.localStorage.setItem(CHAVE_SIDEBAR, valor); } catch (e) { /* preferência só de UI */ }
+        try { window.localStorage.setItem(CHAVE_SIDEBAR, valor); } catch (e) { }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Sidebar recolhível                                                  */
-    /* ------------------------------------------------------------------ */
     function iniciarSidebar() {
         var app = document.getElementById('gestao-app');
         var sidebar = document.getElementById('gestao-sidebar');
@@ -84,9 +72,6 @@
         });
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Mostrar/ocultar senha                                               */
-    /* ------------------------------------------------------------------ */
     function iniciarMostrarSenha() {
         var campos = document.querySelectorAll('input[data-alternar-senha]');
         Array.prototype.forEach.call(campos, function (campo) {
@@ -96,7 +81,6 @@
             caixa.setAttribute('aria-controls', campo.id);
             rotulo.appendChild(caixa);
             rotulo.appendChild(criar('span', '', 'Mostrar senha'));
-            // a mensagem de erro do campo fica IMEDIATAMENTE abaixo dele; o toggle vem depois dela
             var erro = document.getElementById('erro-' + campo.id);
             var ancora = erro && erro.parentNode === campo.parentNode ? erro : campo;
             ancora.insertAdjacentElement('afterend', rotulo);
@@ -104,7 +88,6 @@
                 campo.type = caixa.checked ? 'text' : 'password';
             });
         });
-        // volta a ocultar ao enviar (o valor já foi digitado; nada fica visível na página seguinte)
         window.addEventListener('pageshow', function () {
             Array.prototype.forEach.call(campos, function (campo) { campo.type = 'password'; });
             var caixas = document.querySelectorAll('.gestao-mostrar input');
@@ -112,9 +95,6 @@
         });
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Requisitos da nova senha (mínimo 12, máximo 72 bytes, != login)      */
-    /* ------------------------------------------------------------------ */
     function iniciarRequisitos() {
         var campo = document.querySelector('input[data-requisitos]');
         if (!campo) { return; }
@@ -128,7 +108,6 @@
         Array.prototype.forEach.call(lista.querySelectorAll('[data-requisito]'), function (li) {
             var texto = li.textContent;
             li.textContent = '';
-            // estado inicial NEUTRO: só a instrução (sem prefixo); o prefixo aparece ao digitar
             var estado = criar('span', 'gestao-requisitos__estado', '');
             estado.hidden = true;
             var rotulo = criar('span', '', texto);
@@ -138,7 +117,6 @@
             itens[li.getAttribute('data-requisito')] = { li: li, estado: estado };
         });
 
-        /** atendido: true | false | null (neutro, campo vazio). */
         function marcar(chave, atendido) {
             var item = itens[chave];
             if (!item) { return; }
@@ -163,9 +141,6 @@
         avaliar();
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Diálogo de confirmação (<dialog> nativo)                            */
-    /* ------------------------------------------------------------------ */
     var dialogo = null;
 
     function montarDialogo() {
@@ -182,7 +157,6 @@
         texto.id = 'gestao-dialogo-texto';
         var alvo = criar('p', 'gestao-dialogo__alvo');
         var acoes = criar('div', 'gestao-dialogo__acoes');
-        // confirmação extra (só quando o formulário da ação traz o campo): digitar o nome do totem
         var blocoNome = criar('div', 'gestao-campo gestao-dialogo__extra');
         blocoNome.hidden = true;
         var rotuloNome = criar('label', 'gestao-campo__rotulo', 'Para confirmar, digite o nome do totem');
@@ -204,7 +178,6 @@
         blocoNome.appendChild(entradaNome);
         blocoNome.appendChild(estadoNome);
 
-        // confirmação extra: marcar que há atendimento em andamento e que desativa mesmo assim
         var rotuloCaixa = criar('label', 'gestao-dialogo__caixa');
         rotuloCaixa.hidden = true;
         rotuloCaixa.setAttribute('for', 'gestao-dialogo-atendimento');
@@ -238,7 +211,6 @@
             rotuloCaixa: rotuloCaixa, entradaCaixa: entradaCaixa, textoCaixa: textoCaixa
         };
 
-        // foco preso entre os controles visíveis e habilitados (Tab / Shift+Tab)
         d.addEventListener('keydown', function (e) {
             if (e.key !== 'Tab') { return; }
             var lista = [entradaNome, entradaCaixa, cancelar, confirmar].filter(function (el) {
@@ -250,12 +222,10 @@
             if (e.shiftKey && (!dentro || ativo === lista[0])) { e.preventDefault(); lista[lista.length - 1].focus(); }
             else if (!e.shiftKey && (!dentro || ativo === lista[lista.length - 1])) { e.preventDefault(); lista[0].focus(); }
         });
-        // clique no fundo escurecido fecha (equivale a Cancelar)
         d.addEventListener('click', function (e) { if (e.target === d) { d.close('cancelar'); } });
         cancelar.addEventListener('click', function () { d.close('cancelar'); });
         entradaNome.addEventListener('input', function () { atualizarConfirmacao(obj); });
         entradaCaixa.addEventListener('change', function () { atualizarConfirmacao(obj); });
-        // qualquer fechamento sem "confirmar" devolve os campos do formulário ao estado inicial
         d.addEventListener('close', function () {
             if (d.returnValue !== 'confirmar') { limparCamposOrigem(obj); }
         });
@@ -264,12 +234,10 @@
         return dialogo;
     }
 
-    /** Comparação do nome do totem: sem espaços/tabs nas pontas e sem diferenciar maiúsculas (igual ao servidor). */
     function normalizarNome(valor) {
         return String(valor).replace(/^[ \t]+|[ \t]+$/g, '').toLowerCase();
     }
 
-    /** Habilita "confirmar" só quando as confirmações extras (nome certo, caixa marcada) foram dadas. */
     function atualizarConfirmacao(d) {
         var liberado = true;
         if (d.nomeEsperado !== null) {
@@ -316,11 +284,9 @@
         d.confirmar.textContent = '';
         if (destrutivo) { d.confirmar.appendChild(icone('alerta')); }
         d.confirmar.appendChild(criar('span', '', botao.getAttribute('data-confirmar-rotulo') || 'Confirmar'));
-        // destrutivo: fundo #3A3A3A + texto branco + ícone de alerta; "Cancelar" segue secundário azul
         d.confirmar.className = 'gestao-botao ' + (destrutivo ? 'gestao-botao--destrutivo-cheio' : 'gestao-botao--primario');
         d.el.classList.toggle('gestao-dialogo--destrutivo', destrutivo);
 
-        // confirmações extras que o formulário pede (nome do totem; caixa de atendimento em andamento)
         var campos = camposDoFormulario(botao);
         d.nomeEsperado = campos.nome ? (botao.getAttribute('data-confirmar-alvo') || '') : null;
         d.blocoNome.hidden = !campos.nome;
@@ -338,7 +304,6 @@
         d.confirmar.onclick = function () {
             var origem = d.origem;
             if (d.confirmar.disabled) { return; }
-            // o servidor revalida: o que foi digitado/marcado no diálogo vai nos campos reais do formulário
             if (campos.nome) { campos.nome.value = d.entradaNome.value; }
             if (campos.caixa) { campos.caixa.checked = true; }
             d.el.close('confirmar');
@@ -349,13 +314,12 @@
         };
         d.el.returnValue = '';
         d.el.showModal();
-        d.cancelar.focus(); // foco inicial no botão seguro
+        d.cancelar.focus();
     }
 
     function iniciarConfirmacao() {
         var teste = document.createElement('dialog');
-        if (typeof teste.showModal !== 'function') { return; } // sem <dialog>: envia direto (o servidor valida)
-        // com diálogo disponível, a confirmação extra (nome / caixa) acontece nele: some do formulário da linha
+        if (typeof teste.showModal !== 'function') { return; }
         Array.prototype.forEach.call(document.querySelectorAll('.gestao-confirmacao-inline'), function (el) {
             el.classList.add('gestao-confirmacao-inline--oculta');
         });
@@ -367,9 +331,6 @@
         });
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Copiar senha temporária                                             */
-    /* ------------------------------------------------------------------ */
     function selecionar(el) {
         var sel = window.getSelection();
         var faixa = document.createRange();
@@ -394,7 +355,6 @@
             if (!fonte) { return; }
             var botao = criar('button', 'gestao-botao gestao-botao--secundario');
             botao.type = 'button';
-            // padrão = senha temporária; a tela da URL do totem passa os próprios valores por data-copiar-*
             var idBotao = bloco.getAttribute('data-copiar-id');
             botao.id = idBotao && /^[a-z][a-z0-9-]{0,40}$/.test(idBotao) ? idBotao : 'btn-copiar-senha';
             var objeto = bloco.getAttribute('data-copiar-objeto') === 'a URL' ? 'a URL' : 'a senha';
@@ -402,12 +362,10 @@
             if (rotuloAria) { botao.setAttribute('aria-label', rotuloAria); }
             botao.appendChild(icone('copiar'));
             botao.appendChild(criar('span', '', bloco.getAttribute('data-copiar-rotulo') || 'Copiar'));
-            // sem JS fica o link alternativo (ex.: "Abrir URL" na lista); com JS ele dá lugar ao botão
             Array.prototype.forEach.call(bloco.querySelectorAll('[data-copiar-alternativa]'), function (alt) {
                 if (alt.parentNode) { alt.parentNode.removeChild(alt); }
             });
             var status = criar('span', 'gestao-copiar-status');
-            // ids únicos: o primeiro bloco da página usa "copiar-status" (telas com um só botão); os demais, derivados do botão
             status.id = document.getElementById('copiar-status') ? 'copiar-status-' + botao.id : 'copiar-status';
             status.setAttribute('role', 'status');
             status.setAttribute('aria-live', 'polite');
@@ -429,19 +387,15 @@
         });
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Flash: nenhum tipo some sozinho (WCAG 2.2.1); só "Dispensar" remove  */
-    /* ------------------------------------------------------------------ */
     function iniciarFlash() {
         var flash = document.getElementById('gestao-flash');
-        // a mensagem vem de ?msg=codigo: tira da URL para não reaparecer ao recarregar
         try {
             var url = new URL(window.location.href);
             if (url.searchParams.has('msg')) {
                 url.searchParams.delete('msg');
                 window.history.replaceState(null, '', url.pathname + url.search + url.hash);
             }
-        } catch (e) { /* sem History API: ignora */ }
+        } catch (e) { }
         if (!flash) { return; }
 
         function remover() {
@@ -461,9 +415,6 @@
 
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Anti duplo clique                                                   */
-    /* ------------------------------------------------------------------ */
     function iniciarAntiDuploClique() {
         document.addEventListener('submit', function (e) {
             var form = e.target;
@@ -473,7 +424,6 @@
                 return;
             }
             form.setAttribute('aria-busy', 'true');
-            // desabilita DEPOIS que o navegador montou os dados (senão o botão "acao" some do POST)
             window.setTimeout(function () {
                 var botoes = form.querySelectorAll('button:not([type="button"]), input[type="submit"]');
                 Array.prototype.forEach.call(botoes, function (b) {
@@ -484,7 +434,6 @@
                 });
             }, 0);
         });
-        // voltar pelo histórico (bfcache) não pode deixar o formulário travado
         window.addEventListener('pageshow', function (e) {
             if (!e.persisted) { return; }
             Array.prototype.forEach.call(document.querySelectorAll('form[aria-busy]'), function (f) { f.removeAttribute('aria-busy'); });

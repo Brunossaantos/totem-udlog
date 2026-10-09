@@ -2,17 +2,6 @@
 
 namespace Util;
 
-/**
- * Criptografia simetrica em repouso (AES-256-GCM) para dado pessoal sensivel
- * persistido em cache (nome/CPF de tb_vio_cache_cnh). Escolhido GCM em vez
- * de CBC+HMAC separado porque o proprio modo ja fornece autenticacao
- * integrada (tag), evitando implementar/errar um MAC a parte — uma unica
- * primitiva, uma unica chave (DOCUMENTO_DATA_KEY, 32 bytes/64 hex chars).
- *
- * Formato do texto cifrado retornado (string binaria, gravada em coluna
- * VARBINARY): [12 bytes IV][16 bytes TAG][ciphertext]. IV gerado por
- * chamada (random_bytes) — nunca reaproveitado.
- */
 class CriptografiaHelper
 {
     private const ALGORITMO = 'aes-256-gcm';

@@ -1,10 +1,4 @@
 <?php
-/**
- * Criar/editar usuário (só admin). Variáveis: $editando (bool), $id_alvo
- * (int|null), $valores (array login, nome, perfil), $erros (array campo =>
- * mensagem), $proprio (bool: editando a si mesmo, perfil não pode mudar),
- * $perfis (list de string).
- */
 $erroCampo = static function (string $campo) use ($erros): string {
     if (!isset($erros[$campo])) {
         return '';

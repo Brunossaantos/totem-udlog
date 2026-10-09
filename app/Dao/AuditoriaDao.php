@@ -6,30 +6,6 @@ use InvalidArgumentException;
 use PDO;
 use Util\IpCliente;
 
-/**
- * Auditoria APPEND-ONLY da Gestao Totem (tb_gestao_auditoria, migration 021).
- *
- * Contrato de privacidade: NUNCA grava senha, token, hash, CPF, nome, placa nem
- * URL de totem. Por isso:
- *  - `acao` pertence a um catalogo fechado (ACOES), `alvo_tipo` tambem;
- *  - `detalhe` e montado SO a partir da allowlist DETALHE_CAMPOS (chave fixa +
- *    valor de um conjunto fechado ou inteiro limitado). Chave ou valor fora da
- *    allowlist lancam InvalidArgumentException (erro de programacao) e nada e
- *    gravado: texto livre nunca chega a coluna.
- *
- * IP: a coluna `ip` guarda o IP COMPLETO em binario, em CLARO (nao e hash nem
- * truncado), de proposito: a trilha serve a analise forense. A contrapartida e
- * a retencao curta de 90 dias (decisao do usuario): a poda e feita por
- * App\Dao\AuditoriaRetencaoDao, chamado so pelo cron cron/limpar-logs-gestao.php
- * (F3d). (O hash de IP com sal existe so nos contadores de login,
- * tb_gestao_login_tentativa.)
- *
- * Esta classe so faz INSERT e UM UPDATE: o fechamento do `resultado` (e, se
- * informado, do `detalhe` com as contagens finais) de uma linha PENDENTE (abrir
- * antes da acao, fechar depois). Nao existe DELETE nem outro UPDATE aqui: a poda
- * por idade (90 dias) fica SO em AuditoriaRetencaoDao (o teste da gestao varre o
- * codigo para garantir).
- */
 class AuditoriaDao
 {
     public const ACOES = [
@@ -64,11 +40,6 @@ class AuditoriaDao
 
     public const RESULTADOS_FINAIS = ['OK', 'SEM_EFEITO', 'ERRO'];
 
-    /**
-     * Allowlist de `detalhe`: chave => lista fechada de valores permitidos, ou
-     * 'int' (inteiro 0..9999), 'int_grande' (inteiro 0..999999999, contagens do cron de
-     * retencao) ou 'id' (inteiro positivo de ate 10 digitos, ex.: id da empresa).
-     */
     public const DETALHE_CAMPOS = [
         'origem' => ['web', 'cli', 'cron'],
         'motivo' => ['credenciais', 'conta_bloqueada', 'ip_limitado', 'conta_inativa'],
@@ -83,7 +54,6 @@ class AuditoriaDao
         'status_de' => ['ATIVA', 'INATIVA'],
         'status_para' => ['ATIVA', 'INATIVA'],
         'motivo_oc' => ['ja_no_estado', 'estado_mudou', 'oc_inexistente', 'externo_indisponivel', 'arquivo_ausente', 'confirmado_andamento', 'confirmado_ja_baixada', 'confirmado_cliente_inativo', 'cliente_ausente', 'oc_ambigua', 'oc_ativa'],
-        // F6 (cadastro de clientes e empresas): motivo da recusa ou da confirmacao; conjunto fechado, nunca nome/CNPJ.
         'motivo_cad' => ['andamento_confirmado', 'totens_ativos_confirmado', 'totens_vinculados', 'ja_no_estado', 'duplicado', 'nao_encontrado', 'confirmado_ambiguidade_ocr'],
     ];
 
@@ -108,11 +78,6 @@ class AuditoriaDao
         return $this->inserir($idUsuario, $acao, $alvoTipo, $alvoId, $detalhe, $ip, 'PENDENTE');
     }
 
-    /**
-     * Registra um evento ja concluido (LOGIN_OK, LOGIN_FALHA, LOGOUT).
-     *
-     * @param array<string,string|int> $detalhe
-     */
     public function registrar(?int $idUsuario, string $acao, ?string $alvoTipo, ?int $alvoId, string $resultado, array $detalhe = [], ?string $ip = null): int
     {
         if (!in_array($resultado, self::RESULTADOS_FINAIS, true)) {
@@ -122,13 +87,6 @@ class AuditoriaDao
         return $this->inserir($idUsuario, $acao, $alvoTipo, $alvoId, $detalhe, $ip, $resultado);
     }
 
-    /**
-     * Fecha uma linha PENDENTE. Unico UPDATE desta classe: nunca altera linha ja fechada.
-     * `$detalhe` (opcional, mesma allowlist) substitui o detalhe aberto, para registrar
-     * contagens finais, vazio mantem o detalhe da abertura.
-     *
-     * @param array<string,string|int> $detalhe
-     */
     public function fechar(int $idAuditoria, string $resultado, array $detalhe = []): bool
     {
         if (!in_array($resultado, self::RESULTADOS_FINAIS, true)) {
@@ -146,11 +104,6 @@ class AuditoriaDao
         return $stmt->rowCount() === 1;
     }
 
-    /**
-     * Valida e serializa o detalhe pela allowlist.
-     *
-     * @param array<string,string|int> $detalhe
-     */
     public static function montarDetalhe(array $detalhe): ?string
     {
         $partes = [];
@@ -181,7 +134,6 @@ class AuditoriaDao
         return $partes === [] ? null : implode(';', $partes);
     }
 
-    /** @param array<string,string|int> $detalhe */
     private function inserir(?int $idUsuario, string $acao, ?string $alvoTipo, ?int $alvoId, array $detalhe, ?string $ip, string $resultado): int
     {
         if (!in_array($acao, self::ACOES, true)) {

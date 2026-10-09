@@ -9,21 +9,6 @@ use Throwable;
 use Util\GestaoHttp;
 use Util\LogCatalogo;
 
-/**
- * Tela de logs da Gestao Totem (demanda gestao-totem, F3c; SO admin, o guard esta
- * em GestaoContexto, e SO GET). Somente leitura: sem exportacao, sem edicao, sem
- * exclusao e sem "revelar" (os logs nao tem dado pessoal: mensagem fixa do catalogo,
- * `detalhe` por allowlist). Abrir a tela NAO e auditado.
- *
- * Todo filtro vem da query, e validado por WHITELIST aqui (aba, nivel, categoria
- * da aba no catalogo, totem existente, datas em parse estrito dentro de 90 dias) e
- * so entao chega ao LogSistemaDao, que valida de novo. Valor invalido e IGNORADO
- * (volta ao padrao); nunca vira SQL nem URL. Nao ha busca de texto livre.
- * Os links da tela (abas, atalhos, paginacao, voltar) sao montados SO a partir
- * dos filtros ja validados.
- *
- * Nunca expoe `codigo` nem `token_api` do totem (so id, nome e empresa).
- */
 final class GestaoLogController
 {
     public const POR_PAGINA = 50;
@@ -32,7 +17,6 @@ final class GestaoLogController
 
     public const CAMINHO_LOG = '/gestao/log.php';
 
-    /** slug da URL => origem do banco, rotulo e descricao curta. */
     public const ABAS = [
         'api' => [
             'origem' => 'API',
@@ -63,7 +47,6 @@ final class GestaoLogController
 
     public const ABA_PADRAO = 'api';
 
-    /** Abas cujo registro pode ter totem (Cron e Gestao nunca tem). */
     public const ABAS_COM_TOTEM = ['api', 'recebimento', 'expedicao'];
 
     public const NIVEIS = ['ERRO' => 'Erro', 'AVISO' => 'Aviso', 'INFO' => 'Info'];
@@ -75,11 +58,6 @@ final class GestaoLogController
         $this->dao = new LogSistemaDao($ctx->pdo);
     }
 
-    /**
-     * logs.php (GET): lista paginada da aba.
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function listar(): array
     {
         $hoje = $this->hoje();
@@ -92,7 +70,6 @@ final class GestaoLogController
             $total = (int) $resultado['total'];
             $paginas = max(1, (int) ceil($total / self::POR_PAGINA));
             if ($f['pagina'] > $paginas) {
-                // teto de pagina: volta para a ultima que existe
                 GestaoHttp::redirecionar(self::CAMINHO_LOGS . '?' . $this->query($f, ['pagina' => $paginas]));
             }
         } catch (Throwable $e) {
@@ -179,12 +156,6 @@ final class GestaoLogController
         ];
     }
 
-    /**
-     * log.php (GET, ?id=): detalhe de um registro em pagina propria. Registro
-     * inexistente (ou id invalido) volta para a lista com a mensagem fixa.
-     *
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     public function detalhe(): array
     {
         $hoje = $this->hoje();
@@ -206,7 +177,6 @@ final class GestaoLogController
             GestaoHttp::redirecionar(self::CAMINHO_LOGS . '?' . $this->query($f, ['msg' => 'log_nao_encontrado']));
         }
 
-        // Sem aba na query, o "Voltar" cai na aba do proprio registro.
         $slugDoRegistro = '';
         foreach (self::ABAS as $slug => $def) {
             if ($def['origem'] === (string) $registro['origem']) {
@@ -240,14 +210,7 @@ final class GestaoLogController
         ];
     }
 
-    // ------------------------------------------------------------------
-    // Filtros (whitelist)
-    // ------------------------------------------------------------------
 
-    /**
-     * @param list<array<string,mixed>> $totens
-     * @return array{aba:string,nivel:string,totem:string,categoria:string,de:string,ate:string,pagina:int,erros:array<string,string>}
-     */
     private function lerFiltros(array $totens, DateTimeImmutable $hoje): array
     {
         $aba = GestaoContexto::query('aba');
@@ -300,12 +263,6 @@ final class GestaoLogController
         ];
     }
 
-    /**
-     * Data estrita AAAA-MM-DD dentro da janela de 90 dias (nao futura). Invalida
-     * vira null com mensagem em $erros[$campo]; vazia vira null sem mensagem.
-     *
-     * @param array<string,string> $erros
-     */
     private function lerData(string $campo, DateTimeImmutable $hoje, DateTimeImmutable $limite, array &$erros, string $rotulo): ?DateTimeImmutable
     {
         $texto = GestaoContexto::query($campo);
@@ -338,7 +295,6 @@ final class GestaoLogController
         return $data;
     }
 
-    /** Categorias do catalogo que podem aparecer na aba (inclui as `por_tipo`). @return list<string> */
     private function categoriasDaAba(string $aba): array
     {
         $origem = self::ABAS[$aba]['origem'];
@@ -354,7 +310,6 @@ final class GestaoLogController
         return $lista;
     }
 
-    /** @param array<string,mixed> $f @return array<string,mixed> so o periodo (contagem por aba) */
     private function filtrosDePeriodo(array $f): array
     {
         $dao = [];
@@ -368,7 +323,6 @@ final class GestaoLogController
         return $dao;
     }
 
-    /** @param array<string,mixed> $f @return array<string,mixed> */
     private function filtrosDao(array $f): array
     {
         $dao = ['origem' => self::ABAS[$f['aba']]['origem']] + $this->filtrosDePeriodo($f);
@@ -387,14 +341,6 @@ final class GestaoLogController
         return $dao;
     }
 
-    /**
-     * Query string (sem "?") so com filtros validados, em ordem fixa, omitindo o
-     * que e padrao. $troca substitui valores; $sobrescreve idem (alias semantico).
-     *
-     * @param array<string,mixed> $f
-     * @param array<string,mixed> $extra chaves adicionais/substituicoes (pagina, msg)
-     * @param array<string,mixed> $troca substituicoes de filtros
-     */
     private function query(array $f, array $extra = [], array $troca = []): string
     {
         $v = array_merge($f, $troca, $extra);
@@ -414,7 +360,6 @@ final class GestaoLogController
         return http_build_query($q, '', '&', PHP_QUERY_RFC3986);
     }
 
-    /** @return array<string,array{0:string,1:string,2:string}> id => [rotulo, de, ate] */
     private function periodosAtalho(DateTimeImmutable $hoje): array
     {
         $fim = $hoje->format('Y-m-d');
@@ -428,7 +373,6 @@ final class GestaoLogController
 
     private function hoje(): DateTimeImmutable
     {
-        // mesmo fuso (-03:00) da sessao do banco e da retencao
         return new DateTimeImmutable('today', new DateTimeZone('-03:00'));
     }
 
@@ -439,12 +383,6 @@ final class GestaoLogController
         return $empresa === null || $empresa === '' ? $nome : $nome . ' (' . $empresa . ')';
     }
 
-    /**
-     * `detalhe` ("chave=valor;chave=valor", ja por allowlist na gravacao) em pares.
-     * A view escapa tudo; aqui so se separa.
-     *
-     * @return list<array{0:string,1:string}>
-     */
     private function paresTecnicos(mixed $detalhe): array
     {
         if (!is_string($detalhe) || $detalhe === '') {
@@ -459,7 +397,6 @@ final class GestaoLogController
         return $pares;
     }
 
-    /** @return array{view:string,dados:array<string,mixed>,status:int} */
     private function paginaComErro(): array
     {
         return [

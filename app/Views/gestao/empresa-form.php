@@ -1,12 +1,4 @@
 <?php
-/**
- * Criar/editar empresa (só admin). Variáveis: $editando (bool), $id_alvo (int|null), $valores
- * (array nome, cnpj), $erros (array campo => mensagem; campos nome, cnpj), $totens_ativos e
- * $totens_total (int; só na edição).
- *
- * Na edição só o nome muda: o CNPJ aparece somente leitura (e não é enviado). O aviso
- * permanente `empresa-aviso-urls` só existe na edição. Sem script nem style inline.
- */
 $erroCampo = static function (string $campo) use ($erros): string {
     if (!isset($erros[$campo])) {
         return '';

@@ -1,31 +1,4 @@
 <?php
-/**
- * Recalcula tb_cliente.razao_social_normalizada com o algoritmo ATUAL de
- * Util\RazaoSocialMatcher::normalizar (decisao do usuario de 2026-10-09: "sempre
- * normalizar os textos para nao ter acentos"; a versao antiga perdia letras
- * acentuadas minusculas e, em alguns ambientes, tambem as maiusculas, ex.: o seed da
- * migration 003, pendencia P40). So a razao normalizada muda; `nome` NUNCA e tocado.
- *
- * Somente linha de comando:
- *   php tools/recalcular-razao-normalizada.php             (DRY-RUN, o padrao: nao grava nada)
- *   php tools/recalcular-razao-normalizada.php --aplicar   (grava, sob GET_LOCK, em UMA transacao)
- *
- * Saida: SO contagens e id_cliente. Nunca nome, CNPJ nem razao (PII).
- *
- * Com --aplicar a ferramenta RECUSA (aborta SEM alterar nada, exit 1) se:
- *   - algum valor novo ficar vazio (cliente que deixaria de ser reconhecido pelo OCR);
- *   - algum valor novo exceder a coluna (150);
- *   - dois ou mais clientes ATIVOS ficarem com a mesma razao normalizada (o OCR nao
- *     distingue) -- os ids envolvidos sao listados;
- *   - o UPDATE de uma linha nao afetar exatamente 1 linha (mudou durante a execucao).
- * O UPDATE de cada linha e condicional ao valor antigo lido (`<=>`, aceita NULL).
- * Usa o MESMO lock nomeado do cadastro de clientes da gestao (ClienteGestaoDao), entao
- * nao concorre com criar/editar/ativar cliente. Idempotente: a 2a execucao nao tem
- * divergencias. Registra so contagens em error_log e em LogSistema (cron_resumo /
- * cron_falhou, job `recalcular_razao`); nao cria acao de auditoria.
- *
- * Saida de codigo: 0 = ok (dry-run ou aplicado); 1 = recusado/falhou; 2 = uso/ambiente.
- */
 
 if (PHP_SAPI !== 'cli') {
     http_response_code(404);
@@ -54,12 +27,6 @@ function listaIds(array $ids): string
     return $ids === [] ? '-' : implode(',', $ids);
 }
 
-/**
- * Analise pura das linhas lidas.
- *
- * @param list<array{id_cliente:mixed,nome:mixed,razao_social_normalizada:mixed,ativo:mixed}> $linhas
- * @return array{total:int,iguais:int,diferentes:list<array{id:int,antiga:?string,nova:string}>,vazias_novas:list<int>,vazias_mantidas:int,longas:list<int>,duplicadas:array<string,list<int>>}
- */
 function analisar(array $linhas): array
 {
     $r = ['total' => count($linhas), 'iguais' => 0, 'diferentes' => [], 'vazias_novas' => [], 'vazias_mantidas' => 0, 'longas' => [], 'duplicadas' => []];
@@ -82,7 +49,6 @@ function analisar(array $linhas): array
         if (strlen($nova) > ClienteGestaoRn::RAZAO_MAX) {
             $r['longas'][] = $id;
         }
-        // estado FINAL: toda linha passa a valer normalizar(nome)
         if ((int) $l['ativo'] === 1 && $nova !== '') {
             $ativosPorRazao[$nova][] = $id;
         }
@@ -122,7 +88,6 @@ function imprimirResumo(array $a, bool $aplicar): void
     }
 }
 
-/** @return list<array<string,mixed>> */
 function lerClientes(PDO $pdo, bool $travar): array
 {
     $sql = 'SELECT id_cliente, nome, razao_social_normalizada, ativo FROM tb_cliente ORDER BY id_cliente' . ($travar ? ' FOR UPDATE' : '');
@@ -207,7 +172,6 @@ function executar(bool $aplicar): int
             try {
                 $pdo->rollBack();
             } catch (\Throwable $e2) {
-                // a conexao encerra a transacao
             }
         }
         fwrite(STDERR, 'Falha inesperada (' . get_class($e) . '). Nenhuma alteracao foi gravada.' . PHP_EOL);

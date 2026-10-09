@@ -4,12 +4,6 @@ namespace App\Dao;
 
 use PDO;
 
-/**
- * Empresa/armazem do Talent (Portaria/Checkin) — tb_empresa, vinculada ao
- * totem via tb_totem.id_empresa (demanda integracao-talent-portaria-checkin,
- * 2026-09-09). cnpjArmazem do payload do Talent vem EXCLUSIVAMENTE daqui,
- * nunca do frontend.
- */
 class EmpresaDao
 {
     public function __construct(private PDO $pdo) {}

@@ -1,8 +1,4 @@
 <?php
-/**
- * Novo totem (só admin). Variáveis: $empresas (list de id_empresa, nome; só ativas),
- * $valores (array empresa, nome), $erros (array campo => mensagem).
- */
 $erroCampo = static function (string $campo) use ($erros): string {
     if (!isset($erros[$campo])) {
         return '';

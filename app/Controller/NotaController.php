@@ -12,22 +12,9 @@ use Util\Resposta;
 
 class NotaController
 {
-    // Rate limit por totem, so para o endpoint identificar-cliente (ver
-    // sql/migrations/004_tb_rate_limit_ocr.sql para o raciocinio completo).
-    // Achado do security-especialista na etapa de planejamento: sem o rate
-    // limit natural da antiga API externa (~60/min, janela nao confirmada),
-    // consultar tb_cliente localmente fica barato demais de abusar como
-    // "oraculo" de existencia de CNPJ. Janela fixa de 60s, limite de 30
-    // chamadas/totem/janela — dimensionado com folga de ~2x sobre o pior
-    // caso realista de uso legitimo (ate 5 notas por atendimento, cada uma
-    // gerando 1 chamada "normal" + ate 2 retries de rede com backoff do
-    // front-end = ate 15 chamadas em rajada).
     private const RATE_LIMIT_JANELA_SEGUNDOS = 60;
     private const RATE_LIMIT_MAX_CHAMADAS = 30;
 
-    // Timeout de espera de lock de linha (innodb_lock_wait_timeout, por
-    // sessao) das transacoes curtas de processar/excluir/definir-numero/
-    // identificar-cliente (persistencia). Estourou = HTTP 503 sanitizado.
     private const TIMEOUT_LOCK_SEGUNDOS = 5;
 
     private NotaArquivoStorage $storage;
@@ -41,13 +28,6 @@ class NotaController
         $this->storage = $storage ?? new NotaArquivoStorage();
     }
 
-    /**
-     * Loga falha de banco de forma minima e segura: nunca inclui getMessage(),
-     * getTraceAsString(), getFile() ou getLine() da excecao (podem conter SQL,
-     * valores de parametro ou dado pessoal). O SQLSTATE so entra no log se
-     * bater estritamente no formato esperado (5 caracteres alfanumericos
-     * maiusculos) — nunca confiamos as cegas em getCode().
-     */
     private function logFalhaBancoPdo(string $contexto, \PDOException $e): void
     {
         $sqlstate = (string) $e->getCode();
@@ -60,28 +40,13 @@ class NotaController
         LogSistema::registrar('erro_banco_pdo', ['tipo' => 'recebimento', 'excecao' => $e]);
     }
 
-    /**
-     * Loga falha tecnica generica de forma minima e segura: nunca inclui
-     * getMessage(), getTraceAsString(), getFile() ou getLine() da
-     * excecao (podem conter SQL, payload, dado pessoal ou detalhe de
-     * integracao externa). Registra so o contexto operacional fixo
-     * (acao) + a classe concreta da excecao, suficiente para diferenciar
-     * rapidamente o tipo de falha em debug futuro sem vazar conteudo.
-     */
     private function logFalhaTecnica(string $contexto, \Throwable $e): void
     {
         error_log($contexto . ': falha nao prevista [' . get_class($e) . ']');
         LogSistema::registrar('erro_tecnico', ['tipo' => 'recebimento', 'excecao' => $e]);
     }
 
-    // ------------------------------------------------------------------
-    // Lock de linha e transacao curta (demanda hardening-revisao-notas-e-
-    // cliente, 2026-09-30)
-    // ------------------------------------------------------------------
 
-    /**
-     * Timeout de lock (1205) e deadlock (1213) viram 503 sanitizado.
-     */
     private function ehFalhaDeLock(\PDOException $e): bool
     {
         $codigoDriver = (int) ($e->errorInfo[1] ?? 0);
@@ -89,26 +54,6 @@ class NotaController
         return $codigoDriver === 1205 || $codigoDriver === 1213;
     }
 
-    /**
-     * Executa $acao dentro de UMA transacao curta (BEGIN ... COMMIT) e
-     * devolve o resultado como array; NUNCA chama Resposta (exit dentro de
-     * try pularia o finally e deixaria transacao/lock abertos): quem chama
-     * responde via responder() DEPOIS de a transacao estar fechada.
-     *
-     * $acao recebe por referencia a lista de compensacoes (callables de
-     * efeito em disco, ex.: apagar arquivo recem-gravado, devolver foto da
-     * quarentena). Em QUALQUER caminho de insucesso antes do COMMIT (retorno
-     * com http >= 400 ou excecao) as compensacoes rodam em ordem inversa
-     * AINDA SOB LOCK, e so entao o ROLLBACK. Se o proprio COMMIT falhar as
-     * compensacoes rodam em melhor esforco.
-     *
-     * $acao devolve ['http' => int, 'erro' => string] ou ['http' => 200,
-     * 'dados' => array, 'apos_commit' => ?callable] (apos_commit roda depois
-     * do COMMIT, falha tolerada).
-     *
-     * @param callable(array &): array $acao
-     * @return array{http:int, erro?:string, dados?:array}
-     */
     private function executarSobLock(callable $acao, string $contexto, string $mensagemFalha): array
     {
         try {
@@ -155,7 +100,6 @@ class NotaController
                 try {
                     $this->atendimentoDao->desfazerTransacao();
                 } catch (\Throwable $e) {
-                    // nada a fazer: a conexao e descartada no fim da requisicao
                 }
             }
         }
@@ -181,9 +125,6 @@ class NotaController
         return ['http' => 500, 'erro' => $mensagemFalha];
     }
 
-    /**
-     * @param array<int, callable> $compensacoes
-     */
     private function rodarCompensacoes(array $compensacoes): void
     {
         foreach (array_reverse($compensacoes) as $compensacao) {
@@ -195,10 +136,6 @@ class NotaController
         }
     }
 
-    /**
-     * Responde (exit) o resultado de executarSobLock(), SEMPRE depois de a
-     * transacao estar fechada.
-     */
     private function responder(array $resultado): void
     {
         $http = (int) ($resultado['http'] ?? 500);
@@ -210,17 +147,11 @@ class NotaController
         Resposta::sucesso($resultado['dados'] ?? []);
     }
 
-    /**
-     * Revalida, SOB LOCK (linha de tb_atendimento travada), posse, tipo
-     * (recebimento), status e etapa. Devolve null se tudo ok, ou o resultado
-     * de erro. Mensagens identicas as checagens fora do lock.
-     */
     private function validarAtendimentoSobLock(int $idAtendimento, int $idTotem): array
     {
         $atendimento = $this->atendimentoDao->buscarPorIdParaUpdate($idAtendimento);
 
         if (!$atendimento || (int) $atendimento['id_totem'] !== $idTotem || $atendimento['tipo'] !== 'recebimento') {
-            // mensagem generica: nao revela que o atendimento existe mas eh de outro tipo/totem
             return ['http' => 404, 'erro' => 'Atendimento nao encontrado'];
         }
         if ($atendimento['status'] !== 'em_andamento') {
@@ -233,12 +164,6 @@ class NotaController
         return ['http' => 200, 'atendimento' => $atendimento];
     }
 
-    /**
-     * id_nota (opcional) e ordem (opcional) da entrada. Retorna
-     * [?int $idNota, ?int $ordem, ?string $erro]. Ausente (null/'' /chave
-     * inexistente) = null; presente e invalido = erro. id_nota e sempre
-     * inteiro positivo; ordem 1 a 5.
-     */
     private function lerIdentificadoresDaNota(array $entrada): array
     {
         $idNota = null;
@@ -269,12 +194,6 @@ class NotaController
         $imagemBase64 = $entrada['imagem'] ?? null;
         $chave = $entrada['chave'] ?? null;
 
-        // uid (rodada corretiva F7, 2026-10-01): identificador gerado pelo
-        // front, OPCIONAL (ausente = comportamento anterior). Formato
-        // ^[A-Za-z0-9_-]{8,64}$ validado com regex ancorada (D). Com uid, o
-        // processar e IDEMPOTENTE: retry com o mesmo uid no mesmo atendimento
-        // devolve a nota ja criada sem duplicar nem regravar o arquivo, e a
-        // imagem passa a ser opcional (o front pode so recuperar a nota).
         $uid = $entrada['uid'] ?? null;
         if ($uid === '') {
             $uid = null;
@@ -287,9 +206,6 @@ class NotaController
             Resposta::erro('Dados incompletos');
         }
 
-        // ordem agora e OPCIONAL (decisao D4): ausente = o servidor aloca a
-        // primeira ordem livre de 1 a 5 sob lock; informada e ocupada continua
-        // HTTP 400; informada fora de 1..5 = 400.
         $ordemInformada = null;
         $brutaOrdem = $entrada['ordem'] ?? null;
         if ($brutaOrdem !== null && $brutaOrdem !== '') {
@@ -301,12 +217,6 @@ class NotaController
 
         $chave = is_string($chave) ? $chave : null;
 
-        // Toda a decisao roda sob lock de linha de tb_atendimento em
-        // transacao curta: contagem, alocacao de ordem, gravacao do arquivo
-        // e INSERT sao atomicos em relacao a outros processar/excluir/
-        // concluir do mesmo atendimento. PDOException sanitizada (demanda
-        // integridade-conclusao-atendimento, 2026-09-16): nunca vaza
-        // detalhe do driver nem loga payload/imagem do motorista.
         $resultado = $this->executarSobLock(
             function (array &$compensacoes) use ($idAtendimento, $idTotem, $ordemInformada, $imagemBase64, $chave, $uid): array {
                 $validacao = $this->validarAtendimentoSobLock($idAtendimento, $idTotem);
@@ -315,11 +225,6 @@ class NotaController
                 }
                 $atendimento = $validacao['atendimento'];
 
-                // F7: uid ja conhecido NESTE atendimento (lookup sempre escopado
-                // por id_atendimento e sob o lock do atendimento) = devolve a
-                // mesma nota, sem escrita em banco nem em disco. O uid de outro
-                // atendimento nunca e alcancado (e nao e tratado diferente de
-                // um uid inexistente).
                 if ($uid !== null) {
                     $existente = $this->notaFiscalRn->buscarNotaPorClientUid($idAtendimento, $uid, true);
                     if ($existente !== null) {
@@ -333,7 +238,6 @@ class NotaController
                         ]];
                     }
                     if (!$imagemBase64) {
-                        // uid desconhecido e sem imagem: nada a recuperar
                         return ['http' => 400, 'erro' => 'Dados incompletos'];
                     }
                 }
@@ -371,20 +275,13 @@ class NotaController
                     return ['http' => 400, 'erro' => 'Nao foi possivel salvar a imagem da nota'];
                 }
 
-                // Se qualquer coisa falhar ate o COMMIT, o arquivo recem-gravado
-                // e apagado AINDA SOB LOCK (nunca apaga arquivo legitimo de
-                // outra requisicao concorrente).
                 $compensacoes[] = static function () use ($caminhoArquivo): void {
                     @unlink($caminhoArquivo);
                 };
 
                 try {
-                    // a identificacao do cliente NAO roda aqui: e feita por
-                    // nota.php?acao=identificar-cliente (OCR client-side)
                     $leitura = $this->notaFiscalRn->processarLeitura($idAtendimento, $ordem, $nomeArquivo, $chave, $uid);
                 } catch (\Throwable $e) {
-                    // insercao falhou depois do arquivo ja gravado — o arquivo e
-                    // apagado pela compensacao, sob lock
                     $this->logFalhaTecnica("processar id_atendimento={$idAtendimento}", $e);
                     return ['http' => 500, 'erro' => 'Nao foi possivel registrar a nota'];
                 }
@@ -403,39 +300,8 @@ class NotaController
         $this->responder($resultado);
     }
 
-    /**
-     * Endpoint nota.php?acao=identificar-cliente (demanda
-     * recebimento-leitura-notas). Recebe candidatos extraidos por OCR
-     * client-side (Tesseract.js, fora deste escopo) — entrada tratada como
-     * nao confiavel, validada/normalizada dentro de NotaFiscalRn.
-     *
-     * Decisao aprovada em 2026-09-04: `chave_ocr` foi removido do processo
-     * de identificacao (extracao de 44 digitos via OCR se mostrou
-     * estruturalmente fragil em diagnostico real). O campo continua aceito
-     * no payload por compatibilidade (o front-end pode mandar `null` ou
-     * omitir o campo), mas e completamente IGNORADO aqui — nao validado,
-     * nao repassado para logica de negocio.
-     *
-     * hardening-revisao-notas-e-cliente (2026-09-30): a nota e localizada
-     * por id_nota (novo) e/ou ordem (compat; se vierem os dois devem
-     * coincidir, senao 404). Calcula FORA do lock e trava so para persistir.
-     */
     public function identificarCliente(array $entrada, int $idTotem): void
     {
-        // Rate limit por totem — roda ANTES de qualquer outra validacao de
-        // negocio, logo apos Auth::validarTotem() ja ter sido feito por
-        // quem despachou para este metodo (nota.php), ja que o limite e por
-        // totem autenticado (nao por IP anonimo). Responde 429 + Retry-After
-        // e encerra a requisicao (Resposta::erro faz exit()) se excedido.
-        //
-        // PDOException sanitizada (achado do qa-testes/security-especialista
-        // na revisao de 2026-09-16 desta mesma demanda): incrementarEContar()
-        // executa 2 queries reais (INSERT ... ON DUPLICATE KEY UPDATE +
-        // SELECT) e antes rodava fora de qualquer try/catch deste metodo —
-        // uma falha de banco aqui propagaria ate o handler padrao do PHP.
-        // Retorna imediatamente em caso de excecao, antes de qualquer OCR ou
-        // outra logica; nao ha reexecucao de incrementarEContar() apos a
-        // captura, entao nao ha risco de dupla contabilizacao do rate limit.
         try {
             $this->verificarRateLimit($idTotem);
         } catch (\PDOException $e) {
@@ -464,15 +330,10 @@ class NotaController
             $razaoSocialCandidata = null;
         }
 
-        // PDOException sanitizada (ver processar() acima) — cobre
-        // buscarAtendimentoDoTotem()/busca da nota, antes fora de qualquer
-        // protecao. Checagem previa SEM lock (evita computar para entrada
-        // invalida); tudo e revalidado sob lock na persistencia.
         try {
             $atendimento = $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
             if ($atendimento['tipo'] !== 'recebimento') {
-                // mensagem generica: nao revela que o atendimento existe mas eh de outro tipo/totem
                 Resposta::erro('Atendimento nao encontrado', 404);
             }
 
@@ -504,11 +365,6 @@ class NotaController
                 $razaoSocialCandidata
             );
         } catch (\Throwable $e) {
-            // falha nao prevista (a maioria dos casos de erro tecnico ja e
-            // tratada dentro de NotaFiscalRn::avaliarNota, que devolve
-            // status ERRO sem lancar excecao) — mesmo padrao de processar():
-            // log tecnico sanitizado no servidor, resposta generica ao totem,
-            // nunca vaza mensagem/stack trace da excecao.
             $this->logFalhaTecnica("identificar-cliente id_atendimento={$idAtendimento}", $e);
             Resposta::erro('Nao foi possivel identificar o cliente', 500);
             return;
@@ -521,7 +377,6 @@ class NotaController
                     return $validacao;
                 }
 
-                // nota excluida (ou id_nota reaproveitado por outra nota) = 404 sem escrita
                 $nota = $this->notaFiscalRn->buscarNotaDoAtendimento($idAtendimento, $idNotaResolvida, $ordem, true);
                 if ($nota === null) {
                     return ['http' => 404, 'erro' => 'Nota nao encontrada para essa ordem'];
@@ -542,20 +397,6 @@ class NotaController
         $this->responder($resultado);
     }
 
-    /**
-     * Endpoint nota.php?acao=definir-numero (demanda
-     * talent-doctos-finalizacao-checkin, 2026-09-14) — grava o numero da
-     * NF-e (OCR confirmado pelo motorista ou digitado manualmente).
-     * Normalizacao (so digitos, sem zero a esquerda) e SEMPRE feita no
-     * backend (App\Rn\NotaFiscalRn::atualizarNumeroNota), nunca confia no
-     * que o front envia como "ja normalizado". Mesmo padrao de
-     * posse/tipo/status/etapa das demais acoes deste controller.
-     *
-     * hardening-revisao-notas-e-cliente (2026-09-30): aceita id_nota (novo;
-     * identidade imutavel) e/ou ordem (compat; se vierem os dois devem
-     * coincidir, senao 404). Roda sob lock de linha do atendimento; nota
-     * excluida = 404 sem escrita.
-     */
     public function definirNumero(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
@@ -612,25 +453,6 @@ class NotaController
         $this->responder($resultado);
     }
 
-    /**
-     * Endpoint nota.php?acao=excluir (demanda hardening-revisao-notas-e-
-     * cliente, 2026-09-30, decisoes D3/D4). Exclui UMA nota por id_nota
-     * (identidade imutavel, nunca reutilizada) dentro de UM atendimento em
-     * digitalizacao. Sequencia sob lock de linha (innodb_lock_wait_timeout
-     * de 5 s), na ordem atendimento -> nota:
-     *   1. BEGIN; FOR UPDATE em tb_atendimento; posse/tipo/status/etapa;
-     *   2. nota por id_nota E id_atendimento FOR UPDATE (ausente =
-     *      ja_excluida, 200, sem escrita);
-     *   3. caminho derivado SO no servidor (STORAGE_PATH + pasta_documentos +
-     *      arquivo do banco, formatos validados, realpath com prefixo, sem
-     *      symlink); invalido = 500 sem tocar disco nem banco;
-     *   4. quarentena por rename atomico (ausente = segue; falha = 500);
-     *   5. DELETE exigindo rowCount 1;
-     *   6. COMMIT e SO ENTAO unlink do .del (falha tolerada, o cron cobre).
-     * Qualquer falha antes do COMMIT devolve a foto (compensacao sob lock) e
-     * faz ROLLBACK. Nunca chama Resposta entre o rename e o COMMIT. Campos
-     * de caminho/arquivo no request sao IGNORADOS.
-     */
     public function excluir(array $entrada, int $idTotem): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
@@ -651,8 +473,6 @@ class NotaController
 
                 $nota = $this->notaFiscalRn->buscarNotaDoAtendimento($idAtendimento, $idNota, null, true);
                 if ($nota === null) {
-                    // id_nota inexistente neste atendimento (ja excluida, ou de
-                    // outro atendimento): idempotente e sem vazar existencia.
                     return ['http' => 200, 'dados' => $this->montarRespostaExclusao($idAtendimento, $idNota, false, true)];
                 }
 
@@ -671,15 +491,6 @@ class NotaController
 
                 if ($situacao === 'quarentenado') {
                     $compensacoes[] = function () use ($caminho, $idNota, $idAtendimento): void {
-                        // F4 (rodada corretiva 2026-10-01): restaurar() devolve
-                        // false quando nao conseguiu devolver a foto. Antes isso
-                        // passava em silencio. Contexto FIXO sanitizado: so ids
-                        // inteiros, nunca caminho, nome do arquivo, excecao
-                        // bruta, trace ou dado da nota. Consistencia: o
-                        // ROLLBACK segue (a linha continua existindo) e a foto
-                        // fica em quarentena com nome reconhecivel; um novo
-                        // excluir da mesma nota reconhece 'ja_em_quarentena' e
-                        // conclui a exclusao.
                         if (!$this->storage->restaurar($caminho, $idNota)) {
                             error_log("excluir-nota: FALHA ao restaurar a foto da quarentena apos rollback; foto permanece em quarentena (id_atendimento={$idAtendimento} id_nota={$idNota})");
                         }
@@ -712,11 +523,6 @@ class NotaController
         $this->responder($resultado);
     }
 
-    /**
-     * Snapshot devolvido por excluir (lido sob o mesmo lock, antes do
-     * COMMIT): notas restantes (id_nota, ordem, numero_definido) e o estado
-     * derivado do cliente. Sem numero, CNPJ, caminho ou imagem.
-     */
     private function montarRespostaExclusao(int $idAtendimento, int $idNota, bool $excluida, bool $jaExcluida): array
     {
         $ativas = $this->notaFiscalRn->listarNotasAtivasTravadas($idAtendimento);
@@ -741,17 +547,6 @@ class NotaController
         ];
     }
 
-    /**
-     * Endpoint nota.php?acao=listar (rodada corretiva F7, 2026-10-01) --
-     * RECONCILIACAO somente leitura: devolve TODAS as notas ativas do
-     * atendimento do totem autenticado, para o front recuperar o estado depois
-     * de uma resposta perdida ou reload logico (e para o 422/409 nunca apontar
-     * nota invisivel): {total_notas, notas:[{id_nota, ordem, uid,
-     * numero_definido}]}. `uid` e null para nota criada sem uid. Nunca
-     * devolve arquivo, caminho, imagem, numero, CNPJ ou status interno.
-     * Posse/tipo/status: atendimento de outro totem, inexistente ou de outro
-     * tipo = 404 identico; fora de em_andamento = 400.
-     */
     public function listar(int $idAtendimento, int $idTotem): void
     {
         if (!$idAtendimento) {
@@ -784,9 +579,6 @@ class NotaController
 
     public function algumaIdentificada(int $idAtendimento, int $idTotem): void
     {
-        // PDOException sanitizada (ver processar() acima) — antes este
-        // metodo nao tinha NENHUM try/catch, cobre buscarAtendimentoDoTotem()
-        // e algumaNotaIdentificouCliente().
         try {
             $this->buscarAtendimentoDoTotem($idAtendimento, $idTotem);
 
@@ -800,36 +592,6 @@ class NotaController
         Resposta::sucesso(['cliente_identificado' => $identificada]);
     }
 
-    /**
-     * Rate limit por totem para identificar-cliente (ver constantes da
-     * classe). Janela fixa de 60s, incremento atomico via RateLimitOcrDao
-     * (INSERT ... ON DUPLICATE KEY UPDATE — sem Redis/APCu, compativel com
-     * Hostgator).
-     *
-     * Fail-closed (demanda robustez-rate-limit-migrations, 2026-09-18):
-     * RateLimitOcrDao e dependencia OBRIGATORIA do construtor desde esta
-     * demanda — o unico chamador em producao (public/api/nota.php) sempre
-     * injeta. Como o parametro do construtor e tipado NAO-nullable, a
-     * propriedade `$this->rateLimitOcrDao` nunca pode ser lida como `null`
-     * em nenhum caminho real (uma tentativa de forcar isso via Reflection
-     * resulta em `\Error: Typed property ... must not be accessed before
-     * initialization` ao LER a propriedade, antes mesmo de qualquer `=== null`
-     * — achado confirmado pelo qa-testes em 2026-09-18).
-     *
-     * Correcao (achado 1 do qa-testes, mesma data): a antiga checagem
-     * `=== null` era codigo morto/inalcancavel — nunca produzia o 503
-     * documentado, so um erro fatal cru em qualquer cenario real de falha.
-     * Para o requisito original ("responder 503 se a dependencia nao puder
-     * ser usada") ser cumprido de fato, TODA a logica que depende de
-     * `$this->rateLimitOcrDao` roda dentro de um try/catch. `\PDOException`
-     * e deliberadamente RELANCADA (nao capturada aqui) para continuar
-     * subindo ate o catch(\PDOException) ja existente no chamador
-     * (`identificarCliente()`), que ja responde 500 sanitizado — nao
-     * queremos que esse cenario, ja correto, passe a responder 503. Qualquer
-     * outro `\Throwable` (incluindo `\Error`/`\TypeError` — ex.: propriedade
-     * tipada nao inicializada, falha de acesso inesperada) resulta em 503
-     * sanitizado, sem vazar `$e->getMessage()`/stack trace.
-     */
     private function verificarRateLimit(int $idTotem): void
     {
         try {
@@ -837,16 +599,8 @@ class NotaController
             $janela = intdiv($agora, self::RATE_LIMIT_JANELA_SEGUNDOS);
             $contador = $this->rateLimitOcrDao->incrementarEContar($idTotem, $janela);
         } catch (\PDOException $e) {
-            // Relancada de proposito: o chamador (identificarCliente()) ja
-            // tem seu proprio catch(\PDOException) em volta desta chamada,
-            // respondendo 500 sanitizado — comportamento ja correto e
-            // testado, nao deve virar 503.
             throw $e;
         } catch (\Throwable $e) {
-            // Fail-safe real: qualquer falha inesperada na dependencia de
-            // rate limit (incluindo \Error/\TypeError) vira 503 sanitizado,
-            // nunca um erro fatal cru. Log interno minimo, sem interpolar
-            // a mensagem da excecao (pode conter detalhe tecnico interno).
             error_log('identificarCliente (rate limit): falha inesperada na dependencia de rate limit');
             LogSistema::registrar('erro_tecnico', ['tipo' => 'recebimento', 'excecao' => $e, 'http' => 503, 'motivo' => 'indisponivel']);
             Resposta::erro('Servico de protecao indisponivel no momento. Tente novamente em instantes.', 503);
@@ -861,11 +615,6 @@ class NotaController
         }
     }
 
-    /**
-     * Busca o atendimento e garante que pertence ao totem autenticado.
-     * Mensagem de erro generica em qualquer caso de falha (nao existe / eh
-     * de outro totem) para nao vazar a existencia de atendimento alheio.
-     */
     private function buscarAtendimentoDoTotem(int $idAtendimento, int $idTotem): array
     {
         $atendimento = $this->atendimentoDao->buscarPorId($idAtendimento);

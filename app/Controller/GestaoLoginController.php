@@ -5,18 +5,12 @@ namespace App\Controller;
 use Util\AuthGestao;
 use Util\GestaoHttp;
 
-/**
- * Login e logout da Gestao Totem (demanda gestao-totem, F1). Os metodos
- * devolvem o "resultado de pagina" ['view','dados','status','cabecalhos'] que
- * `gestaoRenderizar()` imprime, ou redirecionam (exit).
- */
 final class GestaoLoginController
 {
     public function __construct(private GestaoContexto $ctx)
     {
     }
 
-    /** @return array{view:string,dados:array<string,mixed>,status:int,cabecalhos?:list<string>} */
     public function login(): array
     {
         $auth = $this->ctx->auth;
@@ -61,7 +55,6 @@ final class GestaoLoginController
         return [];
     }
 
-    /** POST + CSRF (garantido por GestaoContexto::iniciar). Destroi a sessao no servidor. */
     public function logout(): void
     {
         $this->ctx->auth->logout();
@@ -69,16 +62,11 @@ final class GestaoLoginController
         GestaoHttp::redirecionar('/gestao/login.php');
     }
 
-    /** @param array<string,mixed> $sessao */
     private function destinoAposLogin(array $sessao): string
     {
         return $sessao['deve_trocar_senha'] ? GestaoContexto::CAMINHO_CONTA : GestaoContexto::paginaInicial((string) $sessao['perfil']);
     }
 
-    /**
-     * @param list<string> $cabecalhos
-     * @return array{view:string,dados:array<string,mixed>,status:int,cabecalhos:list<string>}
-     */
     private function formulario(int $status, ?string $erro, string $loginDigitado, array $cabecalhos = []): array
     {
         return [

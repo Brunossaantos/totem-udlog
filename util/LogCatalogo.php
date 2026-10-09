@@ -2,31 +2,6 @@
 
 namespace Util;
 
-/**
- * Catalogo FECHADO do log central (tb_log_sistema, migration 023). Quem registra
- * so escolhe uma CATEGORIA daqui: origem (aba), nivel, MENSAGEM e janela de
- * deduplicacao sao sempre os do catalogo, nunca do chamador. Nenhuma categoria
- * aceita texto livre: o contexto de cada uma e uma lista de chaves permitidas
- * (as genericas id_atendimento, id_totem, tipo, excecao, http e as de dominio
- * abaixo, cada qual com regra fechada).
- *
- * Campos de cada categoria:
- *  - origem:   'API'|'RECEBIMENTO'|'EXPEDICAO'|'CRON'|'GESTAO' ou 'por_tipo' (a
- *              aba sai do tipo do atendimento; sem atendimento nem tipo = API);
- *  - nivel:    'INFO'|'AVISO'|'ERRO';
- *  - mensagem: texto FIXO (ate 160 caracteres);
- *  - janela:   segundos do balde de deduplicacao;
- *  - contexto: chaves de contexto aceitas (qualquer outra descarta o evento);
- *  - interna:  (opcional) so a propria infraestrutura de log pode usar;
- *  - throttle_escrita: (opcional) evento que um anonimo dispara sem ids (401, recusa
- *              4xx): no web, no maximo 1 tentativa de escrita no banco por categoria
- *              por 60 s por servidor (ver Util\LogSistema).
- *
- * Eventos que um anonimo consegue disparar (token de totem invalido, 401) NAO
- * listam id_totem nem id_atendimento: uma linha por janela, sem cardinalidade
- * controlada por quem ataca. id_totem so entra em categorias chamadas DEPOIS de
- * o totem ter sido autenticado.
- */
 final class LogCatalogo
 {
     public const NIVEIS = ['INFO', 'AVISO', 'ERRO'];
@@ -35,10 +10,8 @@ final class LogCatalogo
 
     public const JANELA_PADRAO = 300;
 
-    /** Chaves genericas do contexto (regras fixas em Util\LogSistema). */
     public const CHAVES_GERAIS = ['id_atendimento', 'id_totem', 'tipo', 'excecao', 'http'];
 
-    /** Motivos de catalogo (valor de `motivo`). */
     public const MOTIVOS = [
         'https_obrigatorio', 'indisponivel', 'muitas_tentativas', 'nao_autorizado',
         'arquivo_muito_grande', 'corpo_invalido', 'dados_invalidos', 'pdf_invalido',
@@ -62,10 +35,6 @@ final class LogCatalogo
         'limpar_rate_limit_ocr', 'limpar_logs_gestao', 'recalcular_razao',
     ];
 
-    /**
-     * Regras das chaves de dominio: ['enum', lista] ou ['int', min, max].
-     * `alvo` e preenchida so internamente (nome de categoria do catalogo).
-     */
     public const DOMINIO = [
         'motivo' => ['enum', self::MOTIVOS],
         'categoria_erro' => ['enum', self::CATEGORIAS_ERRO_TALENT],
@@ -78,7 +47,6 @@ final class LogCatalogo
         'falhas' => ['int', 0, 99999],
     ];
 
-    /** Ordem fixa das chaves no `detalhe` (apos classe, sqlstate e http). */
     public const ORDEM_DOMINIO = ['alvo', 'job', 'motivo', 'categoria_erro', 'documento', 'logs_apagados', 'auditoria_apagados', 'lotes', 'itens', 'falhas'];
 
     public const CATEGORIAS = [
@@ -194,7 +162,6 @@ final class LogCatalogo
         ],
     ];
 
-    /** @return array<string,mixed>|null */
     public static function obter(string $categoria): ?array
     {
         return self::CATEGORIAS[$categoria] ?? null;

@@ -5,23 +5,6 @@ namespace Util;
 use PDO;
 use PDOException;
 
-/**
- * Conexao PDO dedicada e SEPARADA para o banco externo de gestao de coletas
- * (`udlogo59_db_gestao_coletas`), usado para consultar `tb_ordens_coleta`/
- * `tb_clientes` diretamente (demanda expedicao-consulta-ordem-coleta-teste,
- * 2026-09-11 — nunca existiu API REST real documentada para essa consulta,
- * uso direto ao banco autorizado explicitamente pelo usuario).
- *
- * NUNCA reaproveita Util\Conexao (conexao do banco do totem) — instancia
- * PDO propria, mesmo reaproveitando DB_HOST/DB_PORT/DB_USER/DB_PASS do
- * .env (mesmo servidor/credencial), so o nome do banco muda
- * (GESTAO_COLETAS_DB_NAME). Timeout de conexao curto e explicito
- * (PDO::ATTR_TIMEOUT), diferente da conexao do totem, para nao travar o
- * totem inteiro se o banco externo ficar indisponivel.
- *
- * Erros de conexao NUNCA vazam DSN/host/credencial para o chamador — so um
- * log tecnico via error_log() e uma excecao generica.
- */
 class ConexaoGestaoColetas
 {
     private static ?PDO $instancia = null;
@@ -51,7 +34,6 @@ class ConexaoGestaoColetas
                 ]);
                 self::$instancia->exec("SET time_zone = '-03:00'");
             } catch (PDOException $e) {
-                // Texto FIXO: getMessage() de PDOException pode conter host, usuario e porta.
                 error_log('ConexaoGestaoColetas: falha na conexao com o banco de ordens de coleta');
                 LogSistema::registrar('banco_coletas_indisponivel', ['excecao' => $e]);
                 throw new \RuntimeException('Nao foi possivel conectar ao banco de ordens de coleta');

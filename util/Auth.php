@@ -6,10 +6,6 @@ use PDO;
 
 class Auth
 {
-    /**
-     * Valida o token enviado pelo totem no header Authorization: Bearer <token>.
-     * Encerra a requisicao com 401 se invalido. Retorna a linha do totem autenticado.
-     */
     public static function validarTotem(PDO $pdo): array
     {
         $headers = getallheaders();

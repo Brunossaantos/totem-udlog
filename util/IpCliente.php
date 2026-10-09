@@ -2,28 +2,10 @@
 
 namespace Util;
 
-/**
- * IP real do cliente atras do Cloudflare (demanda gestao-totem, F0, 2026-10-06).
- *
- * Regra: o cabecalho `CF-Connecting-IP` (variavel `HTTP_CF_CONNECTING_IP`) SO e
- * considerado quando o `REMOTE_ADDR` (o par TCP real) pertence as faixas
- * publicadas do Cloudflare. Qualquer outro caso usa `REMOTE_ADDR`. O header
- * `X-Forwarded-For` NUNCA e lido: ele e controlado pelo cliente e nao tem
- * origem confiavel neste projeto.
- *
- * Faixas oficiais, lista embutida (constante) para nao depender de rede em
- * tempo de requisicao. Fonte: https://www.cloudflare.com/ips-v4 e
- * https://www.cloudflare.com/ips-v6, consultadas por GET em 2026-10-06.
- * REVISAR periodicamente (o Cloudflare avisa mudancas na mesma pagina): faixa
- * nova nao listada aqui faz o IP aparecer como o do proprio Cloudflare (todos os
- * visitantes dividem o mesmo contador de rate limit), nunca como um IP forjado.
- */
 final class IpCliente
 {
-    /** Data (AAAA-MM-DD) em que as faixas abaixo foram conferidas na fonte oficial. */
     public const FAIXAS_CLOUDFLARE_DATA = '2026-10-06';
 
-    /** @var list<string> */
     public const FAIXAS_CLOUDFLARE_V4 = [
         '173.245.48.0/20',
         '103.21.244.0/22',
@@ -42,7 +24,6 @@ final class IpCliente
         '131.0.72.0/22',
     ];
 
-    /** @var list<string> */
     public const FAIXAS_CLOUDFLARE_V6 = [
         '2400:cb00::/32',
         '2606:4700::/32',
@@ -53,12 +34,8 @@ final class IpCliente
         '2c0f:f248::/32',
     ];
 
-    /** IP devolvido quando nem o REMOTE_ADDR e um IP valido (todos dividem o mesmo balde). */
     public const IP_DESCONHECIDO = '0.0.0.0';
 
-    /**
-     * @param array<string,mixed> $server tipicamente $_SERVER
-     */
     public static function obter(array $server): string
     {
         $remoto = self::normalizar((string) ($server['REMOTE_ADDR'] ?? ''));
@@ -95,10 +72,6 @@ final class IpCliente
         return false;
     }
 
-    /**
-     * Valida e normaliza (IPv4-mapeado vira IPv4 puro, IPv6 em forma canonica
-     * minuscula). null = nao e um IP valido.
-     */
     public static function normalizar(string $ip): ?string
     {
         if ($ip === '' || strlen($ip) > 45) {
@@ -111,7 +84,6 @@ final class IpCliente
         if ($bin === false) {
             return null;
         }
-        // ::ffff:a.b.c.d (IPv4 mapeado em IPv6) -> a.b.c.d
         if (strlen($bin) === 16 && str_starts_with($bin, str_repeat("\x00", 10) . "\xff\xff")) {
             $bin = substr($bin, 12);
         }
@@ -120,7 +92,6 @@ final class IpCliente
         return $texto === false ? null : strtolower($texto);
     }
 
-    /** Representacao binaria (4 ou 16 bytes) para colunas VARBINARY(16). null se invalido. */
     public static function paraBinario(string $ip): ?string
     {
         $ip = self::normalizar($ip);
@@ -132,19 +103,11 @@ final class IpCliente
         return $bin === false ? null : $bin;
     }
 
-    /** sha256(ip + sal) em hex: chave de contadores sem guardar o IP em claro. */
     public static function hash(string $ip, string $sal): string
     {
         return hash('sha256', $ip . $sal);
     }
 
-    /**
-     * "Balde" de rate limit do IP: IPv4 = o proprio IP (inteiro); IPv6 = o
-     * prefixo /64 (um assinante recebe um /64 inteiro, entao rodar o endereco
-     * dentro dele nao pode zerar o contador). Valor de entrada invalido = o
-     * proprio texto recebido (nunca lanca). Usado so como CHAVE de contador; a
-     * auditoria grava o IP completo.
-     */
     public static function balde(string $ip): string
     {
         $normal = self::normalizar($ip);

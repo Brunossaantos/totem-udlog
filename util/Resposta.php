@@ -19,10 +19,6 @@ class Resposta
         exit;
     }
 
-    /**
-     * Erro com `dados` aditivos e SEM `codigo` (mantem o contrato de status
-     * e mensagem existente). Corpo: {sucesso:false, erro, dados}.
-     */
     public static function erroComDadosSemCodigo(string $mensagem, array $dados, int $codigoHttp): void
     {
         http_response_code($codigoHttp);
@@ -31,13 +27,6 @@ class Resposta
         exit;
     }
 
-    /**
-     * Erro com codigo estavel e dados estruturados (demanda
-     * hardening-revisao-notas-e-cliente, 2026-09-30) -- ADITIVO: `erro()`
-     * continua identico. Corpo: {sucesso:false, erro:<mensagem>,
-     * codigo:<codigo>, dados:<dados>}. Quem chama e responsavel por so
-     * passar dados sanitizados (inteiros, flags), nunca dado pessoal.
-     */
     public static function erroComDados(string $mensagem, string $codigo, array $dados, int $codigoHttp = 422): void
     {
         http_response_code($codigoHttp);

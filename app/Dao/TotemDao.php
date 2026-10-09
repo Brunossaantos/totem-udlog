@@ -15,12 +15,6 @@ class TotemDao
         return $stmt->fetch() ?: null;
     }
 
-    /**
-     * Usado por App\Controller\AtendimentoController::finalizar() para
-     * resolver tb_totem.id_empresa (cnpjArmazem do Talent) a partir do totem
-     * ja autenticado por Util\Auth::validarTotem() — nunca de entrada do
-     * frontend.
-     */
     public function buscarPorId(int $idTotem): ?array
     {
         $stmt = $this->pdo->prepare('SELECT * FROM tb_totem WHERE id_totem = :id AND ativo = 1');

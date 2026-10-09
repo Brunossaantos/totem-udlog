@@ -8,38 +8,14 @@ use Util\EtiquetaLayout;
 use Util\Resposta;
 use Util\TextoEtiqueta;
 
-/**
- * Endpoint ISOLADO de diagnostico (demanda impressao-etiqueta-teste,
- * 2026-09-11/2026-09-14) — gera uma etiqueta de TESTE em PDF real (FPDF) e
- * devolve os dados de conexao do servico local de impressao (mini PC
- * Windows, fora do escopo Hostgator). NUNCA instancia
- * AtendimentoRn/TalentRn/TalentClient/OrdemColetaClient, NUNCA consulta ou
- * altera tb_atendimento/status/etapa real — arquivo proprio, sem nenhuma
- * dependencia de fluxo de atendimento.
- *
- * Dimensao/orientacao/corte da etiqueta SEMPRE lidas de $_ENV (nunca
- * hardcoded no codigo), conforme decisao do usuario em 2026-09-14:
- * ETIQUETA_LARGURA_MM / ETIQUETA_COMPRIMENTO_MM / ETIQUETA_ORIENTACAO /
- * ETIQUETA_CORTE_APOS_IMPRESSAO.
- *
- * O conteudo do PDF gerado NUNCA contem dado pessoal (sem CPF/CNH/placa/
- * nome) — so o texto fixo de aviso "ETIQUETA DE TESTE - NAO UTILIZAR" e
- * metadados tecnicos de diagnostico (identificador, timestamp).
- */
 class ImpressaoTesteController
 {
-    /**
-     * Gera a etiqueta de teste (PDF real via FPDF) usando as dimensoes
-     * configuradas em .env e devolve em base64, junto com um identificador
-     * unico de idempotencia para esta geracao especifica.
-     */
     public function gerarEtiqueta(): void
     {
         $config = $this->lerConfiguracaoEtiqueta();
         $corpo = $this->lerCorpoJson();
         $config = $this->aplicarSobreposicao($config, $corpo);
 
-        // Destinatario (allowlist estrita): motorista (padrao) ou ajudante.
         $destinatario = 'motorista';
         if (array_key_exists('destinatario', $corpo) && $corpo['destinatario'] !== null && $corpo['destinatario'] !== '') {
             if (!is_string($corpo['destinatario']) || !in_array($corpo['destinatario'], ['motorista', 'ajudante'], true)) {
@@ -71,21 +47,12 @@ class ImpressaoTesteController
         ]);
     }
 
-    /**
-     * Devolve os valores atuais do .env (so leitura) para pre-preencher os
-     * controles da pagina de teste. Sem dado pessoal.
-     */
     public function configuracaoEtiqueta(): void
     {
         header('Cache-Control: no-store');
         Resposta::sucesso($this->lerConfiguracaoEtiqueta());
     }
 
-    /**
-     * Devolve a etiqueta pronta docs/50x80.pdf (caminho FIXO, nenhum nome de
-     * arquivo vem do request) em base64, para a pagina imprimir pelo mesmo
-     * POST /imprimir do servico local. Rota de diagnostico: exige o token do totem, le o caminho fixo docs/50x80.pdf (nao existe no deploy; 404 esperado) e deve ser avaliada para exclusao no deploy final.
-     */
     public function etiquetaPronta(): void
     {
         header('Cache-Control: no-store');
@@ -109,7 +76,6 @@ class ImpressaoTesteController
         ]);
     }
 
-    /** Corpo JSON opcional (somente objeto); qualquer outra coisa vira []. */
     private function lerCorpoJson(): array
     {
         $bruto = file_get_contents('php://input');
@@ -120,10 +86,6 @@ class ImpressaoTesteController
         return is_array($json) ? $json : [];
     }
 
-    /**
-     * Sobrepoe o .env SOMENTE nesta requisicao. Validacao estrita: numerico,
-     * 20-300 mm, orientacao em allowlist. Valor invalido => 422.
-     */
     private function aplicarSobreposicao(array $config, array $corpo): array
     {
         foreach (['largura_mm', 'comprimento_mm'] as $campo) {
@@ -146,7 +108,6 @@ class ImpressaoTesteController
         return $config;
     }
 
-    /** MediaBox real (mm) lido do PDF; null se nao for localizavel em texto claro. */
     private function extrairMediaBoxMm(string $pdf): ?array
     {
         if (!preg_match('/\/MediaBox\s*\[\s*([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s+([\d.\-]+)\s*\]/', $pdf, $m)) {
@@ -159,13 +120,6 @@ class ImpressaoTesteController
         ];
     }
 
-    /**
-     * Devolve URL/token do servico local de impressao (mini PC Windows) so
-     * depois de validar o token do totem — NUNCA exposto em arquivo JS
-     * estatico versionado. Rota separada da geracao do PDF para permitir
-     * que o front-end resolva a configuracao de conexao uma unica vez por
-     * sessao, independente de quantas etiquetas gerar.
-     */
     public function configuracaoServicoLocal(): void
     {
         header('Cache-Control: no-store');
@@ -181,11 +135,6 @@ class ImpressaoTesteController
         Resposta::sucesso($config);
     }
 
-    /**
-     * Le e valida a configuracao de etiqueta do .env. Fail-closed: qualquer
-     * valor ausente/invalido interrompe a requisicao com erro, nunca assume
-     * um default silencioso (mesmo padrao de VIO_AMBIENTE em outras rotas).
-     */
     private function lerConfiguracaoEtiqueta(): array
     {
         $largura = $_ENV['ETIQUETA_LARGURA_MM'] ?? '';
@@ -211,11 +160,6 @@ class ImpressaoTesteController
         ];
     }
 
-    /**
-     * Monta o PDF de teste com FPDF: pagina no tamanho exato configurado
-     * (largura x comprimento em mm), orientacao configurada, sem nenhum
-     * dado pessoal — so o aviso fixo e metadados tecnicos de diagnostico.
-     */
     private function montarPdf(array $config, string $identificador, string $destinatario = 'motorista'): string
     {
         $identificador = TextoEtiqueta::paraAscii($identificador);
@@ -226,9 +170,7 @@ class ImpressaoTesteController
         $pdf->SetMargins(2, 2, 2);
         $pdf->AddPage();
 
-        // Mesmo layout da etiqueta real (Util\EtiquetaLayout), texto de teste.
         if ($destinatario === 'ajudante') {
-            // Equivalente da etiqueta do ajudante: nome e nrRegAcesso ficticios.
             EtiquetaLayout::desenhar($pdf, [
                 ['texto' => 'AJUDANTE', 'estilo' => 'B', 'pt' => 22, 'max_linhas' => 1, 'espaco_antes_mm' => 0],
                 ['texto' => TextoEtiqueta::paraAscii('TESTE FICTICIO'), 'estilo' => '', 'pt' => 15, 'max_linhas' => 3, 'espaco_antes_mm' => 2],

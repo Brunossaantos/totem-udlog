@@ -4,12 +4,6 @@ namespace App\Dao;
 
 use PDO;
 
-/**
- * Contador de FALHAS de login por IP (tb_gestao_login_tentativa, migration 020).
- * Janela fixa; incremento atomico por INSERT ... ON DUPLICATE KEY UPDATE contra
- * a PK (ip_hash, janela), no mesmo padrao de RateLimitOcrDao. `ip_hash` e
- * sha256(ip + GESTAO_HASH_SALT): o IP em claro nunca e gravado.
- */
 class LoginTentativaGestaoDao
 {
     public function __construct(private PDO $pdo)
@@ -33,7 +27,6 @@ class LoginTentativaGestaoDao
         return (int) $stmt->fetchColumn();
     }
 
-    /** Limpeza em lote pequeno (chamada oportunista no login). */
     public function apagarAntigas(int $janelaMinima, int $limite = 200): int
     {
         $stmt = $this->pdo->prepare('DELETE FROM tb_gestao_login_tentativa WHERE janela < :minima LIMIT ' . max(1, $limite));

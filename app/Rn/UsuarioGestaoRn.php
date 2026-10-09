@@ -12,27 +12,8 @@ use Util\AuthGestao;
 use Util\LogSistema;
 use Util\SenhaPolitica;
 
-/**
- * Regras de negocio dos usuarios da Gestao Totem (demanda gestao-totem, F1).
- *
- * Toda mutacao: (1) valida a entrada, (2) roda numa transacao que TRAVA os admins
- * ativos (FOR UPDATE) e reconfere que o ator ainda e admin ativo, serializando
- * pedidos concorrentes (protecao do ultimo admin), (3) abre a linha de auditoria
- * PENDENTE dentro da mesma transacao (se nao der para auditar, a acao nao
- * acontece), (4) fecha a auditoria como OK depois do COMMIT. Recusas por regra
- * viram uma linha SEM_EFEITO. Falha tecnica vira log fixo (so a classe da
- * excecao, nunca getMessage) e uma linha ERRO.
- *
- * Senhas temporarias so existem no valor de retorno: nunca em log, auditoria ou
- * banco (so o hash). Parametros com senha/hash levam #[\SensitiveParameter], e
- * todo ponto que chama hash/senha ou obtem o lock de admins (GET_LOCK) esta num
- * try/catch(Throwable) que devolve `erro_interno` e loga SO o nome da classe da
- * excecao (nunca getMessage nem trace): uma excecao nunca carrega a senha para o
- * log ou para a resposta.
- */
 class UsuarioGestaoRn
 {
-    /** Formato do login (decisao do usuario: primeiro.segundo). UMA constante. */
     public const LOGIN_REGEX = '/\A[a-z]{2,30}\.[a-z]{2,30}\z/D';
 
     public const PERFIS = ['admin', 'usuario'];
@@ -52,13 +33,11 @@ class UsuarioGestaoRn
         $this->auditoria = new AuditoriaDao($pdo);
     }
 
-    /** @return list<array<string,mixed>> */
     public function listar(): array
     {
         return $this->usuarios->listar();
     }
 
-    /** @return array<string,mixed>|null sem o hash da senha */
     public function obter(int $idUsuario): ?array
     {
         $u = $this->usuarios->buscarPorId($idUsuario);
@@ -69,11 +48,8 @@ class UsuarioGestaoRn
         return $u;
     }
 
-    // ------------------------------------------------------------------ validacao
-
     public static function normalizarLogin(string $login): string
     {
-        // so espacos e tabs nas pontas (o trim padrao tambem remove NUL e quebras de linha)
         return strtolower(trim($login, " 	"));
     }
 
@@ -85,9 +61,6 @@ class UsuarioGestaoRn
         return is_string($colapsado) ? $colapsado : $nome;
     }
 
-    /**
-     * @return array<string,string> erros por campo (vazio = valido)
-     */
     public static function validarCampos(string $login, string $nome, string $perfil, bool $validarLogin = true): array
     {
         $erros = [];
@@ -104,11 +77,6 @@ class UsuarioGestaoRn
         return $erros;
     }
 
-    // ------------------------------------------------------------------ mutacoes (so admin)
-
-    /**
-     * @return array{ok:bool,codigo?:string,erros?:array<string,string>,id?:int,senha_temporaria?:string}
-     */
     public function criar(int $idAdmin, string $login, string $nome, string $perfil, ?string $ip = null): array
     {
         $login = self::normalizarLogin($login);
@@ -126,7 +94,6 @@ class UsuarioGestaoRn
         return $this->comLockAdmins(fn (): array => $this->criarSobLock($idAdmin, $login, $nome, $perfil, $ip, $temporaria, $hash));
     }
 
-    /** @return array<string,mixed> */
     private function criarSobLock(int $idAdmin, string $login, string $nome, string $perfil, ?string $ip, #[\SensitiveParameter] string $temporaria, #[\SensitiveParameter] string $hash): array
     {
         $idAuditoria = 0;
@@ -160,12 +127,6 @@ class UsuarioGestaoRn
         return ['ok' => true, 'id' => $idNovo, 'senha_temporaria' => $temporaria];
     }
 
-    /**
-     * Edita nome e perfil. Admin nao altera o PROPRIO perfil e o ultimo admin
-     * ativo nunca e rebaixado.
-     *
-     * @return array{ok:bool,codigo?:string,erros?:array<string,string>}
-     */
     public function editar(int $idAdmin, int $idAlvo, string $nome, string $perfil, ?string $ip = null): array
     {
         $nome = self::normalizarNome($nome);
@@ -177,7 +138,6 @@ class UsuarioGestaoRn
         return $this->comLockAdmins(fn (): array => $this->editarSobLock($idAdmin, $idAlvo, $nome, $perfil, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function editarSobLock(int $idAdmin, int $idAlvo, string $nome, string $perfil, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -233,18 +193,11 @@ class UsuarioGestaoRn
         return ['ok' => true];
     }
 
-    /**
-     * Ativa/desativa. Admin nao altera o proprio `ativo`; o ultimo admin ativo
-     * nunca e desativado; desativar revoga as sessoes do usuario.
-     *
-     * @return array{ok:bool,codigo?:string,sem_mudanca?:bool,sessoes_revogadas?:int}
-     */
     public function definirAtivo(int $idAdmin, int $idAlvo, bool $ativo, ?string $ip = null): array
     {
         return $this->comLockAdmins(fn (): array => $this->definirAtivoSobLock($idAdmin, $idAlvo, $ativo, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function definirAtivoSobLock(int $idAdmin, int $idAlvo, bool $ativo, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -303,18 +256,6 @@ class UsuarioGestaoRn
         return ['ok' => true, 'sessoes_revogadas' => $revogadas];
     }
 
-    /**
-     * Redefine a senha de OUTRO usuario (senha temporaria nova, exibida uma
-     * vez, troca obrigatoria no proximo acesso, sessoes revogadas, bloqueio por
-     * conta zerado). O admin troca a PROPRIA senha em "Minha conta".
-     *
-     * `$versaoEsperada` (B7): versao da senha (`senha_versao`) que o admin viu no
-     * formulario. Se mudou (outro envio ja redefiniu, F5 do POST), recusa com
-     * `senha_ja_redefinida` SEM gerar outra senha. null = sem conferencia (uso
-     * interno/testes); o controller sempre a envia.
-     *
-     * @return array{ok:bool,codigo?:string,senha_temporaria?:string,sessoes_revogadas?:int}
-     */
     public function redefinirSenha(int $idAdmin, int $idAlvo, ?string $ip = null, ?int $versaoEsperada = null): array
     {
         $credencial = $this->gerarCredencialTemporaria('redefinirSenha');
@@ -326,7 +267,6 @@ class UsuarioGestaoRn
         return $this->comLockAdmins(fn (): array => $this->redefinirSenhaSobLock($idAdmin, $idAlvo, $ip, $temporaria, $hash, $versaoEsperada));
     }
 
-    /** @return array<string,mixed> */
     private function redefinirSenhaSobLock(int $idAdmin, int $idAlvo, ?string $ip, #[\SensitiveParameter] string $temporaria, #[\SensitiveParameter] string $hash, ?int $versaoEsperada): array
     {
         $idAuditoria = 0;
@@ -378,21 +318,11 @@ class UsuarioGestaoRn
         return ['ok' => true, 'senha_temporaria' => $temporaria, 'sessoes_revogadas' => $revogadas];
     }
 
-    /**
-     * Desbloqueia a conta de um usuario bloqueado por tentativas de login (zera
-     * `bloqueado_ate` e `tentativas_falhas`; nao mexe em senha nem sessoes).
-     * SO admin ativo e NUNCA a propria conta (`proprio_desbloqueio`, SEM_EFEITO);
-     * mesma serializacao das demais acoes. Conta que ja nao tem
-     * bloqueio nem falhas devolve `sem_mudanca` (sem auditoria).
-     *
-     * @return array{ok:bool,codigo?:string,sem_mudanca?:bool}
-     */
     public function desbloquear(int $idAdmin, int $idAlvo, ?string $ip = null): array
     {
         return $this->comLockAdmins(fn (): array => $this->desbloquearSobLock($idAdmin, $idAlvo, $ip));
     }
 
-    /** @return array<string,mixed> */
     private function desbloquearSobLock(int $idAdmin, int $idAlvo, ?string $ip): array
     {
         $idAuditoria = 0;
@@ -433,20 +363,6 @@ class UsuarioGestaoRn
         return ['ok' => true];
     }
 
-    // ------------------------------------------------------------------ minha conta (qualquer perfil)
-
-    /**
-     * Troca a PROPRIA senha. Exige a senha atual (erro conta como falha de senha
-     * da conta), aplica a politica, revoga TODAS as sessoes do usuario (o
-     * controller cria a sessao nova) e limpa a troca obrigatoria.
-     *
-     * B6: com a conta BLOQUEADA (por tentativas de login) a senha atual NAO e
-     * nem verificada: sem isso um cookie roubado serviria para testar a senha
-     * atual sem limite durante o bloqueio. A tentativa vira recusa SEM_EFEITO na
-     * auditoria, nao conta falha nova e nao estende o bloqueio.
-     *
-     * @return array{ok:bool,codigo?:string,erros?:array<string,string>,bloqueada?:bool}
-     */
     public function trocarPropriaSenha(
         int $idUsuario,
         #[\SensitiveParameter] string $senhaAtual,
@@ -463,7 +379,6 @@ class UsuarioGestaoRn
         }
     }
 
-    /** @return array<string,mixed> */
     private function trocarPropriaSenhaInterno(
         int $idUsuario,
         #[\SensitiveParameter] string $senhaAtual,
@@ -532,15 +447,6 @@ class UsuarioGestaoRn
         return ['ok' => true];
     }
 
-    // ------------------------------------------------------------------ primeiro admin (CLI)
-
-    /**
-     * Cria o primeiro admin (usado so por tools/criar-admin.php). Sem senha
-     * temporaria: a pessoa digitou a propria senha, entao nao ha troca
-     * obrigatoria. Recusa se ja existe admin ativo, salvo $forcar.
-     *
-     * @return array{ok:bool,codigo?:string,erros?:array<string,string>,id?:int}
-     */
     public function criarAdminInicial(string $login, string $nome, #[\SensitiveParameter] string $senha, bool $forcar = false): array
     {
         $login = self::normalizarLogin($login);
@@ -564,7 +470,6 @@ class UsuarioGestaoRn
         return $this->comLockAdmins(fn (): array => $this->criarAdminInicialSobLock($login, $nome, $hash, $forcar));
     }
 
-    /** @return array<string,mixed> */
     private function criarAdminInicialSobLock(string $login, string $nome, #[\SensitiveParameter] string $hash, bool $forcar): array
     {
         $idAuditoria = 0;
@@ -596,19 +501,6 @@ class UsuarioGestaoRn
         return ['ok' => true, 'id' => $idNovo];
     }
 
-    // ------------------------------------------------------------------ internos
-
-    /**
-     * Serializa as mutacoes que mexem em admins com um lock NOMEADO do MySQL
-     * (GET_LOCK, o mesmo recurso ja usado em DocumentoController) tomado ANTES da
-     * transacao. Sem ele, dois admins agindo ao mesmo tempo sobre o indice
-     * (perfil, ativo) podiam gerar deadlock do InnoDB (a requisicao perdedora
-     * virava erro_interno). Dentro do lock a transacao ainda trava os admins com
-     * FOR UPDATE e reconfere o ator. Falha (Throwable) ou timeout ao obter o lock
-     * viram `erro_interno` com log so da classe da excecao (sem 500 cru).
-     *
-     * @return array<string,mixed>
-     */
     private function comLockAdmins(callable $fn): array
     {
         try {
@@ -630,12 +522,6 @@ class UsuarioGestaoRn
         }
     }
 
-    /**
-     * Senha temporaria (CSPRNG) + hash, ou null se a geracao falhou (log so com a
-     * classe da excecao; o hash e a temporaria nunca aparecem em log).
-     *
-     * @return array{0:string,1:string}|null [temporaria, hash]
-     */
     private function gerarCredencialTemporaria(string $operacao): ?array
     {
         try {
@@ -665,7 +551,6 @@ class UsuarioGestaoRn
         return isset($e->errorInfo[1]) && (int) $e->errorInfo[1] === 1062;
     }
 
-    /** @return array{ok:false,codigo:string} */
     private function semPermissao(string $acao, int $idAdmin, ?int $idAlvo, ?string $ip): array
     {
         $this->auditarRecusa($acao, $idAdmin, $idAlvo, [], $ip);
@@ -673,7 +558,6 @@ class UsuarioGestaoRn
         return ['ok' => false, 'codigo' => 'sem_permissao'];
     }
 
-    /** @param array<string,string|int> $detalhe */
     private function auditarRecusa(string $acao, int $idAdmin, ?int $idAlvo, array $detalhe, ?string $ip): void
     {
         try {
@@ -684,7 +568,6 @@ class UsuarioGestaoRn
         }
     }
 
-    /** @return array{ok:false,codigo:string} */
     private function falhaTecnica(string $operacao, Throwable $e, string $acao, int $idAtor, ?int $idAlvo, ?string $ip): array
     {
         error_log('UsuarioGestaoRn: ' . $operacao . '_falhou ' . get_class($e));

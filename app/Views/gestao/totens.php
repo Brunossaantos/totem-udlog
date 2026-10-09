@@ -1,15 +1,4 @@
 <?php
-/**
- * Lista de totens (só admin). Variáveis: $totens (list; cada linha: id_totem,
- * nome, empresa_nome, ativo, criado_em, criado_por_nome, criado_por_login, url
- * (completa, só admin), legado (bool: URL fora do padrão novo, ex. RECEPCAO-01),
- * url_versao, url_regerada_em, atualizado_em, atendimentos_recentes (int)),
- * $janela_atendimento_min (int). NUNCA há token do totem nestas variáveis.
- *
- * As ações são <form method=post> com CSRF e funcionam sem JS; o gestao.js só
- * intercepta os botões com data-confirmar para pedir confirmação num diálogo.
- * "Copiar URL": o gestao.js troca o link "Abrir URL" (sem JS) pelo botão que copia a URL da linha.
- */
 ?>
 <div class="gestao-barra-acoes" id="totens-acoes">
 <a class="gestao-botao gestao-botao--primario" id="btn-novo-totem" href="/gestao/totem-form.php"><?= gestaoIcone('mais') ?><span>Novo totem</span></a>

@@ -1,34 +1,5 @@
 'use strict';
 
-/**
- * Recebe um PDF ja pronto (gerado por FPDF no backend PHP) em base64 e
- * manda para a impressora fisica indicada pelo nome. Este servico NUNCA
- * gera conteudo de etiqueta e NUNCA aceita um caminho de arquivo vindo da
- * requisicao -- so o conteudo binario em base64 do corpo do POST.
- *
- * Corpo esperado (JSON):
- * {
- *   "pdf_base64": "<base64 do PDF, sem prefixo data:...>",
- *   "impressora": "<nome exato da impressora no Windows>",
- *   "identificador": "<id unico do job, gerado pelo backend PHP>"
- * }
- *
- * Seguranca/robustez desta rota (ver docs/handoffs da demanda
- * impressao-etiqueta-teste, resultado dos testes de 2026-09-14):
- *  - "impressora" e SEMPRE revalidada contra a allowlist
- *    config.impressorasPermitidas antes de imprimir -- mesmo que o
- *    front-end so ofereca impressoras permitidas, esta e a defesa em
- *    profundidade contra uma chamada direta a este endpoint;
- *  - so um job de impressao roda por vez neste servico (mutex em memoria)
- *    -- evita sobreposicao no mesmo dispositivo USB fisico;
- *  - o processo de impressao tem um timeout configuravel
- *    (config.timeoutMs); ao estourar, so o PID daquele job especifico e
- *    encerrado (nunca por nome de processo) e o identificador fica
- *    marcado como "indeterminado" -- protegido contra reprocessamento,
- *    mas sinalizado ao front-end como resultado desconhecido (nao
- *    "impresso"), para nunca informar sucesso sem certeza.
- */
-
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
@@ -39,22 +10,15 @@ const config = require('../config');
 const { autenticar } = require('../middleware/auth');
 const { decodificarEValidarPdfBase64 } = require('../lib/validarPdf');
 const { IdempotenciaStore } = require('../lib/idempotencia');
-// Modulos referenciados pelo objeto (nao desestruturados) para poderem ser
-// substituidos em teste sem imprimir.
 const imprimirModulo = require('../lib/imprimirComTimeout');
 const filaModulo = require('../lib/verificarFila');
 
 const router = express.Router();
 
-// Uma unica instancia em memoria para todo o processo -- e por isso que
-// TTL/maxEntries vem da config central, nao de valores soltos aqui.
 const idempotencia = new IdempotenciaStore(config.idempotencia.ttlMs, config.idempotencia.maxEntries);
 
 const IMPRESSORAS_PERMITIDAS = new Set(config.impressorasPermitidas);
 
-// Mutex simples de processo -- este servico roda como um unico processo
-// Node por dispositivo (mini PC), entao uma flag em memoria e suficiente
-// para garantir "um job de impressao por vez" na impressora USB fisica.
 let jobEmAndamento = false;
 
 const IDENTIFICADOR_MAX_TAMANHO = 128;
@@ -115,9 +79,6 @@ router.post('/imprimir', autenticar, express.json({ limit: '32mb' }), async (req
     return;
   }
 
-  // Defesa em profundidade: revalida a allowlist mesmo que o front-end so
-  // ofereca impressoras permitidas. Nunca lista as impressoras reais do
-  // driver nesta mensagem de erro.
   if (!IMPRESSORAS_PERMITIDAS.has(impressora)) {
     res.status(403).json({ erro: 'Impressora nao permitida.' });
     return;
@@ -135,9 +96,6 @@ router.post('/imprimir', autenticar, express.json({ limit: '32mb' }), async (req
   }
   jobEmAndamento = true;
 
-  // Nome de arquivo temporario sempre gerado internamente (uuid), nunca a
-  // partir de "identificador" ou "impressora" -- evita qualquer risco de
-  // path traversal vindo da requisicao.
   const nomeArquivoTemp = `impressao-local-udlog-${crypto.randomUUID()}.pdf`;
   const caminhoTemp = path.join(os.tmpdir(), nomeArquivoTemp);
 
@@ -145,10 +103,6 @@ router.post('/imprimir', autenticar, express.json({ limit: '32mb' }), async (req
     await fs.writeFile(caminhoTemp, resultadoPdf.buffer);
     await imprimirModulo.imprimirComTimeout(caminhoTemp, impressora, config.timeoutMs, { printSettings: config.printSettings });
 
-    // Deteccao de falta de papel (so driver/porta atuais): job que permanece
-    // na fila alem do limite = sem papel. Qualquer falha da verificacao
-    // mantem o comportamento anterior ("impresso"). O mutex segue preso
-    // durante a verificacao (limitada por semPapelTimeoutMs).
     if (config.deteccaoSemPapel) {
       const verificacao = await filaModulo.verificarFila({
         impressora,
@@ -157,7 +111,6 @@ router.post('/imprimir', autenticar, express.json({ limit: '32mb' }), async (req
         log: (msg) => console.warn(msg),
       });
       if (verificacao.resultado === 'sem_papel') {
-        // Nao memoriza na idempotencia: a nova tentativa vem com outro identificador.
         res.status(409).json({
           status: 'sem_papel',
           identificador,
@@ -187,8 +140,6 @@ router.post('/imprimir', autenticar, express.json({ limit: '32mb' }), async (req
   } finally {
     jobEmAndamento = false;
     fs.unlink(caminhoTemp).catch(() => {
-      // Melhor esforco -- arquivo temporario orfao nao e um problema de
-      // seguranca (sem dado alem do PDF ja impresso), so limpeza de disco.
     });
   }
 });

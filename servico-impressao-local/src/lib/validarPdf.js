@@ -1,25 +1,7 @@
 'use strict';
 
-/**
- * Decodifica e valida um PDF enviado em base64 pelo backend PHP.
- *
- * Regras de seguranca (nao negociaveis, ver docs/handoffs da demanda
- * impressao-etiqueta-teste):
- *  - so aceita conteudo em base64 no corpo da requisicao, NUNCA um
- *    caminho de arquivo -- este modulo nem sabe o que e um caminho, so
- *    trabalha com o Buffer decodificado;
- *  - o binario decodificado precisa comecar com os magic bytes "%PDF";
- *  - o tamanho do binario decodificado (nao do base64) precisa respeitar
- *    o limite configurado.
- */
-
 const MAGIC_BYTES_PDF = '%PDF';
 
-/**
- * @param {string} pdfBase64
- * @param {number} maxBytesDecodificado
- * @returns {{ ok: true, buffer: Buffer } | { ok: false, erro: string }}
- */
 function decodificarEValidarPdfBase64(pdfBase64, maxBytesDecodificado) {
   if (typeof pdfBase64 !== 'string' || pdfBase64.trim().length === 0) {
     return { ok: false, erro: 'Campo "pdf_base64" ausente ou vazio.' };

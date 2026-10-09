@@ -1,21 +1,9 @@
 'use strict';
 
-/**
- * Validacao e montagem dos argumentos do SumatraPDF. Sem dependencia de
- * config/disco, para ser testavel isoladamente. A string de `-print-settings`
- * vem SOMENTE de config.json (nunca de request).
- */
-
 const PRINT_SETTINGS_PADRAO = 'noscale,portrait,paper=totem';
 const PRINT_SETTINGS_TAMANHO_MAX = 100;
 const PRINT_SETTINGS_REGEX = /^[A-Za-z0-9,=._ -]*$/;
 
-/**
- * undefined/null -> padrao. '' -> '' (comportamento antigo, sem -print-settings).
- * Invalida -> lanca Error (fail-closed na inicializacao).
- * @param {unknown} valor
- * @returns {string}
- */
 function validarPrintSettings(valor) {
   if (valor === undefined || valor === null) {
     return PRINT_SETTINGS_PADRAO;
@@ -32,10 +20,6 @@ function validarPrintSettings(valor) {
   return valor;
 }
 
-/**
- * Argumentos do SumatraPDF. `-print-settings` vem antes do arquivo.
- * printSettings vazio = sem a opcao (comportamento antigo).
- */
 function montarArgumentosSumatra(caminhoPdf, impressora, printSettings) {
   const argumentos = ['-print-to', impressora];
   if (printSettings) {

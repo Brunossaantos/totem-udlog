@@ -1,27 +1,10 @@
 <?php
-/**
- * Cria o PRIMEIRO administrador da Gestao Totem (demanda gestao-totem, F1).
- * Nao existe rota web de cadastro inicial: este e o unico caminho.
- *
- * Somente linha de comando, em terminal interativo:
- *   php tools/criar-admin.php [--login=primeiro.segundo] [--nome="Nome Completo"] [--forcar]
- *
- * A SENHA e pedida por prompt SEM eco (duas vezes). Nunca por argumento, nunca
- * por variavel de ambiente nem pelo .env. Sem terminal interativo o script
- * recusa (nao le a senha de pipe/arquivo). O script nunca imprime a senha nem o
- * hash. Recusa se ja existir admin ativo, salvo --forcar. A criacao e auditada
- * (USUARIO_CRIAR, origem=cli).
- *
- * Saida: 0 = criado; 1 = recusado/invalido; 2 = ambiente (sem terminal, banco).
- */
 
 if (PHP_SAPI !== 'cli') {
     http_response_code(404);
     exit(1);
 }
 
-// M1: stack trace nunca leva argumentos (a senha digitada passa por este processo) e
-// qualquer excecao nao tratada vira UMA linha so com a classe, sem mensagem nem trace.
 ini_set('zend.exception_ignore_args', '1');
 set_exception_handler(static function (Throwable $e): void {
     fwrite(STDERR, 'Falha inesperada (' . get_class($e) . '). Nada foi criado.' . PHP_EOL);
@@ -34,14 +17,12 @@ use App\Rn\UsuarioGestaoRn;
 use Util\Bootstrap;
 use Util\SenhaPolitica;
 
-/** Imprime em STDERR e encerra. */
 function falhar(string $mensagem, int $codigo): void
 {
     fwrite(STDERR, $mensagem . PHP_EOL);
     exit($codigo);
 }
 
-/** Le uma linha (com eco) do terminal. */
 function perguntar(string $rotulo): string
 {
     fwrite(STDOUT, $rotulo);
@@ -50,10 +31,6 @@ function perguntar(string $rotulo): string
     return $linha === false ? '' : rtrim($linha, "\r\n");
 }
 
-/**
- * Le a senha SEM eco. Linux/macOS: stty -echo (restaurado sempre). Windows:
- * Read-Host -AsSecureString no PowerShell com o console herdado.
- */
 function perguntarSenha(string $rotulo): string
 {
     fwrite(STDOUT, $rotulo);
@@ -93,7 +70,6 @@ foreach (array_slice($argv, 1) as $arg) {
     } elseif (str_starts_with($arg, '--nome=')) {
         $nome = substr($arg, 7);
     } else {
-        // qualquer outro argumento (incluindo tentativa de passar a senha) e recusado
         falhar('Argumento nao reconhecido. Uso: php tools/criar-admin.php [--login=primeiro.segundo] [--nome="Nome"] [--forcar]', 1);
     }
 }

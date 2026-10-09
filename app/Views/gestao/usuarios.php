@@ -1,13 +1,4 @@
 <?php
-/**
- * Lista de usuários (só admin). Variáveis: $usuarios (list de id_usuario, login,
- * nome, perfil, ativo, deve_trocar_senha, senha_versao, bloqueado_ate (so se o
- * bloqueio ainda vale, senao null), ultimo_login_em, criado_em, eh_proprio),
- * $id_usuario_logado (int).
- *
- * As ações são <form method=post> com CSRF e funcionam sem JS; o gestao.js só
- * intercepta os botões com data-confirmar para pedir confirmação num diálogo.
- */
 ?>
 <div class="gestao-barra-acoes" id="usuarios-acoes">
 <a class="gestao-botao gestao-botao--primario" id="btn-novo-usuario" href="/gestao/usuario-form.php"><?= gestaoIcone('mais') ?><span>Novo usuário</span></a>

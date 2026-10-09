@@ -1,18 +1,5 @@
 'use strict';
 
-/**
- * Lista as impressoras instaladas no Windows via PowerShell com saida JSON.
- *
- * Motivo: o getPrinters() do pdf-to-printer le saida de texto formatado do
- * PowerShell e quebra (TypeError em ".match") quando uma impressora tem a
- * lista de papeis longa (linhas de continuacao sem ":"), derrubando a
- * listagem inteira. Aqui a saida e JSON, sem dependencia de formatacao.
- *
- * Seguranca: o script e CONSTANTE; nada vindo de requisicao/config e
- * concatenado. execFile sem shell. Timeout de 10 s com kill pelo PID do
- * proprio processo (taskkill /PID /T /F, nunca por nome).
- */
-
 const { execFile } = require('child_process');
 
 const SCRIPT_LISTAR_IMPRESSORAS = [
@@ -63,7 +50,6 @@ function executar(execFileImpl, timeoutMs) {
   });
 }
 
-/** Converte a saida JSON (objeto, array ou vazio) em [{ name, isDefault }]. */
 function parsearSaida(texto) {
   const limpo = String(texto || '').replace(/^﻿/, '').trim();
   if (!limpo) {
@@ -84,10 +70,6 @@ function parsearSaida(texto) {
   });
 }
 
-/**
- * @param {{execFileImpl?: Function, timeoutMs?: number}} [opcoes] so para teste
- * @returns {Promise<Array<{name: string, isDefault: boolean}>>}
- */
 async function listarImpressoras(opcoes = {}) {
   const { execFileImpl = execFile, timeoutMs = TIMEOUT_MS } = opcoes;
   const saida = await executar(execFileImpl, timeoutMs);

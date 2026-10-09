@@ -1,16 +1,4 @@
 <?php
-/**
- * URL do totem (só admin; destino do PRG depois de criar e de regerar, e também
- * abre pelo botão "Copiar URL" da lista). Variáveis: $totem (id_totem, nome,
- * empresa_nome, ativo, url (completa), legado, criado_em, url_regerada_em). NUNCA
- * há token do totem.
- *
- * A nota "O endereço anterior deixou de funcionar" aparece sempre que a URL já foi regerada
- * (url_regerada_em preenchido, com a data): permanente e neutra (informação, sem caixa de alerta),
- * vale em qualquer abertura da tela.
- * O flash de ação (msg=url_regerada / totem_criado) só aparece após o PRG, via GestaoContexto::flash().
- * O botão "Copiar URL" (id btn-copiar-url) é criado pelo gestao.js a partir dos data-copiar-*.
- */
 $ativo = (int) $totem['ativo'] === 1;
 $regerada = ($totem['url_regerada_em'] ?? null) !== null;
 ?>

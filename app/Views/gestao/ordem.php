@@ -1,16 +1,4 @@
 <?php
-/**
- * Detalhe de uma ordem de coleta (perfis usuario e admin). Variáveis (GestaoOrdemController::detalhe):
- * $erroCarga (bool; true = só $urlVoltar e o aviso de erro), $urlVoltar (lista com os filtros já
- * validados), $ordem (id, numero, razao_social, cnpj, transportadora_nome, transportadora_cnpj,
- * placa_prevista, motorista_nome_previsto, cnh_prevista, status, criado_em, inativada_em, tem_pdf,
- * mesmo_numero_outros_clientes), $situacaoSlug (ativa|inativa), $situacaoRotulo, $idadeTexto,
- * $idadeAtencao (bool), $cnpjCliente, $cnpjTransportadora (já formatados), $confirmacao (null ou
- * acao, n, texto: segundo passo de inativar/ativar), $pdf (disponivel|ausente|apagado), $pdfTexto,
- * $pdfAviso, $retorno (query validada que volta nos formulários), $diasRetencaoPdf,
- * $clienteInativo (bool; tb_clientes.status = INATIVO) e $avisoClienteInativo (texto fixo).
- * Sem máscara (decisão do usuário): nome, CNH e placa em claro. Sem script nem style inline.
- */
 ?>
 <?php if ($erroCarga): ?>
 <div class="gestao-estado gestao-estado--erro" id="ordens-erro-carga" role="alert"><?= gestaoIcone('alerta') ?><span>Não foi possível consultar as ordens de coleta agora. Tente novamente em instantes.</span></div>

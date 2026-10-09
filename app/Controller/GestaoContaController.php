@@ -5,11 +5,6 @@ namespace App\Controller;
 use App\Rn\UsuarioGestaoRn;
 use Util\GestaoHttp;
 
-/**
- * "Minha conta" (todos os perfis): ver o proprio perfil e trocar a propria
- * senha (demanda gestao-totem, F1). A troca de senha revoga todas as sessoes do
- * usuario e abre uma sessao NOVA (id novo, CSRF novo) na mesma resposta.
- */
 final class GestaoContaController
 {
     private UsuarioGestaoRn $rn;
@@ -19,7 +14,6 @@ final class GestaoContaController
         $this->rn = new UsuarioGestaoRn($ctx->pdo);
     }
 
-    /** @return array{view:string,dados:array<string,mixed>,status:int} */
     public function tratar(): array
     {
         if ($this->ctx->auth->metodoSeguro()) {
@@ -60,10 +54,6 @@ final class GestaoContaController
         return $this->pagina(500, ['geral' => 'Não foi possível trocar a senha. Nada foi alterado. Tente novamente.']);
     }
 
-    /**
-     * @param array<string,string> $erros
-     * @return array{view:string,dados:array<string,mixed>,status:int}
-     */
     private function pagina(int $status, array $erros): array
     {
         $usuario = $this->rn->obter($this->ctx->idUsuario()) ?? [];
@@ -71,7 +61,6 @@ final class GestaoContaController
         return [
             'view' => 'conta',
             'status' => $status,
-            // so o texto do topo (#gestao-titulo): deixa claro que a troca e obrigatoria
             'titulo' => (bool) ($this->ctx->sessao['deve_trocar_senha'] ?? false) ? 'Troca de senha obrigatória' : 'Minha conta',
             'dados' => [
                 'usuario' => [

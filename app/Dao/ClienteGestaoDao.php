@@ -4,15 +4,8 @@ namespace App\Dao;
 
 use PDO;
 
-/**
- * Acesso a tb_cliente (banco do TOTEM) para o cadastro da Gestao Totem (F6).
- * Separado de ClienteDao (leitura do OCR e do autocomplete): este faz CRUD.
- * Tudo com prepared statements; filtros de lista com `%`, `_` e `|` escapados
- * (ESCAPE '|'). Nunca escreve em tb_atendimento nem em tb_atendimento_nota.
- */
 class ClienteGestaoDao
 {
-    /** Prefixo do lock nomeado (o nome real inclui MD5(DATABASE()): um lock por banco). */
     private const LOCK_CLIENTES = 'totem_gestao_clientes_';
 
     public const POR_PAGINA = 25;
@@ -23,16 +16,11 @@ class ClienteGestaoDao
     {
     }
 
-    /** Escapa o texto para LIKE com ESCAPE '|'. */
     public static function escaparLike(string $texto): string
     {
         return str_replace(['|', '%', '_'], ['||', '|%', '|_'], $texto);
     }
 
-    /**
-     * @param array{situacao:string,q:string} $filtros situacao na whitelist; q ja validado ('' = sem busca)
-     * @return array{0:string,1:array<string,string>} [where, binds]
-     */
     private function filtro(array $filtros): array
     {
         $partes = [];
@@ -57,7 +45,6 @@ class ClienteGestaoDao
         return [$partes === [] ? '' : ' WHERE ' . implode(' AND ', $partes), $binds];
     }
 
-    /** @param array{situacao:string,q:string} $filtros */
     public function contar(array $filtros): int
     {
         [$where, $binds] = $this->filtro($filtros);
@@ -67,12 +54,6 @@ class ClienteGestaoDao
         return (int) $stmt->fetchColumn();
     }
 
-    /**
-     * Ordenacao fixa: nome ASC (desempate pelo id).
-     *
-     * @param array{situacao:string,q:string} $filtros
-     * @return list<array<string,mixed>>
-     */
     public function listar(array $filtros, int $pagina): array
     {
         [$where, $binds] = $this->filtro($filtros);
@@ -89,7 +70,6 @@ class ClienteGestaoDao
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** @return array<string,mixed>|null */
     public function buscarPorId(int $idCliente, bool $paraAtualizar = false): ?array
     {
         $stmt = $this->pdo->prepare(
@@ -100,13 +80,6 @@ class ClienteGestaoDao
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    /**
-     * Clientes ATIVOS com razao normalizada nao vazia, no formato de ClienteDao::listarParaFuzzy
-     * (mais `nome`, so para a tela de confirmacao de ambiguidade). `$limite` corta a leitura:
-     * quem chama pede (maximo + 1) e pula a simulacao se vier acima do maximo.
-     *
-     * @return list<array{id_cliente:int,nome:string,razao_social:string}>
-     */
     public function listarAtivosParaSimulacao(int $limite): array
     {
         $stmt = $this->pdo->prepare(
@@ -128,7 +101,6 @@ class ClienteGestaoDao
         return $stmt->fetchColumn() !== false;
     }
 
-    /** Outro cliente (qualquer situacao) com a MESMA razao normalizada? `$exceto` = id ignorado (edicao). */
     public function existeRazaoNormalizada(string $razao, ?int $exceto): bool
     {
         $stmt = $this->pdo->prepare('SELECT 1 FROM tb_cliente WHERE razao_social_normalizada = :razao AND id_cliente <> :exceto LIMIT 1 FOR UPDATE');
@@ -139,7 +111,6 @@ class ClienteGestaoDao
         return $stmt->fetchColumn() !== false;
     }
 
-    /** Pode lancar PDOException 1062 (CNPJ repetido): quem chama decide. */
     public function inserir(string $nome, string $razaoNormalizada, string $cnpj, bool $ativo): int
     {
         $stmt = $this->pdo->prepare('INSERT INTO tb_cliente (nome, razao_social_normalizada, cnpj, ativo) VALUES (:nome, :razao, :cnpj, :ativo)');
@@ -152,7 +123,6 @@ class ClienteGestaoDao
         return (int) $this->pdo->lastInsertId();
     }
 
-    /** O CNPJ nunca e alterado. */
     public function atualizarNome(int $idCliente, string $nome, string $razaoNormalizada): void
     {
         $stmt = $this->pdo->prepare('UPDATE tb_cliente SET nome = :nome, razao_social_normalizada = :razao WHERE id_cliente = :id');
@@ -170,7 +140,6 @@ class ClienteGestaoDao
         $stmt->execute();
     }
 
-    /** Exclusao FISICA. @return int linhas apagadas (0 = ja nao existia) */
     public function excluir(int $idCliente): int
     {
         $stmt = $this->pdo->prepare('DELETE FROM tb_cliente WHERE id_cliente = :id');
@@ -180,12 +149,6 @@ class ClienteGestaoDao
         return $stmt->rowCount();
     }
 
-    /**
-     * Atendimentos EM ANDAMENTO que dependem do cliente: `cliente_cnpj` igual ao CNPJ
-     * OU alguma nota do atendimento com `cnpj_emitente` igual ao CNPJ. Os dois formatos
-     * conhecidos (so digitos e mascarado) sao comparados sem funcao na coluna. So conta
-     * (nenhum dado pessoal sai daqui).
-     */
     public function contarAtendimentosEmAndamento(string $cnpj): int
     {
         if (preg_match('/\A\d{14}\z/D', $cnpj) !== 1) {
@@ -203,7 +166,6 @@ class ClienteGestaoDao
         return (int) $stmt->fetchColumn();
     }
 
-    /** Lock nomeado (por banco) que serializa as mutacoes de clientes. @return bool true se obteve */
     public function obterLock(int $segundos): bool
     {
         $stmt = $this->pdo->prepare('SELECT GET_LOCK(CONCAT(:nome, MD5(DATABASE())), :segundos)');

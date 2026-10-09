@@ -10,33 +10,10 @@ use Util\LogSistema;
 use Util\Resposta;
 use Util\TextoEtiqueta;
 
-/**
- * Endpoint de impressao REAL (demanda talent-doctos-finalizacao-checkin,
- * 2026-09-14) — separado e ISOLADO de App\Controller\ImpressaoTesteController
- * (nunca reaproveitado por ele, nem o contrario). Gera a etiqueta final com
- * nome do motorista + nrRegAcesso (persistido como tb_atendimento.talent_senha)
- * — SO LE dados ja persistidos, NUNCA dispara/redispara chamada ao Talent
- * (achado do security-especialista no planejamento: risco de caminho
- * paralelo de envio).
- *
- * Entrada aceita SOMENTE id_atendimento (+ flag de reimpressao) — nome do
- * motorista e nrRegAcesso SEMPRE lidos do banco via buscarAtendimentoDoTotem
- * (mesmo padrao de posse/tipo/status/etapa de
- * App\Controller\AtendimentoController::finalizar()), NUNCA aceitos do corpo
- * da requisicao (evita forjar senha impressa).
- *
- * NUNCA inclui CPF/CNH na etiqueta — so nome do motorista + nrRegAcesso. O
- * rotulo de UI ("Numero de acesso" vs. outro texto) e responsabilidade do
- * front-end — este controller so devolve o dado bruto.
- */
 class ImpressaoAtendimentoController
 {
     public function __construct(private AtendimentoDao $atendimentoDao) {}
 
-    /**
-     * Flag de reimpressao (so para log): aceita `reimpressao` na query OU no
-     * corpo JSON, com valor verdadeiro `1`, `true` ou `'1'`.
-     */
     public static function flagReimpressao(array $query, array $entrada): bool
     {
         foreach ([$query['reimpressao'] ?? null, $entrada['reimpressao'] ?? null] as $valor) {
@@ -48,19 +25,6 @@ class ImpressaoAtendimentoController
         return false;
     }
 
-    /**
-     * Devolve URL/token do servico local de impressao (mini PC Windows) para
-     * o fluxo REAL de impressao — equivalente de producao da rota exclusiva
-     * de diagnostico App\Controller\ImpressaoTesteController::configuracaoServicoLocal()
-     * (impressao-teste.php), criada originalmente so para a tela de
-     * diagnostico e ate 2026-09-15 reaproveitada indevidamente pelo front-end
-     * de producao (achado do planejamento impressao-arquitetura-producao-ux).
-     *
-     * NAO recebe id_atendimento nem nenhum parametro: e configuracao de
-     * totem/ambiente, nao de atendimento especifico. Autenticacao
-     * (Util\Auth::validarTotem) ja e a primeira linha executada em
-     * public/api/impressao.php, antes de qualquer chamada a este metodo.
-     */
     public function configuracaoServicoLocal(): void
     {
         header('Cache-Control: no-store');
@@ -77,12 +41,6 @@ class ImpressaoAtendimentoController
         Resposta::sucesso($config);
     }
 
-    /**
-     * Reimpressao manual (nunca automatica) sempre gera um NOVO
-     * `identificador` de job — cada chamada e logicamente um novo job de
-     * impressao, mas sempre do MESMO nrRegAcesso ja persistido (nunca gera
-     * um novo check-in, nunca chama o Talent).
-     */
     public function gerarEtiqueta(array $entrada, int $idTotem, bool $reimpressao): void
     {
         $idAtendimento = (int) ($entrada['id_atendimento'] ?? 0);
@@ -91,7 +49,6 @@ class ImpressaoAtendimentoController
             return;
         }
 
-        // Destinatario da etiqueta (allowlist): motorista (padrao) ou ajudante.
         $destinatario = 'motorista';
         if (array_key_exists('destinatario', $entrada) && $entrada['destinatario'] !== null && $entrada['destinatario'] !== '') {
             $destinatario = $entrada['destinatario'];
@@ -119,8 +76,6 @@ class ImpressaoAtendimentoController
             return;
         }
 
-        // Ajudante (opcional): so o NOME, nunca o CPF. Lido do mesmo registro
-        // ja carregado (SELECT * por id, prepared statement no DAO).
         $nomeAjudante = '';
         if ((int) ($atendimento['possui_ajudante'] ?? 0) === 1) {
             $nomeAjudante = $this->sanitizarNomeAjudante($atendimento['ajudante_nome'] ?? '');
@@ -133,9 +88,6 @@ class ImpressaoAtendimentoController
 
         $config = $this->lerConfiguracaoEtiqueta($idAtendimento, $idTotem, (string) $atendimento['tipo']);
 
-        // Identificador SEMPRE novo — nunca reaproveita um job de impressao
-        // anterior, mesmo em reimpressao (cada chamada e um novo job,
-        // sempre do mesmo nrRegAcesso ja persistido).
         $identificador = bin2hex(random_bytes(16));
 
         try {
@@ -147,9 +99,6 @@ class ImpressaoAtendimentoController
             return;
         }
 
-        // Auditoria simples (log estruturado) — id_atendimento, timestamp,
-        // se e reimpressao. Sem dado pessoal alem do proprio id_atendimento
-        // (ja e um identificador interno, nao dado pessoal em si).
         error_log(sprintf(
             'impressao gerar-etiqueta: id_atendimento=%d destinatario=%s reimpressao=%s timestamp=%s',
             $idAtendimento,
@@ -168,19 +117,12 @@ class ImpressaoAtendimentoController
             'destinatario' => $destinatario,
         ];
         if ($destinatario === 'motorista') {
-            // Aditivo: ha uma segunda etiqueta (ajudante) para imprimir.
             $resposta['tem_etiqueta_ajudante'] = $nomeAjudante !== '';
         }
 
         Resposta::sucesso($resposta);
     }
 
-    /**
-     * Mesmo padrao de posse (IDOR) ja usado em
-     * App\Controller\AtendimentoController::buscarAtendimentoDoTotem —
-     * mensagem generica em qualquer caso de falha, nao revela existencia de
-     * atendimento alheio.
-     */
     private function buscarAtendimentoDoTotem(int $idAtendimento, int $idTotem): array
     {
         $atendimento = $this->atendimentoDao->buscarPorId($idAtendimento);
@@ -191,14 +133,6 @@ class ImpressaoAtendimentoController
         return $atendimento;
     }
 
-    /**
-     * Le e valida a configuracao de etiqueta do .env — mesmas 4 variaveis
-     * ja usadas por App\Controller\ImpressaoTesteController (ETIQUETA_*),
-     * fail-closed (nunca assume default silencioso). Duplicado
-     * deliberadamente aqui (em vez de reaproveitar ImpressaoTesteController
-     * diretamente, que e isolado por design) — leitura de config e simples
-     * o bastante para nao justificar acoplamento entre os dois controllers.
-     */
     private function lerConfiguracaoEtiqueta(int $idAtendimento, int $idTotem, string $tipo): array
     {
         $largura = $_ENV['ETIQUETA_LARGURA_MM'] ?? '';
@@ -225,29 +159,16 @@ class ImpressaoAtendimentoController
         ];
     }
 
-    /**
-     * Monta o PDF final: so nome do motorista + nrRegAcesso, SEM rotulo fixo
-     * de "senha"/"numero de acesso" hardcoded (texto de UI e decisao do
-     * front-end para a TELA; aqui usamos um rotulo tecnico neutro so para
-     * legibilidade da etiqueta impressa em si). NUNCA CPF/CNH/placa.
-     */
-    /**
-     * Nome do ajudante para a fonte core do FPDF: transliterado para ASCII
-     * (Util\TextoEtiqueta::paraAscii: sem acentos, sem controles, espacos
-     * normalizados) e limitado a 150 caracteres (tamanho da coluna). Vazio => sem bloco de ajudante.
-     */
     private function sanitizarNomeAjudante(mixed $nome): string
     {
         if (!is_string($nome)) {
             return '';
         }
-        // ASCII puro (sem acentos), sem controles, espacos normalizados, 150 chars.
         return TextoEtiqueta::paraAscii($nome, 150);
     }
 
     private function montarPdf(array $config, string $nomeMotorista, string $nrRegAcesso, string $nomeAjudante = '', string $destinatario = 'motorista'): string
     {
-        // Todo texto variavel impresso passa por paraAscii (idempotente).
         $nomeMotorista = TextoEtiqueta::paraAscii($nomeMotorista);
         $nrRegAcesso = TextoEtiqueta::paraAscii($nrRegAcesso);
         $nomeAjudante = TextoEtiqueta::paraAscii($nomeAjudante, 150);
@@ -259,11 +180,7 @@ class ImpressaoAtendimentoController
         $pdf->SetMargins(2, 2, 2);
         $pdf->AddPage();
 
-        // Layout (topo, fontes grandes, ajuste automatico a largura/altura da
-        // pagina) centralizado em Util\EtiquetaLayout — so conteudo muda aqui.
         if ($destinatario === 'ajudante') {
-            // Etiqueta do ajudante (papel separado): "AJUDANTE" no lugar de
-            // "UDLOG", nome, mesmo nrRegAcesso do motorista e "Gerado em".
             EtiquetaLayout::desenhar($pdf, [
                 ['texto' => 'AJUDANTE', 'estilo' => 'B', 'pt' => 22, 'max_linhas' => 1, 'espaco_antes_mm' => 0],
                 ['texto' => $nomeAjudante, 'estilo' => '', 'pt' => 15, 'max_linhas' => 3, 'espaco_antes_mm' => 2],
@@ -273,8 +190,6 @@ class ImpressaoAtendimentoController
             return $pdf->Output('S');
         }
 
-        // Etiqueta do MOTORISTA: nunca desenha o nome do ajudante (ele tem
-        // etiqueta propria; $nomeAjudante e ignorado aqui).
         EtiquetaLayout::desenhar($pdf, [
             ['texto' => 'UDLOG', 'estilo' => 'B', 'pt' => 22, 'max_linhas' => 1, 'espaco_antes_mm' => 0],
             ['texto' => $nomeMotorista, 'estilo' => '', 'pt' => 15, 'max_linhas' => 3, 'espaco_antes_mm' => 2],

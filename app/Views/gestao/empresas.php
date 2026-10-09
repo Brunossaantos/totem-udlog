@@ -1,13 +1,4 @@
 <?php
-/**
- * Lista de empresas (tb_empresa do totem; só admin; são poucas, sem paginação). Variáveis:
- * $empresas (list; cada linha: id_empresa, nome, cnpj (só dígitos; exibido formatado), ativo,
- * criado_em, totens_ativos, totens_total), $confirmacao (null ou acao, id_empresa, nome, texto,
- * rotulo, totens_ativos: segundo passo de inativar/excluir).
- *
- * As ações são <form method=post> com CSRF e funcionam sem JS. A confirmação em dois passos é
- * do servidor (não usa data-confirmar). Sem script nem style inline.
- */
 ?>
 <div class="gestao-barra-acoes" id="empresas-acoes">
 <a class="gestao-botao gestao-botao--primario" id="btn-nova-empresa" href="/gestao/empresa-form.php"><?= gestaoIcone('mais') ?><span>Nova empresa</span></a>

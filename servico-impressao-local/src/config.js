@@ -1,15 +1,5 @@
 'use strict';
 
-/**
- * Config centralizada do servico-impressao-local. NENHUM outro arquivo do
- * projeto deve ler process.env ou o arquivo de config diretamente --
- * tudo passa por aqui, e tudo falha alto (fail-closed) se algo essencial
- * de seguranca estiver ausente ou invalido. Nada de numero magico
- * espalhado pelo resto do codigo: quem precisar de porta, token, limite
- * de tamanho, origens permitidas ou parametros de idempotencia importa
- * este modulo.
- */
-
 const fs = require('fs');
 const path = require('path');
 const { validarPrintSettings } = require('./lib/printSettings');
@@ -150,8 +140,6 @@ function construirConfig() {
     deteccaoSemPapel: validarDeteccaoSemPapel(bruto.deteccaoSemPapel),
     semPapelTimeoutMs: validarSemPapelTimeoutMs(bruto.semPapelTimeoutMs),
     idempotencia: Object.freeze(validarIdempotencia(bruto.idempotencia)),
-    // Bind sempre exclusivo em loopback -- nunca configuravel para 0.0.0.0,
-    // de proposito (requisito de seguranca fixo, nao uma opcao de config).
     host: '127.0.0.1',
     caminhoArquivo: CAMINHO_CONFIG,
   });
