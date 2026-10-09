@@ -34,7 +34,7 @@ class LogSistemaDao
 
     public const ORDENS = ['ultima_ocorrencia', 'criado_em', 'contador', 'nivel', 'categoria', 'id_log'];
 
-    public const FILTROS = ['origem', 'nivel', 'categoria', 'id_totem', 'id_atendimento', 'de', 'ate'];
+    public const FILTROS = ['origem', 'nivel', 'categoria', 'id_totem', 'sem_totem', 'id_atendimento', 'de', 'ate'];
 
     public const POR_PAGINA_MAXIMO = 200;
 
@@ -210,6 +210,45 @@ class LogSistemaDao
     }
 
     /**
+     * Um registro por PK, para a pagina de detalhe, com SO nome e empresa do totem
+     * (nunca `codigo` nem `token_api`). Null se nao existe (ex.: apagado pela retencao).
+     *
+     * @return array<string,mixed>|null
+     */
+    public function buscarPorId(int $idLog): ?array
+    {
+        if ($idLog < 1) {
+            throw new InvalidArgumentException('id de log invalido');
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT l.id_log, l.nivel, l.origem, l.categoria, l.mensagem, l.id_atendimento, l.id_totem, l.detalhe,
+                    l.contador, l.criado_em, l.ultima_ocorrencia, t.nome AS totem_nome, e.nome AS totem_empresa
+               FROM tb_log_sistema l
+               LEFT JOIN tb_totem t ON t.id_totem = l.id_totem
+               LEFT JOIN tb_empresa e ON e.id_empresa = t.id_empresa
+              WHERE l.id_log = :id'
+        );
+        $stmt->bindValue('id', $idLog, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /**
+     * Totens para o filtro da tela (id, nome e empresa; NUNCA `codigo` nem `token_api`).
+     *
+     * @return list<array{id_totem:int|string,nome:string,empresa_nome:?string}>
+     */
+    public function totensParaFiltro(): array
+    {
+        return $this->pdo->query(
+            'SELECT t.id_totem, t.nome, e.nome AS empresa_nome
+               FROM tb_totem t LEFT JOIN tb_empresa e ON e.id_empresa = t.id_empresa
+              ORDER BY t.nome ASC, e.nome ASC, t.id_totem ASC'
+        )->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * @param array<string,mixed> $filtros
      * @return array{0:string,1:array<string,array{0:mixed,1:int}>}
      */
@@ -247,6 +286,13 @@ class LogSistemaDao
                     }
                     $condicoes[] = $chave . ' = :f_' . $chave;
                     $params['f_' . $chave] = [$valor, PDO::PARAM_INT];
+                    break;
+                case 'sem_totem':
+                    // so o valor true liga o filtro ("registros sem totem"); nunca vira SQL cru
+                    if ($valor !== true) {
+                        throw new InvalidArgumentException('filtro sem_totem invalido');
+                    }
+                    $condicoes[] = 'id_totem IS NULL';
                     break;
                 case 'de':
                     $condicoes[] = 'ultima_ocorrencia >= :f_de';

@@ -477,3 +477,122 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-dialogo__estado { min-height: 21px; font-size: 14px; font-weight: 700; }
 .gestao-dialogo__caixa { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; font-size: 15px; font-weight: 600; cursor: pointer; }
 .gestao-dialogo__caixa input { flex: none; width: 24px; height: 24px; margin: 0; accent-color: var(--azul); }
+
+/* ==========================================================================
+   Logs (F3c): /gestao/logs.php e /gestao/log.php (so admin, so leitura).
+   Mesma paleta/estados do resto da gestao: o NIVEL nunca depende so de cor
+   (rotulo textual + icone + peso + espessura/estilo de borda + barra lateral).
+   ========================================================================== */
+
+/* ---------- abas (links; ativa = fundo #0179AD, texto branco, 700) ---------- */
+.gestao-abas { width: 100%; }
+.gestao-abas__lista { display: flex; flex-wrap: wrap; gap: 12px; }
+.gestao-abas__item { display: block; }
+.gestao-aba {
+    position: relative; display: inline-flex; align-items: center; gap: 8px;
+    min-height: 44px; padding: 0 16px;
+    background: var(--branco); color: var(--texto);
+    border: 2px solid var(--borda); border-radius: 6px;
+    font-size: 15px; font-weight: 500; line-height: 1.2; text-decoration: none;
+}
+.gestao-aba--ativa { background: var(--azul); color: var(--branco); border-color: var(--azul); font-weight: 700; }
+.gestao-aba__rotulo { white-space: nowrap; }
+.gestao-aba__contagem {
+    min-width: 28px; padding: 1px 8px;
+    border: 1px solid currentColor; border-radius: 999px;
+    font-size: 13px; font-weight: 700; text-align: center;
+}
+
+/* campo de data: o foco fica nos sub-campos internos (dia/mes/ano), entao o anel vai no :focus-within */
+.gestao-filtros .gestao-campo__entrada[type="date"]:focus-within { outline: 3px solid var(--azul); outline-offset: 1px; border-color: var(--azul); }
+
+/* ---------- painel, filtros e contador ---------- */
+.gestao-painel-logs { width: 100%; display: flex; flex-direction: column; gap: 16px; }
+.gestao-descricao { max-width: 90ch; font-size: 15px; }
+.gestao-filtros {
+    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px;
+    width: 100%; padding: 16px;
+    border: 2px solid var(--borda); border-radius: 8px;
+}
+.gestao-filtros .gestao-campo { flex: 1 1 180px; min-width: 150px; max-width: 240px; }
+/* alinha com os campos: altura do rotulo (15px x 1,5) + gap de 6px */
+.gestao-filtros .gestao-atalhos,
+.gestao-filtros .gestao-barra-acoes { margin-top: calc(15px * 1.5 + 6px); }
+.gestao-atalhos { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+/* atalho do periodo em uso: negrito + borda de 3px + aria-current (nunca so cor) */
+.gestao-botao--ativo { font-weight: 700; border-width: 3px; box-shadow: inset 0 0 0 1px var(--azul); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
+/* paginacao desabilitada: <span aria-disabled="true">, borda tracejada, sem cursor de clique */
+.gestao-botao--desabilitado,
+.gestao-botao--desabilitado:hover {
+    background: var(--branco); color: var(--texto);
+    border: 2px dashed var(--texto); box-shadow: none;
+    font-weight: 500; cursor: default;
+}
+.gestao-contador { font-size: 15px; font-weight: 600; }
+.gestao-link { font-weight: 600; }
+
+/* ---------- tabela de logs (colunas fixas; a mensagem leva o resto) ---------- */
+.gestao-tabela--logs { table-layout: fixed; min-width: 886px; }
+.gestao-tabela--logs:has(th.col-totem) { min-width: 1006px; }
+.gestao-tabela--logs th,
+.gestao-tabela--logs td { padding-left: 6px; padding-right: 6px; }
+.gestao-tabela--logs th.col-nivel { width: 104px; }
+.gestao-tabela--logs th.col-quando { width: 128px; }
+.gestao-tabela--logs th.col-totem { width: 120px; }
+.gestao-tabela--logs th.col-categoria { width: 150px; }
+.gestao-tabela--logs th.col-repeticoes { width: 104px; }
+.gestao-tabela--logs th.col-detalhe { width: 112px; }
+.gestao-tabela--logs th.col-mensagem { min-width: 280px; }
+.gestao-tabela--logs th { white-space: normal; }
+.gestao-tabela--logs td { height: 52px; }
+.gestao-tabela--logs .col-totem { overflow-wrap: anywhere; }
+.gestao-tabela--logs .col-categoria { overflow-wrap: break-word; }
+.gestao-tabela--logs .col-repeticoes { position: relative; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* o texto .gestao-sr (absoluto) fica contido na celula: sem isso ele estica a rolagem da PAGINA quando a tabela rola */
+.gestao-tabela--logs .col-detalhe { text-align: left; }
+/* "Ver detalhe" fixo na borda direita: continua visivel e clicavel quando a tabela rola na horizontal (ex.: 1000x700) */
+.gestao-tabela--logs th.col-detalhe,
+.gestao-tabela--logs td.col-detalhe { position: sticky; right: 0; background: var(--branco); box-shadow: -1px 0 0 var(--borda); }
+.gestao-tabela--logs .col-detalhe .gestao-botao { padding: 0 8px; }
+/* mensagem: ate 2 linhas; o texto inteiro fica no detalhe (title nao funciona em toque) */
+.gestao-mensagem-texto {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+    overflow: hidden; overflow-wrap: anywhere;
+}
+
+/* nivel: rotulo (texto) + icone + peso + borda; INFO e o mais discreto */
+.gestao-nivel {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 6px; border-radius: 4px;
+    font-size: 13px; line-height: 1.2; text-transform: uppercase; white-space: nowrap;
+}
+.gestao-nivel .gestao-icone { width: 16px; height: 16px; }
+.gestao-nivel--erro { background: var(--texto); color: var(--branco); border: 3px solid var(--texto); font-weight: 700; }
+.gestao-nivel--aviso { background: var(--branco); color: var(--texto); border: 3px solid var(--texto); font-weight: 700; }
+.gestao-nivel--info { background: var(--branco); color: var(--texto); border: 1px dashed var(--borda); padding: 5px 8px; font-weight: 500; }
+/* barra esquerda da linha: ERRO solida 6px, AVISO tracejada 6px, INFO sem barra */
+.gestao-tabela--logs tr[data-nivel="erro"] td:first-child { border-left: 6px solid var(--texto); }
+.gestao-tabela--logs tr[data-nivel="aviso"] td:first-child { border-left: 6px dashed var(--texto); }
+.gestao-tabela--logs tr[data-nivel="erro"] .col-mensagem { font-weight: 700; }
+
+/* ---------- paginacao ---------- */
+.gestao-paginacao { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.gestao-paginacao__posicao { font-size: 15px; font-weight: 600; text-align: center; }
+
+/* ---------- detalhe do registro ---------- */
+#log-mensagem { font-size: 16px; font-weight: 600; }
+.gestao-cartao__titulo .gestao-nivel { margin-right: 8px; vertical-align: middle; }
+.gestao-cartao__subtitulo { width: 100%; padding-top: 20px; border-top: 2px solid var(--borda); font-size: 17px; font-weight: 700; }
+
+@media (max-width: 1099px) {
+    .gestao-filtros .gestao-campo { max-width: none; }
+}
+@media (max-width: 720px) {
+    .gestao-filtros { flex-direction: column; align-items: stretch; }
+    .gestao-filtros .gestao-campo { flex: none; max-width: none; width: 100%; }
+    .gestao-filtros .gestao-atalhos,
+    .gestao-filtros .gestao-barra-acoes { margin-top: 0; }
+    .gestao-paginacao { flex-wrap: wrap; }
+    .gestao-paginacao .gestao-botao { flex: 1 1 0; }
+    .gestao-paginacao__posicao { flex: 1 1 100%; order: -1; }
+}

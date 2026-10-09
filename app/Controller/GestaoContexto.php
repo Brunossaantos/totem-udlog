@@ -37,7 +37,7 @@ final class GestaoContexto
         ['id' => 'atendimentos', 'rotulo' => 'Atendimentos', 'href' => '/gestao/atendimentos.php', 'perfil' => 'admin', 'disponivel' => false],
         ['id' => 'ordens', 'rotulo' => 'Ordens de coleta', 'href' => '/gestao/ordens.php', 'perfil' => 'usuario', 'disponivel' => false],
         ['id' => 'anexos', 'rotulo' => 'Anexos órfãos', 'href' => '/gestao/anexos.php', 'perfil' => 'admin', 'disponivel' => false],
-        ['id' => 'logs', 'rotulo' => 'Logs', 'href' => '/gestao/logs.php', 'perfil' => 'admin', 'disponivel' => false],
+        ['id' => 'logs', 'rotulo' => 'Logs', 'href' => '/gestao/logs.php', 'perfil' => 'admin', 'disponivel' => true],
         ['id' => 'usuarios', 'rotulo' => 'Usuários', 'href' => '/gestao/usuarios.php', 'perfil' => 'admin', 'disponivel' => true],
         ['id' => 'conta', 'rotulo' => 'Minha conta', 'href' => '/gestao/conta.php', 'perfil' => 'usuario', 'disponivel' => true],
     ];
@@ -72,6 +72,7 @@ final class GestaoContexto
         'totem_nome_confirmacao' => ['erro', 'O nome digitado não confere com o nome do totem. A URL não foi regerada. Digite o nome exatamente como aparece na lista.'],
         'totem_legado_invalido' => ['erro', 'Este totem é antigo e o nome ou a empresa dele não permitem montar uma URL no padrão novo. A URL não foi alterada. Avise quem administra o sistema.'],
         'totem_colisao' => ['erro', 'Não foi possível gerar um código único agora. Nada foi alterado. Tente novamente.'],
+        'log_nao_encontrado' => ['erro', 'Registro não encontrado. Ele pode ter sido apagado pela retenção de 90 dias.'],
         'sessao_expirada' => ['info', 'Sua sessão terminou. Digite o login e a senha para entrar de novo.'],
         'saiu' => ['sucesso', 'Você saiu da gestão. Para voltar, digite o login e a senha.'],
         'senha_alterada_entrar' => ['sucesso', 'Senha alterada. Digite o login e a nova senha para entrar.'],

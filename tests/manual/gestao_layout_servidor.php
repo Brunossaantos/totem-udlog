@@ -79,6 +79,40 @@ try {
     $legado('RECEPCAO-01', 'RECEPCAO-01', $eMaua1);
     $legado('XSS_LEGADO', '<img src=x onerror=window.__xss=7>', $eXss);
 
+    // F3c (logs): linhas semeadas nas 5 abas (ERRO/AVISO/INFO, mensagem longa, repeticoes, 120 linhas na API para
+    // paginacao, texto hostil). Cron e Gestao nunca tem totem. Categorias e mensagens sao as do catalogo.
+    $seqLog = 0;
+    $log = static function (string $nivel, string $origem, string $cat, string $msg, ?int $idTotem, ?string $detalhe, int $contador, string $quando) use ($pdo, &$seqLog): int {
+        $seqLog++;
+        $pdo->prepare(
+            "INSERT INTO tb_log_sistema (nivel, origem, categoria, mensagem, id_totem, detalhe, dedup_chave, janela, contador, criado_em, ultima_ocorrencia)
+             VALUES (:n, :o, :c, :m, :t, :d, :k, NOW(), :ct, $quando, $quando)"
+        )->execute(['n' => $nivel, 'o' => $origem, 'c' => $cat, 'm' => $msg, 't' => $idTotem, 'd' => $detalhe, 'k' => sha1('lay' . $seqLog), 'ct' => $contador]);
+
+        return (int) $pdo->lastInsertId();
+    };
+    $niveisLog = ['ERRO', 'AVISO', 'INFO'];
+    $totensLog = [$idGuiche, $idDoca, null, $idAtend];
+    $idLogHostil = $log('ERRO', 'API', 'erro_tecnico', '<img src=x onerror=window.__xss=11>"><script>window.__xss=12</script>', null, 'classe=<img src=x onerror=window.__xss=13>;http=500', 3, 'NOW()');
+    for ($i = 1; $i <= 120; $i++) {
+        $log($niveisLog[$i % 3], 'API', $i % 2 === 0 ? 'erro_tecnico' : 'totem_nao_autorizado', $i % 2 === 0 ? 'Erro técnico inesperado.' : 'Requisição à API com token de totem informado e inválido.', $totensLog[$i % 4], $i % 7 === 0 ? 'classe=PDOException;sqlstate=HY000;http=500' : null, ($i % 5) + 1, "NOW() - INTERVAL $i MINUTE");
+    }
+    $log('ERRO', 'API', 'banco_coletas_indisponivel', 'Banco de gestão de coletas indisponível.', null, null, 1, 'NOW() - INTERVAL 30 DAY');
+    $mensagemLonga = str_repeat('Falha ao consultar a ordem de coleta no banco de gestão de coletas e ao tentar novamente em seguida. ', 2);
+    $mensagemLonga = substr($mensagemLonga, 0, 158) . '.';
+    $idLongo = $log('ERRO', 'EXPEDICAO', 'oc_consulta_falhou', $mensagemLonga, $idDoca, 'classe=PDOException;http=500;motivo=timeout', 4000000000, 'NOW() - INTERVAL 5 MINUTE');
+    $log('AVISO', 'EXPEDICAO', 'oc_baixa_falhou', str_repeat('SemEspacoNenhumNaMensagemMuitoLonga', 4) . 'Fim', $idGuiche, null, 1, 'NOW() - INTERVAL 6 MINUTE');
+    $log('INFO', 'EXPEDICAO', 'erro_tecnico', 'Mensagem curta.', null, null, 1, 'NOW() - INTERVAL 7 MINUTE');
+    for ($i = 1; $i <= 3; $i++) {
+        $log($niveisLog[$i % 3], 'RECEBIMENTO', 'rate_limit_ocr_excedido', 'Limite de leitura de notas excedido pelo totem.', $idGuiche, null, $i, "NOW() - INTERVAL $i HOUR");
+    }
+    $idCronInfo = $log('INFO', 'CRON', 'cron_resumo', 'Rotina agendada concluída.', null, 'job=limpar_logs_gestao;logs_apagados=3;auditoria_apagados=0;lotes=1', 1, 'NOW() - INTERVAL 2 HOUR');
+    $log('ERRO', 'CRON', 'cron_falhou', 'Rotina agendada falhou.', null, 'classe=PDOException;job=limpar_logs_gestao;motivo=erro_banco', 2, 'NOW() - INTERVAL 3 HOUR');
+    $log('AVISO', 'CRON', 'cron_falhou', 'Rotina agendada falhou.', null, null, 1, 'NOW() - INTERVAL 4 HOUR');
+    $log('ERRO', 'GESTAO', 'gestao_erro_interno', 'Erro interno na Gestão Totem.', null, null, 1, 'NOW() - INTERVAL 1 HOUR');
+    $log('AVISO', 'GESTAO', 'auditoria_falhou', 'Falha ao gravar a trilha de auditoria.', null, 'motivo=auditoria_indisponivel', 2, 'NOW() - INTERVAL 2 HOUR');
+    $idsLog = ['hostil' => $idLogHostil, 'longo' => $idLongo, 'cron' => $idCronInfo, 'semDetalhe' => (int) $pdo->query("SELECT id_log FROM tb_log_sistema WHERE origem = 'GESTAO' AND detalhe IS NULL LIMIT 1")->fetchColumn()];
+
     $env = array_merge(gtEnvPadrao(), ['GESTAO_PERMITIR_HTTP' => 'true', 'TOTEM_URL_BASE' => $urlBase]);
     putenv('QA_GESTAO_ENV_JSON=' . json_encode($env));
     $raiz = dirname(__DIR__, 2);
@@ -101,12 +135,18 @@ try {
     if (!$pronto) {
         throw new RuntimeException('servidor nao respondeu');
     }
-    echo json_encode(['pronto' => true, 'porta' => $porta, 'banco' => $banco, 'senha' => GT_SENHA_BOA]) . "\n";
+    echo json_encode(['pronto' => true, 'porta' => $porta, 'banco' => $banco, 'senha' => GT_SENHA_BOA, 'logs' => $idsLog]) . "\n";
     fflush(STDOUT);
     // bloqueia ate o node mandar "fim" ou fechar o stdin
     while (($linha = fgets(STDIN)) !== false) {
         if (trim($linha) === 'fim') {
             break;
+        }
+        if (trim($linha) === 'esvaziar-logs') { // estado vazio da tela de logs
+            $pdo->exec('DELETE FROM tb_log_sistema');
+            echo "LOGS-ESVAZIADOS
+";
+            fflush(STDOUT);
         }
         if (trim($linha) === 'esvaziar') { // estado vazio da lista de totens (captura/teste)
             $pdo->exec('DELETE FROM tb_atendimento');

@@ -58,10 +58,16 @@ function qaQrCriarBanco(): array
     $pdo = qaQrPdoServidor(qaQrConfiguracao());
     $nome = qaQrNomeBanco(); qaQrValidarNomeBanco($nome);
     $pdo->exec("CREATE DATABASE `{$nome}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    // Falha depois do CREATE (sentinela, migration) nao pode deixar o banco QA residual: o chamador nem recebe o nome.
+    try {
     $pdo->exec("USE `{$nome}`");
     if ($pdo->query('SELECT DATABASE()')->fetchColumn() !== $nome) throw new RuntimeException('Sentinela do banco QA falhou');
     $raiz = dirname(__DIR__, 2);
     foreach (['sql/schema.sql', 'sql/migrations/014_tb_lgpd_aceite.sql', 'sql/migrations/015_vio_api_br_estados_e_id_externo.sql', 'sql/migrations/016_vio_api_br_cache.sql', 'sql/migrations/017_cnh_modo_captura.sql', 'sql/migrations/018_nota_client_uid.sql', 'sql/migrations/019_drop_tb_fila_envio.sql', 'sql/migrations/020_gestao_usuario_sessao.sql', 'sql/migrations/021_gestao_auditoria.sql', 'sql/migrations/022_totem_gestao.sql', 'sql/migrations/023_log_sistema.sql'] as $arquivo) qaQrAplicarSql($pdo, $raiz . '/' . $arquivo);
+    } catch (Throwable $e) {
+        try { $pdo->exec("DROP DATABASE IF EXISTS `{$nome}`"); } catch (Throwable) {}
+        throw $e;
+    }
     return [$pdo, $nome];
 }
 

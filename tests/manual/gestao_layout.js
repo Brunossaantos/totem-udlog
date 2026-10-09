@@ -10,6 +10,8 @@
 // F2 (totens, 2026-10-07): lista/novo totem/URL em 1366x768, 1920x1080 e 1000x700, dialogos (desativar, regerar com
 // nome digitado), copiar URL, sem JS, XSS, densidade e estado vazio; o servidor semeia os totens e TOTEM_URL_BASE (so no processo).
 // Rodada UX F2 (2026-10-08): "Copiar URL" copia de verdade na lista (data-copiar-*; sem JS vira "Abrir URL"), nota do legado, destaque do atendimento, nota permanente neutra da URL regerada, ajuda na tela da URL, maxlength 24.
+// F3c (logs, 2026-10-08): /gestao/logs.php e /gestao/log.php em 1366x768, 1920x1080 e 1000x700 (+ 680x900 estreito), 5 abas semeadas
+// (ERRO/AVISO/INFO, mensagem longa, repeticoes, 122 linhas na API para paginar), Cron/Gestao sem coluna Totem, filtros, vazio, detalhe e sem JS.
 // Rodada de correcao de UX (2026-10-06): alvos de 44px, erro antes do toggle, requisitos
 // neutros, flash persistente, info, dialogo destrutivo cheio, troca obrigatoria em foco unico.
 const fs = require('fs');
@@ -145,7 +147,7 @@ async function novaPagina(browser, w, h, rotulo, contadores) {
     page.on('pageerror', e => contadores.erros.push(rotulo + ': ' + e.message));
     page.on('response', r => {
         const u = new URL(r.url());
-        if (u.hostname !== '127.0.0.1') { contadores.externos.push(r.url()); }
+        if (u.hostname !== '127.0.0.1' && u.protocol !== 'data:') { contadores.externos.push(r.url()); }
         if (r.request().resourceType() === 'document' && !r.headers()['content-security-policy']) { contadores.semCsp.push(r.url()); }
     });
     page.on('request', r => { if (!r.url().startsWith('http://127.0.0.1') && !r.url().startsWith('data:')) { contadores.externos.push(r.url()); } });
@@ -177,7 +179,7 @@ async function checagemGeral(page, rotulo, contadores, opcoes) {
 }
 
 async function botoesSolidos(page, rotulo) {
-    const r = await page.evaluate(() => Array.from(document.querySelectorAll('.gestao-botao')).filter(b => b.getClientRects().length).map(b => {
+    const r = await page.evaluate(() => Array.from(document.querySelectorAll('.gestao-botao')).filter(b => b.getClientRects().length && b.getAttribute('aria-disabled') !== 'true').map(b => {
         const cs = getComputedStyle(b);
         return { t: b.textContent.trim(), cls: b.className, bg: cs.backgroundColor, bw: cs.borderTopWidth, bs: cs.borderTopStyle, bc: cs.borderTopColor, cor: cs.color, h: Math.round(b.getBoundingClientRect().height) };
     }));
@@ -676,6 +678,379 @@ async function cenarioSemJs(browser, srv, contadores) {
 }
 
 /* ============================================================================================
+ * Gestao Totem F3c (logs): lista com abas/filtros/paginacao e detalhe. Semente do servidor
+ * (gestao_layout_servidor.php): API 122 linhas (3 paginas; a mais recente tem texto hostil),
+ * EXPEDICAO 3 (uma com mensagem longa e contador de 10 digitos, outra sem espacos), RECEBIMENTO 3,
+ * CRON 3, GESTAO 2 (sem INFO). Cron e Gestao nao tem coluna Totem.
+ * ============================================================================================ */
+const IDS_LOGS = ['logs-aviso-retencao', 'logs-abas', 'logs-painel', 'logs-descricao', 'logs-filtros', 'logs-aba-campo', 'filtro-nivel', 'filtro-periodo-de', 'filtro-periodo-ate', 'logs-atalhos-periodo', 'periodo-hoje', 'periodo-7d', 'periodo-90d', 'filtro-categoria', 'btn-aplicar-filtros', 'btn-limpar-filtros', 'logs-contador', 'logs-tabela', 'logs-paginacao', 'pag-anterior', 'pag-posicao', 'pag-proxima', 'aba-api', 'aba-recebimento', 'aba-expedicao', 'aba-cron', 'aba-gestao'];
+const LARGURAS_LOGS = { nivel: 104, quando: 128, totem: 120, categoria: 150, repeticoes: 104, detalhe: 112 };
+
+async function paginaLogs(browser, srv, w, h, rot, contadores, semJs) {
+    const page = await novaPagina(browser, w, h, rot, contadores);
+    await limparEstado(page, srv.base);
+    if (semJs) { await page.setJavaScriptEnabled(false); }
+    await entrar(page, srv.base, 'ana.admin', srv.info.senha);
+    return page;
+}
+
+/** Estrutura comum da lista: ids, abas, th, alvos, tabela, niveis. `esperaTotem` = aba com coluna Totem. */
+async function verificarListaLogs(page, rot, w, esperaTotem, contadores) {
+    await checagemGeral(page, rot, contadores);
+    const faltam = await page.evaluate(lista => lista.filter(i => !document.getElementById(i)), IDS_LOGS.concat(esperaTotem ? ['filtro-totem'] : []));
+    ok(faltam.length === 0, rot + ': ids do contrato presentes' + (faltam.length ? ' -> ' + faltam.join(',') : ''));
+    ok(await page.evaluate(sem => (sem ? true : !document.getElementById('filtro-totem')), esperaTotem), rot + ': filtro de totem so nas abas com totem');
+    const abas = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const as = Array.from(document.querySelectorAll('#logs-abas a.gestao-aba'));
+        const ativa = document.querySelector('#logs-abas a[aria-current]');
+        const cs = ativa && getComputedStyle(ativa);
+        const inativa = as.find(a => !a.hasAttribute('aria-current'));
+        const ci = getComputedStyle(inativa);
+        const lista = document.querySelector('.gestao-abas__lista');
+        let gapMin = 999;
+        for (let i = 0; i < as.length - 1; i++) { const a = r(as[i]), b = r(as[i + 1]); if (Math.abs(a.top - b.top) < 4) { gapMin = Math.min(gapMin, Math.round(b.left - a.right)); } }
+        return {
+            n: as.length, comAtual: document.querySelectorAll('#logs-abas [aria-current]').length, ariaAtual: ativa && ativa.getAttribute('aria-current'),
+            semAriaAbas: document.querySelectorAll('#logs-abas [role], #logs-abas [aria-selected], #logs-abas [aria-controls], #logs-abas [aria-labelledby]').length === 0 && !document.getElementById('logs-painel').hasAttribute('role') && !document.getElementById('logs-painel').hasAttribute('aria-labelledby'),
+            srContagem: as.every(a => { const sr = a.querySelector('.gestao-sr'); const n = a.querySelector('.gestao-aba__contagem'); return !!sr && !n.hasAttribute('aria-label') && sr.textContent.trim() === '(' + n.textContent.trim() + ' ' + (n.textContent.trim() === '1' ? 'registro' : 'registros') + ')'; }),
+            ativaCls: !!ativa && ativa.classList.contains('gestao-aba--ativa'),
+            estAtiva: cs && [cs.backgroundColor, cs.color, cs.fontWeight].join('|'),
+            estInativa: [ci.backgroundColor, ci.color, ci.borderTopWidth, ci.borderTopStyle, ci.borderTopColor].join('|'),
+            altMin: Math.min(...as.map(a => Math.round(r(a).height))), gapMin,
+            contagens: as.map(a => a.querySelector('.gestao-aba__contagem').textContent.trim()),
+            rolagemH: lista.scrollWidth > lista.clientWidth + 1,
+            rotulosVisiveis: as.every(a => a.querySelector('.gestao-aba__rotulo').getClientRects().length > 0 && a.querySelector('.gestao-aba__rotulo').textContent.trim() !== ''),
+        };
+    });
+    ok(abas.n === 5 && abas.comAtual === 1 && abas.ariaAtual === 'page' && abas.ativaCls, rot + ': 5 abas, exatamente 1 com aria-current="page" e a classe --ativa');
+    ok(abas.semAriaAbas && abas.srContagem, rot + ': abas sem padrao ARIA de tablist (role/aria-selected/aria-controls) e contagem com texto .gestao-sr dentro do link (sem aria-label)');
+    ok(abas.estAtiva === 'rgb(1, 121, 173)|rgb(255, 255, 255)|700', rot + ': aba ativa fundo #0179AD, texto branco, peso 700 (' + abas.estAtiva + ')');
+    ok(abas.estInativa === 'rgb(255, 255, 255)|rgb(58, 58, 58)|2px|solid|rgb(176, 176, 177)', rot + ': aba inativa fundo branco, borda 2px #B0B0B1, texto #3A3A3A (' + abas.estInativa + ')');
+    ok(abas.altMin >= 44 && abas.gapMin >= 12 && !abas.rolagemH && abas.rotulosVisiveis, rot + ': abas com alvo >= 44px (' + abas.altMin + '), 12px entre abas (' + abas.gapMin + '), sem rolagem horizontal, rotulo visivel');
+    ok(abas.contagens.every(c => /^\d+$/.test(c)), rot + ': contagem dentro da aba (' + abas.contagens.join(',') + ')');
+    const ths = await page.evaluate(() => Array.from(document.querySelectorAll('#logs-tabela th')).map(t => ({ scope: t.getAttribute('scope'), cls: t.className, t: t.textContent.trim(), clip: t.scrollWidth > t.clientWidth + 1, w: Math.round(t.getBoundingClientRect().width) })));
+    ok(ths.length === (esperaTotem ? 7 : 6) && ths.every(t => t.scope === 'col'), rot + ': ' + ths.length + ' cabecalhos, todos th scope=col' + (esperaTotem ? '' : ' (sem a coluna Totem)'));
+    ok(ths.every(t => !t.clip), rot + ': nenhum cabecalho cortado' + (ths.some(t => t.clip) ? ' -> ' + ths.filter(t => t.clip).map(t => t.t).join(',') : ''));
+    const col = Object.fromEntries(ths.map(t => [t.cls.replace('col-', ''), t.w]));
+    const largOk = Object.entries(LARGURAS_LOGS).filter(([k]) => k !== 'totem' || esperaTotem).every(([k, v]) => Math.abs(col[k] - v) <= 2);
+    ok(largOk && col.mensagem >= 279, rot + ': colunas fixas 104/128/' + (esperaTotem ? '120/' : '') + '150/104/112 e mensagem >= 280px (' + JSON.stringify(col) + ')');
+    const tab = await page.evaluate(() => {
+        const t = document.getElementById('logs-tabela'), wrap = t.closest('.gestao-tabela-wrap');
+        const linhas = Array.from(t.tBodies[0].rows);
+        const r = el => el.getBoundingClientRect();
+        return {
+            layout: getComputedStyle(t).tableLayout, fs: getComputedStyle(t).fontSize,
+            alturas: linhas.map(l => Math.round(r(l).height)), n: linhas.length,
+            wrapRole: wrap.getAttribute('role'), wrapTab: wrap.getAttribute('tabindex'),
+            wrapRolagem: wrap.scrollWidth > wrap.clientWidth + 1,
+            btns: Array.from(t.querySelectorAll('.col-detalhe a')).map(a => Math.round(r(a).height)),
+            btnsDentro: Array.from(t.querySelectorAll('.col-detalhe a')).every(a => r(a).right <= a.closest('td').getBoundingClientRect().right + 1),
+        };
+    });
+    ok(tab.layout === 'fixed' && tab.fs === '14px' && tab.n > 0 && tab.alturas.every(a => a >= 44 && a <= 110), rot + ': tabela fixed, 14px, linhas >= 44px e <= 110px (min ' + Math.min(...tab.alturas) + ', max ' + Math.max(...tab.alturas) + ')');
+    ok(tab.wrapRole === 'region' && tab.wrapTab === '0', rot + ': .gestao-tabela-wrap com role=region e tabindex=0');
+    if (w >= 1366) { ok(!tab.wrapRolagem, rot + ': a >= 1366px a tabela cabe sem rolagem horizontal'); }
+    if (w < 1100 && esperaTotem) { ok(tab.wrapRolagem, rot + ': < 1100px a rolagem horizontal fica SO no .gestao-tabela-wrap'); }
+    ok(tab.btns.every(a => a >= 44) && tab.btnsDentro, rot + ': botoes "Ver detalhe" >= 44px e dentro da celula');
+    const niv = await page.evaluate(() => {
+        const out = { vazio: [], fora: [], estilos: {}, barras: {}, msgPeso: {}, icones: true };
+        for (const tr of document.querySelectorAll('#logs-tabela tbody tr')) {
+            const n = tr.querySelector('.gestao-nivel'), slug = tr.getAttribute('data-nivel');
+            const txt = n.innerText.trim();
+            if (txt === '' || n.getClientRects().length === 0 || ({ erro: 'ERRO', aviso: 'AVISO', info: 'INFO' })[slug] !== txt) { out.vazio.push(slug + ':' + txt); }
+            if (!n.querySelector('svg')) { out.icones = false; }
+            const td = n.closest('td');
+            if (n.getBoundingClientRect().right > td.getBoundingClientRect().right + 0.5) { out.fora.push(txt); }
+            const cs = getComputedStyle(n);
+            out.estilos[slug] = [cs.backgroundColor, cs.color, cs.fontWeight, cs.borderTopWidth, cs.borderTopStyle, cs.borderTopColor, cs.textTransform].join('|');
+            const cb = getComputedStyle(td);
+            out.barras[slug] = cb.borderLeftWidth + '|' + cb.borderLeftStyle + '|' + cb.borderLeftColor;
+            out.msgPeso[slug] = getComputedStyle(tr.querySelector('.col-mensagem')).fontWeight;
+        }
+        return out;
+    });
+    ok(niv.vazio.length === 0 && niv.icones, rot + ': .gestao-nivel nunca vazio, rotulo visivel (ERRO/AVISO/INFO) com icone' + (niv.vazio.length ? ' -> ' + niv.vazio.slice(0, 3).join(',') : ''));
+    ok(niv.fora.length === 0, rot + ': rotulo do nivel cabe na celula de 104px');
+    if (niv.estilos.erro) { ok(niv.estilos.erro === 'rgb(58, 58, 58)|rgb(255, 255, 255)|700|3px|solid|rgb(58, 58, 58)|uppercase' && niv.barras.erro === '6px|solid|rgb(58, 58, 58)' && niv.msgPeso.erro === '700', rot + ': ERRO = fundo #3A3A3A, texto branco, 700, MAIUSCULAS, barra 6px solida e mensagem 700 (' + niv.estilos.erro + ' ; ' + niv.barras.erro + ' ; ' + niv.msgPeso.erro + ')'); }
+    if (niv.estilos.aviso) { ok(niv.estilos.aviso === 'rgb(255, 255, 255)|rgb(58, 58, 58)|700|3px|solid|rgb(58, 58, 58)|uppercase' && niv.barras.aviso === '6px|dashed|rgb(58, 58, 58)', rot + ': AVISO = fundo branco, borda 3px solida #3A3A3A, 700, barra 6px TRACEJADA (' + niv.estilos.aviso + ' ; ' + niv.barras.aviso + ')'); }
+    if (niv.estilos.info) { ok(niv.estilos.info === 'rgb(255, 255, 255)|rgb(58, 58, 58)|500|1px|dashed|rgb(176, 176, 177)|uppercase' && /^0px\|/.test(niv.barras.info), rot + ': INFO = fundo branco, borda 1px tracejada #B0B0B1, 500 e sem barra (' + niv.estilos.info + ' ; ' + niv.barras.info + ')'); }
+}
+
+/** Filtros, contador, atalhos e posicao da paginacao (aba API, pagina 1 de 3). */
+async function verificarFiltrosEPaginacao(page, rot) {
+    const f = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const campos = Array.from(document.querySelectorAll('#logs-filtros select, #logs-filtros input:not([type=hidden])'));
+        const rotulos = campos.map(c => { const l = document.querySelector('label[for="' + c.id + '"]'); return !!l && l.getClientRects().length > 0 && l.textContent.trim() !== ''; });
+        const atalhos = Array.from(document.querySelectorAll('#logs-atalhos-periodo a'));
+        const btns = Array.from(document.querySelectorAll('#logs-filtros .gestao-botao'));
+        const form = document.getElementById('logs-filtros'), fr = r(form);
+        const cc = getComputedStyle(campos[0]);
+        let gap = 999;
+        for (let i = 0; i < atalhos.length - 1; i++) { const a = r(atalhos[i]), b = r(atalhos[i + 1]); if (Math.abs(a.top - b.top) < 4) { gap = Math.min(gap, Math.round(b.left - a.right)); } }
+        return {
+            camposAltura: campos.map(c => Math.round(r(c).height)), rotulos, nCampos: campos.length,
+            campoBorda: cc.borderTopColor + '|' + cc.borderTopWidth,
+            atalhosTxt: atalhos.map(a => a.textContent.trim()), atalhosAlt: atalhos.map(a => Math.round(r(a).height)), atalhosAtivos: atalhos.filter(a => a.hasAttribute('aria-current')).length,
+            btnsAlt: btns.map(b => Math.round(r(b).height)),
+            dentro: Array.from(form.querySelectorAll('select, input, a, button')).filter(e => e.getClientRects().length).every(e => r(e).right <= fr.right + 0.5 && r(e).left >= fr.left - 0.5),
+            gap, contador: document.getElementById('logs-contador').textContent.trim(),
+        };
+    });
+    ok(f.nCampos >= 4 && f.camposAltura.every(a => a >= 44) && f.rotulos.every(Boolean), rot + ': ' + f.nCampos + ' campos de filtro com label visivel e altura >= 44px (' + f.camposAltura.join(',') + ')');
+    ok(f.campoBorda === 'rgb(135, 135, 137)|2px', rot + ': campos com a borda existente (2px #878789): ' + f.campoBorda);
+    ok(JSON.stringify(f.atalhosTxt) === JSON.stringify(['Hoje', 'Últimos 7 dias', 'Últimos 90 dias']) && f.atalhosAlt.every(a => a >= 44) && f.atalhosAtivos === 0 && f.gap >= 12, rot + ': atalhos Hoje/7 dias/90 dias com 44px, 12px entre si e nenhum ativo sem periodo');
+    ok(f.btnsAlt.every(a => a >= 44) && f.dentro, rot + ': botoes dos filtros >= 44px e dentro da barra de filtros');
+    ok(f.contador === 'Exibindo 1 a 50 de 122 registros.', rot + ': contador "' + f.contador + '"');
+    const p = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const nav = document.getElementById('logs-paginacao'), ant = document.getElementById('pag-anterior'), prox = document.getElementById('pag-proxima'), pos = document.getElementById('pag-posicao');
+        const wrap = document.querySelector('.gestao-tabela-wrap');
+        const cs = getComputedStyle(ant);
+        return {
+            antSpan: ant.tagName === 'SPAN' && ant.getAttribute('aria-disabled') === 'true' && !ant.hasAttribute('href'),
+            antEst: [cs.borderTopStyle, cs.borderTopColor, cs.backgroundColor, cs.color, cs.cursor].join('|'),
+            proxLink: prox.tagName === 'A' && prox.getAttribute('rel') === 'next',
+            alt: [ant, prox].map(e => Math.round(r(e).height)),
+            esq: Math.abs(r(ant).left - r(wrap).left) <= 2, dir: Math.abs(r(prox).right - r(wrap).right) <= 2,
+            meio: r(pos).left > r(ant).right && r(pos).right < r(prox).left && Math.abs((r(pos).left + r(pos).right) / 2 - (r(wrap).left + r(wrap).right) / 2) <= 8,
+            abaixo: r(nav).top >= r(wrap).bottom, textoPos: pos.textContent.trim(),
+        };
+    });
+    ok(p.antSpan && p.antEst === 'dashed|rgb(58, 58, 58)|rgb(255, 255, 255)|rgb(58, 58, 58)|default', rot + ': "Anterior" desabilitado = <span aria-disabled="true"> de borda tracejada (' + p.antEst + ')');
+    ok(p.proxLink && p.alt.every(a => a >= 44), rot + ': "Proxima" e link rel=next; ambos >= 44px');
+    ok(p.esq && p.dir && p.meio && p.abaixo && p.textoPos === 'Página 1 de 3', rot + ': paginacao posicionada (anterior a esquerda, proxima a direita, posicao no meio, abaixo da tabela): "' + p.textoPos + '"');
+}
+
+async function cenarioLogsViewport(browser, srv, w, h, contadores) {
+    const rot = w + 'x' + h + ' logs';
+    const { base } = srv;
+    const page = await paginaLogs(browser, srv, w, h, rot, contadores, false);
+    const resp = await irPara(page, base, '/gestao/logs.php');
+    ok(resp.status() === 200 && await page.evaluate(() => { const a = document.querySelector('.gestao-menu__link[aria-current="page"]'); return a && a.textContent.trim() === 'Logs' && document.getElementById('gestao-titulo').textContent === 'Logs'; }), rot + ': 200, menu "Logs" atual e titulo "Logs"');
+    await verificarListaLogs(page, rot + ' API', w, true, contadores);
+    await verificarFiltrosEPaginacao(page, rot + ' API');
+    ok(await page.evaluate(() => Array.from(document.querySelectorAll('#logs-abas .gestao-aba__contagem')).map(x => x.textContent.trim()).join(',') === '122,3,3,3,2'), rot + ': contagens das abas API 122, Recebimento 3, Expedicao 3, Cron 3, Gestao 2');
+    ok(await page.evaluate(() => document.querySelectorAll('#logs-tabela img, #logs-tabela script').length === 0 && document.querySelector('#logs-tabela tbody tr').textContent.includes('<img src=x onerror=')), rot + ': texto hostil da mensagem aparece literal (escapado)');
+    await botoesSolidos(page, rot + ' API');
+    await page.screenshot({ path: path.join(CAPTURAS, 'logs-' + w + '.png') });
+    await page.focus('#aba-api');
+    await focoVisivel(page, rot + ' API', 18);
+    // "Ver detalhe" sempre visivel e clicavel sem rolar a PAGINA (sticky na borda direita do wrap, ex.: 1000x700)
+    const vd = await page.evaluate(() => {
+        const wrap = document.querySelector('.gestao-tabela-wrap'), wr = wrap.getBoundingClientRect(), e = document.documentElement;
+        wrap.scrollLeft = 0;
+        document.querySelector('#logs-tabela tbody tr').scrollIntoView({ block: 'start' });
+        const btns = Array.from(document.querySelectorAll('#logs-tabela .col-detalhe a'));
+        const th = document.querySelector('#logs-tabela th.col-detalhe');
+        return {
+            n: btns.length, pagina: e.scrollWidth <= e.clientWidth, posTh: getComputedStyle(th).position, posTd: getComputedStyle(btns[0].closest('td')).position, fundoTd: getComputedStyle(btns[0].closest('td')).backgroundColor, fundoTh: getComputedStyle(th).backgroundColor,
+            dentro: btns.every(a => { const b = a.getBoundingClientRect(); return b.left >= wr.left - 1 && b.right <= wr.right + 1 && b.left >= 0 && b.right <= e.clientWidth + 1; }),
+            clicavel: btns.filter(a => a.getBoundingClientRect().top >= 0 && a.getBoundingClientRect().bottom <= innerHeight).length >= 3 && btns.filter(a => a.getBoundingClientRect().top >= 0 && a.getBoundingClientRect().bottom <= innerHeight).every(a => { const b = a.getBoundingClientRect(); const el = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!el && (el === a || a.contains(el)); }),
+        };
+    });
+    ok(vd.n > 0 && vd.pagina && vd.dentro && vd.clicavel && vd.posTh === 'sticky' && vd.posTd === 'sticky' && vd.fundoTd === 'rgb(255, 255, 255)' && vd.fundoTh === 'rgb(255, 255, 255)', rot + ': "Ver detalhe" visivel e clicavel na ultima coluna (sticky, fundo branco) sem rolagem horizontal da pagina (' + JSON.stringify(vd) + ')');
+    await page.evaluate(() => { document.querySelector('.gestao-tabela-wrap').scrollLeft = 99999; });
+    ok(await page.evaluate(() => { const wr = document.querySelector('.gestao-tabela-wrap').getBoundingClientRect(); return Array.from(document.querySelectorAll('#logs-tabela .col-detalhe a')).filter(a => a.getBoundingClientRect().bottom <= innerHeight).every(a => { const b = a.getBoundingClientRect(); const el = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return b.right <= wr.right + 1 && (el === a || a.contains(el)); }); }), rot + ': com a tabela rolada ate o fim, "Ver detalhe" continua visivel e clicavel');
+    // categoria longa quebra so depois do "_" (wbr + break-word), sem estourar a celula
+    const cat = await page.evaluate(() => {
+        const td = document.querySelector('#logs-tabela td.col-categoria');
+        td.innerHTML = 'banco_<wbr>coletas_<wbr>indisponivel';
+        const quebras = [];
+        let topAnt = null, charAnt = '';
+        for (const n of Array.from(td.childNodes).filter(x => x.nodeType === 3)) {
+            for (let i = 0; i < n.length; i++) {
+                const rg = document.createRange(); rg.setStart(n, i); rg.setEnd(n, i + 1);
+                const rc = rg.getClientRects()[0];
+                if (!rc) { continue; }
+                if (topAnt !== null && Math.abs(rc.top - topAnt) > 4) { quebras.push(charAnt); }
+                topAnt = rc.top; charAnt = n.data[i];
+            }
+        }
+        return { dentro: td.scrollWidth <= td.clientWidth + 1, quebras, wbr: td.querySelectorAll('wbr').length, bw: getComputedStyle(td).overflowWrap };
+    });
+    ok(cat.dentro && cat.bw === 'break-word' && cat.wbr === 2 && cat.quebras.length >= 1 && cat.quebras.every(c => c === '_'), rot + ': categoria longa quebra so depois de "_" e cabe na celula (' + JSON.stringify(cat) + ')');
+    await irPara(page, base, '/gestao/logs.php?aba=api');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#logs-tabela tbody tr .col-detalhe a')]);
+    ok(page.url().includes('/gestao/log.php?id='), rot + ': clique real em "Ver detalhe" (sem rolar) abre o detalhe');
+    await irPara(page, base, '/gestao/logs.php?aba=api');
+
+    // pagina 3: proxima desabilitada, anterior link
+    await irPara(page, base, '/gestao/logs.php?aba=api&pagina=3');
+    const p3 = await page.evaluate(() => { const a = document.getElementById('pag-anterior'), p = document.getElementById('pag-proxima'); return { ant: a.tagName, prox: p.tagName, aria: p.getAttribute('aria-disabled'), est: getComputedStyle(p).borderTopStyle, c: document.getElementById('logs-contador').textContent.trim(), pos: document.getElementById('pag-posicao').textContent.trim(), n: document.querySelectorAll('#logs-tabela tbody tr').length }; });
+    ok(p3.ant === 'A' && p3.prox === 'SPAN' && p3.aria === 'true' && p3.est === 'dashed' && p3.c === 'Exibindo 101 a 122 de 122 registros.' && p3.pos === 'Página 3 de 3' && p3.n === 22, rot + ': pagina 3 (ultima): "Proxima" desabilitada tracejada, contador "' + p3.c + '"');
+    await checagemGeral(page, rot + ' API p3', contadores);
+
+    // atalho de periodo ativo (clica "Hoje")
+    await irPara(page, base, '/gestao/logs.php?aba=api');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#periodo-hoje')]);
+    const at = await page.evaluate(() => { const a = document.getElementById('periodo-hoje'); const cs = getComputedStyle(a); const outros = ['periodo-7d', 'periodo-90d'].map(i => document.getElementById(i)); return { atual: document.querySelectorAll('#logs-atalhos-periodo [aria-current]').length, ativoCls: a.classList.contains('gestao-botao--ativo'), peso: cs.fontWeight, borda: cs.borderTopWidth, outrosPeso: outros.map(o => getComputedStyle(o).fontWeight), de: document.getElementById('filtro-periodo-de').value, ate: document.getElementById('filtro-periodo-ate').value, h: Math.round(a.getBoundingClientRect().height) }; });
+    ok(at.atual === 1 && at.ativoCls && at.peso === '700' && at.borda === '3px' && at.outrosPeso.every(p => p === '600') && at.de !== '' && at.de === at.ate && at.h >= 44, rot + ': atalho "Hoje" ativo = aria-current + negrito 700 + borda 3px (outros 600), campos preenchidos');
+    ok(await page.evaluate(() => { const cs = getComputedStyle(document.getElementById('periodo-hoje')); const o = getComputedStyle(document.getElementById('periodo-7d')); return cs.textDecorationLine === 'underline' && cs.textDecorationThickness === '2px' && cs.textUnderlineOffset === '4px' && o.textDecorationLine === 'none' && cs.backgroundColor === 'rgb(255, 255, 255)'; }), rot + ': atalho ativo sublinhado 2px (offset 4px), sem fundo azul; os demais sem sublinhado');
+    await checagemGeral(page, rot + ' API hoje', contadores);
+
+    // aba Expedicao: mensagem longa truncada em 2 linhas, sem espacos nao estoura, contador de 10 digitos
+    await irPara(page, base, '/gestao/logs.php?aba=expedicao');
+    await verificarListaLogs(page, rot + ' Expedicao', w, true, contadores);
+    const m = await page.evaluate(idLongo => {
+        const tr = document.querySelector('tr[data-id-log="' + idLongo + '"]');
+        const t = tr.querySelector('.gestao-mensagem-texto');
+        const cs = getComputedStyle(t), lh = parseFloat(getComputedStyle(tr.querySelector('.col-mensagem')).lineHeight);
+        const sem = Array.from(document.querySelectorAll('.gestao-mensagem-texto')).find(x => !x.textContent.includes(' '));
+        const rep = tr.querySelector('.col-repeticoes');
+        return {
+            truncada: t.scrollHeight > t.clientHeight + 1, altura: t.clientHeight, lh, clamp: cs.webkitLineClamp, title: !t.hasAttribute('title') && t.textContent.length > 150,
+            semEspacoDentro: !!sem && sem.scrollWidth <= sem.clientWidth + 1 && sem.clientHeight <= 2 * lh + 1,
+            rep: rep.textContent.replace(/\s+/g, ' ').trim(), repDentro: rep.scrollWidth <= rep.clientWidth + 1, repNum: getComputedStyle(rep).fontVariantNumeric, repQuebra: rep.querySelector('span[aria-hidden]').getClientRects().length === 1,
+            repSr: rep.querySelector('.gestao-sr').textContent,
+        };
+    }, srv.info.logs.longo);
+    ok((m.truncada || w >= 1920) && String(m.clamp) === '2' && m.altura <= 2 * m.lh + 1 && m.title, rot + ': mensagem longa truncada em 2 linhas (altura ' + m.altura + ' <= 2 x ' + m.lh + ') sem title (o texto inteiro fica em "Ver detalhe"; o title com texto escapado dispara o regex de on*= do teste_gestao_logs)');
+    ok(m.semEspacoDentro, rot + ': mensagem sem espacos quebra dentro da celula (sem estourar a coluna)');
+    ok(m.rep.startsWith('x4000000000') && m.repDentro && m.repSr.startsWith('4000000000 ocorr'), rot + ': repeticoes de 10 digitos ("' + m.rep.slice(0, 40) + '") ficam na celula e tem texto para leitor de tela');
+    ok(m.repQuebra && /tabular-nums/.test(m.repNum), rot + ': contador de 10 digitos em UMA linha (nao quebra no meio) com tabular-nums (' + m.repNum + ')');
+    await page.screenshot({ path: path.join(CAPTURAS, 'logs-expedicao-' + w + '.png') });
+
+    // abas sem totem: Cron e Gestao
+    for (const [slug, total] of [['cron', 3], ['gestao', 2]]) {
+        await irPara(page, base, '/gestao/logs.php?aba=' + slug);
+        await verificarListaLogs(page, rot + ' ' + slug, w, false, contadores);
+        const c = await page.evaluate(() => { const wrap = document.querySelector('.gestao-tabela-wrap'); return { c: document.getElementById('logs-contador').textContent.trim(), pagDes: document.getElementById('pag-anterior').getAttribute('aria-disabled') === 'true' && document.getElementById('pag-proxima').getAttribute('aria-disabled') === 'true', pos: document.getElementById('pag-posicao').textContent.trim(), semTotem: !document.querySelector('.col-totem') && !document.getElementById('filtro-totem'), rolagem: wrap.scrollWidth > wrap.clientWidth + 1 }; });
+        ok(c.c === 'Exibindo 1 a ' + total + ' de ' + total + ' registros.' && c.pagDes && c.pos === 'Página 1 de 1' && c.semTotem, rot + ' ' + slug + ': sem coluna/filtro Totem, contador "' + c.c + '" e paginacao toda desabilitada');
+        ok(!c.rolagem, rot + ' ' + slug + ': sem rolagem horizontal (tabela de 6 colunas cabe)');
+        await page.screenshot({ path: path.join(CAPTURAS, 'logs-' + slug + '-' + w + '.png') });
+    }
+
+    // estado vazio por filtro (Gestao so tem ERRO e AVISO)
+    await irPara(page, base, '/gestao/logs.php?aba=gestao&nivel=INFO');
+    const v = await page.evaluate(() => { const e = document.getElementById('logs-vazio'); const l = document.getElementById('logs-vazio-limpar'); return { txt: e && e.textContent.replace(/\s+/g, ' ').trim(), icone: !!(e && e.querySelector('svg')), link: l && l.getAttribute('href'), tabela: !!document.getElementById('logs-tabela'), pag: !!document.getElementById('logs-paginacao'), contador: document.getElementById('logs-contador').textContent.trim(), nivelSel: document.getElementById('filtro-nivel').value }; });
+    ok(v.txt && v.txt.startsWith('Nenhum registro encontrado com estes filtros.') && v.icone && v.link === '/gestao/logs.php?aba=gestao' && !v.tabela && !v.pag && v.contador === 'Nenhum registro.' && v.nivelSel === 'INFO', rot + ': vazio por filtro com icone, "Limpar filtros" e sem tabela/paginacao');
+    await checagemGeral(page, rot + ' vazio-filtro', contadores);
+    await botoesSolidos(page, rot + ' vazio-filtro');
+
+    // erro de filtro (data futura): aviso por texto + icone, campo com borda de 3px
+    await irPara(page, base, '/gestao/logs.php?aba=api&de=2999-01-01');
+    const er = await page.evaluate(() => { const e = document.getElementById('erro-periodo-de'); const c = document.getElementById('filtro-periodo-de'); const cs = getComputedStyle(c); return { txt: e && e.textContent.trim(), icone: !!(e && e.querySelector('svg')), borda: cs.borderTopWidth + '|' + cs.borderTopColor, inv: c.getAttribute('aria-invalid'), desc: c.getAttribute('aria-describedby') }; });
+    ok(er.txt && er.txt.includes('não pode ser futura') && er.icone && er.borda === '3px|rgb(58, 58, 58)' && er.inv === 'true' && er.desc === 'erro-periodo-de', rot + ': erro de filtro por texto + icone + borda 3px + aria-invalid');
+    await checagemGeral(page, rot + ' erro-filtro', contadores);
+    await page.screenshot({ path: path.join(CAPTURAS, 'logs-erro-filtro-' + w + '.png') });
+
+    // ---- detalhe
+    const L = srv.info.logs;
+    await irPara(page, base, '/gestao/log.php?id=' + L.longo + '&aba=expedicao');
+    const rd = rot + ' detalhe';
+    await checagemGeral(page, rd, contadores);
+    const d = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const ids = ['log-voltar', 'log-detalhe', 'log-contexto', 'log-nivel', 'log-aba', 'log-categoria', 'log-totem', 'log-primeira', 'log-ultima', 'log-repeticoes', 'log-mensagem', 'log-tecnico'];
+        const card = document.getElementById('log-detalhe'), v = document.getElementById('log-voltar');
+        const n = card.querySelector('h2 .gestao-nivel'), sub = card.querySelector('.gestao-cartao__subtitulo');
+        const e = document.documentElement;
+        return {
+            faltam: ids.filter(i => !document.getElementById(i)), vH: Math.round(r(v).height), vHref: v.getAttribute('href'), vTxt: v.textContent.trim(),
+            nivel: n && n.innerText.trim(), nivelSvg: !!(n && n.querySelector('svg')), h2: card.querySelector('h2').textContent.replace(/\s+/g, ' ').trim(),
+            cartaoBorda: getComputedStyle(card).borderTopWidth, subtitulo: sub && sub.textContent.trim(), subBorda: sub && getComputedStyle(sub).borderTopWidth,
+            dl: document.querySelectorAll('#log-contexto dt').length, dlCols: getComputedStyle(document.getElementById('log-contexto')).gridTemplateColumns.split(' ').length,
+            mensagem: document.getElementById('log-mensagem').textContent.length, repet: document.getElementById('log-repeticoes').textContent,
+            tecnicoDentro: Array.from(document.querySelectorAll('#log-tecnico dd')).every(x => x.scrollWidth <= x.clientWidth + 1),
+            semOverflow: e.scrollWidth <= e.clientWidth, cartaoDentro: r(card).right <= r(document.querySelector('.gestao-conteudo')).right + 1,
+        };
+    });
+    ok(d.faltam.length === 0, rd + ': ids do contrato presentes' + (d.faltam.length ? ' -> ' + d.faltam.join(',') : ''));
+    ok(d.vH >= 44 && d.vTxt === 'Voltar para a lista' && d.vHref.startsWith('/gestao/logs.php?aba=expedicao'), rd + ': link "Voltar para a lista" >= 44px mantem os filtros (' + d.vHref + ')');
+    ok(d.nivel === 'ERRO' && d.nivelSvg && d.h2.includes('oc_consulta_falhou') && d.cartaoBorda === '2px' && d.subtitulo === 'Detalhe técnico' && d.subBorda === '2px', rd + ': titulo com nivel ERRO (texto + icone) e categoria, cartao com borda, subtitulo "Detalhe técnico" separado');
+    ok(d.dl === 8 && d.dlCols === 2 && d.mensagem >= 150 && d.repet === '4000000000 ocorrências' && d.tecnicoDentro && d.semOverflow && d.cartaoDentro, rd + ': dados em 2 colunas (8 itens), mensagem longa e valores tecnicos sem estourar o cartao nem a pagina');
+    ok(await page.evaluate(() => { const dt = document.querySelector('#log-contexto dt'), m = document.getElementById('log-mensagem'), cs = getComputedStyle(m); return dt.textContent === 'Mensagem' && dt.nextElementSibling === m && cs.fontSize === '16px' && cs.fontWeight === '600' && document.querySelectorAll('#log-contexto wbr').length === 2 && document.querySelectorAll('#log-detalhe h2 wbr').length === 2; }), rd + ': "Mensagem" e o PRIMEIRO par do #log-contexto, 16px/600, categoria com <wbr>');
+    await botoesSolidos(page, rd);
+    await page.screenshot({ path: path.join(CAPTURAS, 'log-detalhe-' + w + '.png') });
+    await irPara(page, base, '/gestao/log.php?id=' + L.hostil);
+    await checagemGeral(page, rd + ' hostil', contadores);
+    ok(await page.evaluate(() => document.querySelectorAll('#log-detalhe img, #log-detalhe script').length === 0 && document.getElementById('log-mensagem').textContent.includes('<img src=x')), rd + ': mensagem/detalhe hostis aparecem literais');
+    await irPara(page, base, '/gestao/log.php?id=' + L.semDetalhe);
+    ok(await page.evaluate(() => { const t = document.getElementById('log-tecnico-vazio'); return !!t && t.textContent === 'Este registro não tem detalhe técnico.' && !document.getElementById('log-tecnico') && !document.getElementById('log-totem'); }), rd + ': sem detalhe tecnico mostra a frase fixa; aba Gestao sem linha "Totem"');
+    await irPara(page, base, '/gestao/log.php?id=' + L.cron);
+    ok(await page.evaluate(() => { const n = document.querySelector('#log-detalhe h2 .gestao-nivel'); const cs = getComputedStyle(n); return n.innerText.trim() === 'INFO' && cs.borderTopStyle === 'dashed' && document.querySelectorAll('#log-tecnico dt').length === 4; }), rd + ': INFO (borda tracejada) e 4 pares tecnicos na aba Cron');
+    await checagemGeral(page, rd + ' cron', contadores);
+    await page.close();
+}
+
+/** < 720px: filtros em coluna e paginacao em largura total; a pagina nao rola na horizontal (so o wrap). */
+async function cenarioLogsEstreito(browser, srv, contadores) {
+    const rot = '680x900 logs';
+    const page = await paginaLogs(browser, srv, 680, 900, rot, contadores, false);
+    await irPara(page, srv.base, '/gestao/logs.php?aba=api');
+    await checagemGeral(page, rot, contadores);
+    const q = await page.evaluate(() => {
+        const r = el => el.getBoundingClientRect();
+        const f = document.getElementById('logs-filtros');
+        const campos = Array.from(f.querySelectorAll('.gestao-campo')).filter(c => c.getClientRects().length);
+        const nav = document.getElementById('logs-paginacao'), ant = document.getElementById('pag-anterior'), prox = document.getElementById('pag-proxima');
+        const wrap = document.querySelector('.gestao-tabela-wrap'), lista = document.querySelector('.gestao-abas__lista');
+        return {
+            coluna: campos.every(c => Math.abs(r(c).left - r(campos[0]).left) < 1 && Math.abs(r(c).width - r(campos[0]).width) < 1) && campos.every((c, i) => i === 0 || r(c).top >= r(campos[i - 1]).bottom - 1),
+            largos: r(campos[0]).width >= r(f).width - 40,
+            navLargo: Math.abs(r(nav).width - r(wrap).width) <= 2 && r(ant).width >= r(nav).width / 3 && r(prox).width >= r(nav).width / 3,
+            altBtn: [ant, prox].map(b => Math.round(r(b).height)), dbg: [r(nav).width, r(wrap).width, r(ant).width, r(prox).width, r(nav).height].map(Math.round).join('/'),
+            wrapRola: wrap.scrollWidth > wrap.clientWidth + 1, abasRola: lista.scrollWidth > lista.clientWidth + 1,
+            abasLinhas: new Set(Array.from(document.querySelectorAll('#logs-abas .gestao-aba')).map(a => Math.round(r(a).top))).size,
+        };
+    });
+    if (process.env.GESTAO_DEBUG) { console.log(JSON.stringify(await page.evaluate(() => ['html', 'body', '.gestao-app', '.gestao-principal', '.gestao-conteudo', '.gestao-painel-logs', '.gestao-tabela-wrap', '#logs-filtros', '#logs-paginacao', '.gestao-topo'].map(q => { const e = document.querySelector(q); return q + ' sw=' + e.scrollWidth + ' cw=' + e.clientWidth + ' r=' + Math.round(e.getBoundingClientRect().right); })))); }
+    ok(q.coluna && q.largos, rot + ': filtros em coluna, campos em largura total');
+    ok(q.navLargo && q.altBtn.every(a => a >= 44), rot + ': paginacao em largura total, botoes >= 44px (nav/wrap/ant/prox/alt ' + q.dbg + ')');
+    ok(q.wrapRola && !q.abasRola, rot + ': so o .gestao-tabela-wrap rola na horizontal; abas sem rolagem (' + q.abasLinhas + ' linha(s))');
+    await page.screenshot({ path: path.join(CAPTURAS, 'logs-680.png') });
+    await page.close();
+}
+
+/** Sem JS: abas, atalho, filtros e paginacao sao links/formulario GET. */
+async function cenarioLogsSemJs(browser, srv, contadores) {
+    const rot = 'sem JS logs';
+    const page = await paginaLogs(browser, srv, 1366, 768, rot, contadores, true);
+    await irPara(page, srv.base, '/gestao/logs.php');
+    ok(await page.evaluate(() => document.querySelector('.gestao-sidebar').getBoundingClientRect().width === 248), rot + ': pagina completa sem JS');
+    await verificarListaLogs(page, rot, 1366, true, contadores);
+    await verificarFiltrosEPaginacao(page, rot);
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#pag-proxima')]);
+    ok(await page.evaluate(() => document.getElementById('logs-contador').textContent.trim() === 'Exibindo 51 a 100 de 122 registros.' && document.getElementById('pag-anterior').tagName === 'A'), rot + ': "Proxima" (link) leva a pagina 2');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#aba-expedicao')]);
+    ok(await page.evaluate(() => document.querySelectorAll('#logs-abas [aria-current]').length === 1 && document.getElementById('aba-expedicao').hasAttribute('aria-current') && document.getElementById('logs-contador').textContent.includes('de 3 registros')), rot + ': clicar na aba Expedicao troca a aba (1 aria-current)');
+    await page.select('#filtro-nivel', 'ERRO');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-aplicar-filtros')]);
+    ok(await page.evaluate(() => document.getElementById('filtro-nivel').value === 'ERRO' && document.querySelectorAll('#logs-tabela tbody tr').length === 1 && document.querySelector('#logs-tabela tbody tr').getAttribute('data-nivel') === 'erro'), rot + ': formulario GET filtra por nivel sem JS');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#btn-limpar-filtros')]);
+    ok(await page.evaluate(() => document.getElementById('filtro-nivel').value === '' && document.querySelectorAll('#logs-tabela tbody tr').length === 3), rot + ': "Limpar filtros" volta a lista da aba');
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#logs-tabela tbody tr .col-detalhe a')]);
+    ok(page.url().includes('/gestao/log.php?id=') && await page.evaluate(() => !!document.getElementById('log-detalhe') && !!document.getElementById('log-voltar')), rot + ': "Ver detalhe" abre o detalhe sem JS');
+    await checagemGeral(page, rot + ' detalhe', contadores);
+    await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle0' }), page.click('#log-voltar')]);
+    ok(page.url().includes('/gestao/logs.php?aba=expedicao'), rot + ': "Voltar para a lista" retorna a aba de origem');
+    await page.screenshot({ path: path.join(CAPTURAS, 'logs-sem-js.png') });
+    await page.close();
+}
+
+/** Estado vazio da tela (sem nenhum log). Esvazia tb_log_sistema do banco QA por stdin. */
+async function cenarioLogsVazio(browser, srv, contadores) {
+    const rot = '1366x768 logs-vazio';
+    const pronto = new Promise((res, rej) => {
+        const t = setTimeout(() => rej(new Error('servidor nao confirmou o esvaziamento dos logs')), 20000);
+        const h = d => { if (d.toString().includes('LOGS-ESVAZIADOS')) { clearTimeout(t); srv.proc.stdout.off('data', h); res(); } };
+        srv.proc.stdout.on('data', h);
+    });
+    srv.proc.stdin.write('esvaziar-logs\n');
+    await pronto;
+    const page = await paginaLogs(browser, srv, 1366, 768, rot, contadores, false);
+    await irPara(page, srv.base, '/gestao/logs.php');
+    await checagemGeral(page, rot, contadores);
+    const v = await page.evaluate(() => { const e = document.getElementById('logs-vazio'); return { txt: e && e.textContent.replace(/\s+/g, ' ').trim(), icone: !!(e && e.querySelector('svg')), limpar: !!document.getElementById('logs-vazio-limpar'), tabela: !!document.getElementById('logs-tabela'), pag: !!document.getElementById('logs-paginacao'), contador: document.getElementById('logs-contador').textContent.trim(), abas: Array.from(document.querySelectorAll('.gestao-aba__contagem')).map(c => c.textContent.trim()).join(','), atual: document.querySelectorAll('#logs-abas [aria-current]').length, ret: !!document.getElementById('logs-aviso-retencao') }; });
+    ok(v.txt === 'Nenhum registro nesta aba nos últimos 90 dias.' && v.icone && !v.limpar && !v.tabela && !v.pag && v.contador === 'Nenhum registro.' && v.abas === '0,0,0,0,0' && v.atual === 1 && v.ret, rot + ': estado vazio com icone e texto, abas zeradas, 1 aba atual, aviso de retencao, sem tabela/paginacao');
+    await botoesSolidos(page, rot);
+    await page.screenshot({ path: path.join(CAPTURAS, 'logs-vazio.png') });
+    await page.close();
+}
+
+/* ============================================================================================
  * Gestao Totem F2 (totens): lista, novo totem, URL do totem, dialogos, copiar, sem JS, vazio.
  * Semente do servidor: GUICHE-04 e DOCA-02 (ativos), BALCAO-01 (atendimento recente), BALCAO-09
  * (inativo), ABCDEFGHIJKLMNOPQRSTUVWX (nome 24 + empresa 16: URL mais longa), RECEPCAO-01 (legado)
@@ -1107,18 +1482,30 @@ async function cenarioTotensVazio(browser, srv, contadores) {
         srv = await subirServidor();
         console.log('servidor QA em ' + srv.base + ' (banco ' + srv.info.banco + ')');
         browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
-        await cenarioViewport(browser, srv, 1366, 768, true, contadores);
-        await cenarioViewport(browser, srv, 1920, 1080, false, contadores);
-        await cenarioCompleto(browser, srv, contadores);
-        await cenarioEstreito(browser, srv, contadores);
-        await cenarioSemJs(browser, srv, contadores);
+        // GESTAO_SO=logs roda so os cenarios da F3c (atalho de desenvolvimento; a rodada oficial roda tudo)
+        if (process.env.GESTAO_SO !== 'logs') {
+            await cenarioViewport(browser, srv, 1366, 768, true, contadores);
+            await cenarioViewport(browser, srv, 1920, 1080, false, contadores);
+            await cenarioCompleto(browser, srv, contadores);
+            await cenarioEstreito(browser, srv, contadores);
+            await cenarioSemJs(browser, srv, contadores);
+        }
+        // F3c (logs): 3 viewports + estreito, sem JS e vazio (o vazio apaga so tb_log_sistema do banco QA)
+        await cenarioLogsViewport(browser, srv, 1366, 768, contadores);
+        await cenarioLogsViewport(browser, srv, 1920, 1080, contadores);
+        await cenarioLogsViewport(browser, srv, 1000, 700, contadores);
+        await cenarioLogsEstreito(browser, srv, contadores);
+        await cenarioLogsSemJs(browser, srv, contadores);
+        await cenarioLogsVazio(browser, srv, contadores);
         // F2 (totens): lista, novo totem e URL em 3 viewports; fluxos com JS; sem JS; estado vazio (ultimo: esvazia o banco QA)
-        await cenarioTotensViewport(browser, srv, 1366, 768, contadores);
-        await cenarioTotensViewport(browser, srv, 1920, 1080, contadores);
-        await cenarioTotensViewport(browser, srv, 1000, 700, contadores);
-        await cenarioTotensFluxo(browser, srv, contadores);
-        await cenarioTotensSemJs(browser, srv, contadores);
-        await cenarioTotensVazio(browser, srv, contadores);
+        if (process.env.GESTAO_SO !== 'logs') {
+            await cenarioTotensViewport(browser, srv, 1366, 768, contadores);
+            await cenarioTotensViewport(browser, srv, 1920, 1080, contadores);
+            await cenarioTotensViewport(browser, srv, 1000, 700, contadores);
+            await cenarioTotensFluxo(browser, srv, contadores);
+            await cenarioTotensSemJs(browser, srv, contadores);
+            await cenarioTotensVazio(browser, srv, contadores);
+        }
         ok(contadores.csp.length === 0, 'console: nenhuma mensagem de CSP no Chrome' + (contadores.csp.length ? ' -> ' + contadores.csp.slice(0, 3).join(' | ') : ''));
         ok(contadores.erros.length === 0, 'nenhum erro de JavaScript nas paginas' + (contadores.erros.length ? ' -> ' + contadores.erros.slice(0, 3).join(' | ') : ''));
         ok(contadores.externos.length === 0, 'nenhuma requisicao externa (CDN/fonte/imagem)' + (contadores.externos.length ? ' -> ' + contadores.externos.slice(0, 3).join(' | ') : ''));

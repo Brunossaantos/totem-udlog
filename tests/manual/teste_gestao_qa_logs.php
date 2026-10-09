@@ -1097,9 +1097,9 @@ try {
     // =====================================================================
     // M1. Migration 023: idempotencia sobre schema pre-023 e leitura 5.7
     // =====================================================================
-    $schemaHead = (string) shell_exec('git -C ' . escapeshellarg($raiz) . ' show HEAD:sql/schema.sql 2>NUL');
+    $schemaHead = (string) shell_exec('git -C ' . escapeshellarg($raiz) . ' show ' . escapeshellarg('c4411ce^:sql/schema.sql') . ' 2>NUL');
     if ($schemaHead === '') {
-        $schemaHead = (string) shell_exec('git -C ' . escapeshellarg($raiz) . ' show HEAD:sql/schema.sql');
+        $schemaHead = (string) shell_exec('git -C ' . escapeshellarg($raiz) . ' show ' . escapeshellarg('c4411ce^:sql/schema.sql'));
     }
     afirmar('M1: schema.sql do HEAD obtido e NAO contem tb_log_sistema (estado pre-023)', strlen($schemaHead) > 1000 && !str_contains($schemaHead, 'tb_log_sistema'));
     $srv = qaQrPdoServidor(qaQrConfiguracao());

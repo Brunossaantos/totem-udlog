@@ -64,6 +64,7 @@ if (!function_exists('gestaoSprite')) {
             'fechar' => '<path d="M18 6L6 18M6 6l12 12"/>',
             'recolher' => '<path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>',
             'info' => '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+            'erro' => '<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/>',
             'ponto' => '<circle cx="12" cy="12" r="7"/>',
             'desbloquear' => '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
         ];
