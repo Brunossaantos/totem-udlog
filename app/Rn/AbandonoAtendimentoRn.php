@@ -4,6 +4,7 @@ namespace App\Rn;
 
 use App\Dao\AtendimentoDao;
 use App\Dao\AtendimentoNotaDao;
+use Util\LogSistema;
 use Util\NotaArquivoStorage;
 
 /**
@@ -138,6 +139,7 @@ class AbandonoAtendimentoRn
                 }
             }
             error_log('abandono: falha ao abandonar atendimento, mantido em_andamento [' . get_class($e) . '] id_atendimento=' . $idAtendimento);
+            LogSistema::registrar('cron_falhou', ['job' => 'abandonar_atendimentos', 'excecao' => $e, 'motivo' => 'falha_inesperada']);
             $resultado['falhas']++;
         } finally {
             if (!$confirmou) {

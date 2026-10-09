@@ -540,6 +540,7 @@ class AuthGestao
             $acao();
         } catch (Throwable $e) {
             error_log('AuthGestao: auditoria_falhou ' . get_class($e));
+            LogSistema::registrar('auditoria_falhou', ['excecao' => $e]);
         }
     }
 }

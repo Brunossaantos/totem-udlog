@@ -14,6 +14,8 @@ use App\Dao\TotemDao;
 use App\Dao\EmpresaDao;
 use App\Dao\OrdemColetaPendenteBaixaDao;
 use Util\CnpjValidador;
+use Util\LogCatalogo;
+use Util\LogSistema;
 use Util\NotaArquivoStorage;
 use Util\Resposta;
 use Util\UploadHelper;
@@ -140,6 +142,7 @@ class AtendimentoController
             try {
                 $ordens = $this->atendimentoRn->consultarOrdensAbertas($placa);
             } catch (\Throwable $e) {
+                LogSistema::registrar('oc_consulta_falhou', ['id_atendimento' => $idAtendimento, 'id_totem' => $idTotem, 'excecao' => $e, 'http' => 502]);
                 Resposta::erro('Nao foi possivel consultar as ordens de coleta agora', 502);
             }
 
@@ -1055,6 +1058,7 @@ class AtendimentoController
                 // fechada; nunca excecao, corpo, CPF ou token).
                 $categoria = self::categoriaFalhaCheckinParaLog($resultado['erro_categoria'] ?? null);
                 error_log('[AtendimentoController] checkin_talent_erro_reprocessavel id_atendimento=' . $idAtendimento . ' categoria=' . $categoria);
+                self::registrarFalhaCheckinNoLog('talent_erro_reprocessavel', $idAtendimento, $idTotem, $atendimento['tipo'], $categoria);
                 // 202 (contrato mantido): o check-in NAO foi concluido. O texto
                 // nao promete reprocessamento automatico e orienta chamar o
                 // atendimento. dados.mensagem_api (aditivo): retorno real da
@@ -1071,11 +1075,27 @@ class AtendimentoController
             case 'ENVIO_INDETERMINADO':
                 // Sem retry automatico (por design) — exige conferencia
                 // manual no painel do Talent.
+                self::registrarFalhaCheckinNoLog('talent_indeterminado', $idAtendimento, $idTotem, $atendimento['tipo'], self::categoriaFalhaCheckinParaLog($resultado['erro_categoria'] ?? null));
                 Resposta::erro('Nao foi possivel confirmar seu check-in — procure um atendente', 500);
                 return;
             default:
                 Resposta::erro('Nao foi possivel processar o check-in agora', 500);
         }
+    }
+
+    /**
+     * Log central (tb_log_sistema) de uma falha de check-in no Talent. So ids ja
+     * validados (posse do atendimento pelo totem autenticado), tipo e a categoria
+     * da allowlist (categoria_erro); 'erro_desconhecido' nao esta no catalogo e
+     * simplesmente nao e enviada. Nunca excecao, mensagem_api, corpo ou dado pessoal.
+     */
+    private static function registrarFalhaCheckinNoLog(string $categoriaLog, int $idAtendimento, int $idTotem, string $tipo, string $categoriaErro): void
+    {
+        $ctx = ['id_atendimento' => $idAtendimento, 'id_totem' => $idTotem, 'tipo' => $tipo];
+        if (in_array($categoriaErro, LogCatalogo::CATEGORIAS_ERRO_TALENT, true)) {
+            $ctx['categoria_erro'] = $categoriaErro;
+        }
+        LogSistema::registrar($categoriaLog, $ctx);
     }
 
     /**
@@ -1203,6 +1223,7 @@ class AtendimentoController
     {
         if ($this->ordemColetaClient === null || $this->ordemColetaPendenteBaixaDao === null) {
             error_log("finalizar: OrdemColetaClient/OrdemColetaPendenteBaixaDao nao injetados — pendencia de baixa nao registrada para id_atendimento={$idAtendimento}");
+            LogSistema::registrar('oc_baixa_falhou', ['id_atendimento' => $idAtendimento, 'motivo' => 'config_ausente']);
             return;
         }
 
@@ -1230,8 +1251,10 @@ class AtendimentoController
         try {
             $this->ordemColetaPendenteBaixaDao->registrar($idAtendimento, $numeroOrdemColeta);
             error_log("finalizar: baixa da ordem de coleta pendente, registrada para reconciliacao manual (id_atendimento={$idAtendimento})");
+            LogSistema::registrar('oc_baixa_falhou', ['id_atendimento' => $idAtendimento, 'motivo' => 'baixa_pendente']);
         } catch (\Throwable $e) {
             error_log("finalizar: falha ao registrar pendencia de baixa de ordem de coleta (id_atendimento={$idAtendimento})");
+            LogSistema::registrar('oc_baixa_falhou', ['id_atendimento' => $idAtendimento, 'excecao' => $e, 'motivo' => 'pendencia_nao_registrada']);
         }
     }
 

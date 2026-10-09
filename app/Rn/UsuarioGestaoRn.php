@@ -9,6 +9,7 @@ use PDO;
 use PDOException;
 use Throwable;
 use Util\AuthGestao;
+use Util\LogSistema;
 use Util\SenhaPolitica;
 
 /**
@@ -679,6 +680,7 @@ class UsuarioGestaoRn
             $this->auditoria->registrar($idAdmin, $acao, 'usuario', $idAlvo, 'SEM_EFEITO', $detalhe, $ip);
         } catch (Throwable $e) {
             error_log('UsuarioGestaoRn: auditoria_recusa_falhou ' . get_class($e));
+            LogSistema::registrar('auditoria_falhou', ['excecao' => $e]);
         }
     }
 
@@ -690,6 +692,7 @@ class UsuarioGestaoRn
             $this->auditoria->registrar($idAtor, $acao, 'usuario', $idAlvo, 'ERRO', [], $ip);
         } catch (Throwable $e2) {
             error_log('UsuarioGestaoRn: auditoria_erro_falhou ' . get_class($e2));
+            LogSistema::registrar('auditoria_falhou', ['excecao' => $e2]);
         }
 
         return ['ok' => false, 'codigo' => 'erro_interno'];
@@ -701,6 +704,7 @@ class UsuarioGestaoRn
             $this->auditoria->fechar($idAuditoria, $resultado);
         } catch (Throwable $e) {
             error_log('UsuarioGestaoRn: auditoria_fechar_falhou ' . get_class($e));
+            LogSistema::registrar('auditoria_falhou', ['excecao' => $e]);
         }
     }
 }

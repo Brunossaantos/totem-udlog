@@ -71,6 +71,16 @@ class LogSistemaDao
         return (int) $this->pdo->query('SELECT COUNT(*) FROM tb_log_sistema WHERE criado_em >= CURDATE()')->fetchColumn();
     }
 
+    /** Linhas da categoria criadas hoje (dia da sessao, -03:00). */
+    public function contarCriadosHojePorCategoria(string $categoria): int
+    {
+        self::$consultasDeTeto++;
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM tb_log_sistema WHERE categoria = :c AND criado_em >= CURDATE()');
+        $stmt->execute(['c' => $categoria]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
     public function contarTotal(): int
     {
         self::$consultasDeTeto++;

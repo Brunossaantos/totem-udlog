@@ -589,7 +589,7 @@ try {
     LogSistema::registrar('erro_tecnico', ['id_atendimento' => 1, 'id_totem' => 1, 'tipo' => 'recebimento']);
     LogSistemaDao::$consultasDeTeto = 0;
     lsFlush();
-    afirmar('sem COUNT (a): linha nova confere os tetos (2 contagens: diaria e total)', LogSistemaDao::$consultasDeTeto === 2 && (int) lsLinhas($pdo, "categoria = 'erro_tecnico'")[0]['contador'] === 1);
+    afirmar('sem COUNT (a): linha nova confere os tetos (3 contagens: diaria, total e da categoria)', LogSistemaDao::$consultasDeTeto === 3 && (int) lsLinhas($pdo, "categoria = 'erro_tecnico'")[0]['contador'] === 1);
     lsReset();
     LogSistemaDao::$consultasDeTeto = 0;
     LogSistema::registrar('erro_tecnico', ['id_atendimento' => 1, 'id_totem' => 1, 'tipo' => 'recebimento']);
@@ -602,7 +602,7 @@ try {
     LogSistema::registrar('erro_tecnico', ['id_atendimento' => 2, 'id_totem' => 1, 'tipo' => 'recebimento']);
     LogSistema::registrar('erro_tecnico', ['id_atendimento' => 3, 'id_totem' => 1, 'tipo' => 'recebimento']);
     lsFlush();
-    afirmar('sem COUNT (c): existente + 2 novas na mesma descarga = 2 contagens no total (1x por descarga) e 3 linhas', LogSistemaDao::$consultasDeTeto === 2 && (int) gtEscalar($pdo, "SELECT COUNT(*) FROM tb_log_sistema WHERE categoria = 'erro_tecnico'") === 3 && (int) lsLinhas($pdo, "categoria = 'erro_tecnico' AND id_atendimento = 1")[0]['contador'] === 4);
+    afirmar('sem COUNT (c): existente + 2 novas na mesma descarga = 3 contagens no total (diaria, total e da categoria, 1x por descarga) e 3 linhas', LogSistemaDao::$consultasDeTeto === 3 && (int) gtEscalar($pdo, "SELECT COUNT(*) FROM tb_log_sistema WHERE categoria = 'erro_tecnico'") === 3 && (int) lsLinhas($pdo, "categoria = 'erro_tecnico' AND id_atendimento = 1")[0]['contador'] === 4);
     lsLimpar($pdo);
 
     // teto diario
@@ -639,6 +639,25 @@ try {
     lsFlush();
     $s = lsLinhas($pdo, "categoria = 'log_suprimido'");
     afirmar('teto diario: nova supressao so soma no log_suprimido (continua 1 linha, contador 4)', count($s) === 1 && (int) $s[0]['contador'] === 4);
+
+    // teto diario POR CATEGORIA
+    lsReset();
+    lsLimpar($pdo);
+    for ($i = 1; $i <= LogSistema::TETO_DIARIO_POR_CATEGORIA + 20; $i++) {
+        LogSistema::registrar('vio_erro_interno', ['id_atendimento' => $i, 'id_totem' => 1, 'tipo' => 'expedicao']);
+        if ($i % 10 === 0) {
+            lsFlush();
+        }
+    }
+    lsFlush();
+    afirmar('teto por categoria: vio_erro_interno com ids distintos para em ' . LogSistema::TETO_DIARIO_POR_CATEGORIA . ' linhas', (int) gtEscalar($pdo, "SELECT COUNT(*) FROM tb_log_sistema WHERE categoria = 'vio_erro_interno'") === LogSistema::TETO_DIARIO_POR_CATEGORIA);
+    $s = lsLinhas($pdo, "categoria = 'log_suprimido'");
+    afirmar('teto por categoria: excedentes contam em log_suprimido motivo=teto_categoria (20)', count($s) === 1 && $s[0]['detalhe'] === 'motivo=teto_categoria' && (int) $s[0]['contador'] === 20);
+    LogSistema::registrar('erro_banco_pdo', ['id_atendimento' => 1, 'id_totem' => 1, 'tipo' => 'expedicao']);
+    LogSistema::registrar('vio_erro_interno', ['id_atendimento' => 1, 'id_totem' => 1, 'tipo' => 'expedicao']);
+    lsFlush();
+    afirmar('teto por categoria: erro_banco_pdo (outra categoria) ainda grava; linha ja existente de vio_erro_interno ainda soma', (int) gtEscalar($pdo, "SELECT COUNT(*) FROM tb_log_sistema WHERE categoria = 'erro_banco_pdo'") === 1 && (int) gtEscalar($pdo, "SELECT contador FROM tb_log_sistema WHERE categoria = 'vio_erro_interno' AND id_atendimento = 1") === 2);
+    lsLimpar($pdo);
 
     // teto total
     lsReset();

@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Rn\OrdemColetaArquivoRn;
 use Util\AuthServidor;
+use Util\LogSistema;
 use Util\Resposta;
 
 /**
@@ -86,7 +87,7 @@ class OrdemColetaAnexoController
             $resultado = $this->rn->receber($entrada);
         } catch (\Throwable $e) {
             error_log('OrdemColetaAnexoController: falha_inesperada ' . get_class($e));
-            self::responder(500, 'ERRO_INTERNO', 'Erro interno ao processar o arquivo.');
+            self::responder(500, 'ERRO_INTERNO', 'Erro interno ao processar o arquivo.', [], $e);
         }
 
         if ($resultado['http'] >= 400) {
@@ -126,8 +127,41 @@ class OrdemColetaAnexoController
         return $acumulado;
     }
 
-    private static function responder(int $http, string $codigo, string $mensagem, array $dados = []): void
+    /**
+     * Log central (so codigo HTTP e motivo do catalogo; nunca CNPJ, numero da OC,
+     * caminho, corpo nem mensagem). 4xx = recusa (AVISO); 5xx = erro (ERRO).
+     */
+    private static function registrarLog(int $http, string $codigo, ?\Throwable $excecao): void
     {
+        if ($http >= 500) {
+            $motivo = $codigo === 'INDISPONIVEL' ? 'indisponivel' : 'falha_inesperada';
+            $ctx = ['http' => $http, 'motivo' => $motivo];
+            if ($excecao !== null) {
+                $ctx['excecao'] = $excecao;
+            }
+            LogSistema::registrar('n8n_anexo_erro', $ctx);
+
+            return;
+        }
+        $motivos = [
+            'METODO_NAO_PERMITIDO' => 'metodo_nao_permitido',
+            'HTTPS_OBRIGATORIO' => 'https_obrigatorio',
+            'MUITAS_TENTATIVAS' => 'muitas_tentativas',
+            'NAO_AUTORIZADO' => 'nao_autorizado',
+            'ARQUIVO_MUITO_GRANDE' => 'arquivo_muito_grande',
+            'CORPO_INVALIDO' => 'corpo_invalido',
+            'CAMPO_INVALIDO' => 'dados_invalidos',
+            'FORMATO_NAO_SUPORTADO' => 'pdf_invalido',
+        ];
+        LogSistema::registrar('n8n_anexo_recusado', [
+            'http' => $http,
+            'motivo' => $motivos[$codigo] ?? 'dados_invalidos',
+        ]);
+    }
+
+    private static function responder(int $http, string $codigo, string $mensagem, array $dados = [], ?\Throwable $excecao = null): void
+    {
+        self::registrarLog($http, $codigo, $excecao);
         Resposta::erroComDados($mensagem, $codigo, $dados, $http); // encerra (exit)
     }
 }

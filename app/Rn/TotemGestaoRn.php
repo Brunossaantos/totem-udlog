@@ -9,6 +9,7 @@ use LogicException;
 use PDO;
 use PDOException;
 use Throwable;
+use Util\LogSistema;
 use Util\TotemCodigo;
 use Util\TotemUrlBase;
 
@@ -437,6 +438,7 @@ class TotemGestaoRn
             $this->auditoria->registrar($idAdmin, $acao, 'totem', $idAlvo, 'SEM_EFEITO', $detalhe, $ip);
         } catch (Throwable $e) {
             error_log('TotemGestaoRn: auditoria_recusa_falhou ' . get_class($e));
+            LogSistema::registrar('auditoria_falhou', ['excecao' => $e]);
         }
     }
 
@@ -446,6 +448,7 @@ class TotemGestaoRn
             $this->auditoria->registrar($idAtor, $acao, 'totem', $idAlvo, 'ERRO', [], $ip);
         } catch (Throwable $e2) {
             error_log('TotemGestaoRn: auditoria_erro_falhou ' . get_class($e2));
+            LogSistema::registrar('auditoria_falhou', ['excecao' => $e2]);
         }
     }
 
@@ -464,6 +467,7 @@ class TotemGestaoRn
             $this->auditoria->fechar($idAuditoria, $resultado);
         } catch (Throwable $e) {
             error_log('TotemGestaoRn: auditoria_fechar_falhou ' . get_class($e));
+            LogSistema::registrar('auditoria_falhou', ['excecao' => $e]);
         }
     }
 }

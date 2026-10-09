@@ -26,6 +26,10 @@ $qaJson = getenv('QA_GESTAO_ENV_JSON');
 if ($qaJson !== false && $qaJson !== '') {
     $qaMapa = json_decode($qaJson, true);
     if (is_array($qaMapa)) {
+        if (array_key_exists('DB_NAME', $qaMapa)) {
+            fwrite(STDERR, "QA prepend gestao: QA_GESTAO_ENV_JSON nao pode conter DB_NAME; abortando.\n");
+            exit(3);
+        }
         foreach ($qaMapa as $qaChave => $qaValor) {
             if (is_string($qaChave) && preg_match('/\A[A-Z0-9_]{1,60}\z/', $qaChave) === 1 && is_string($qaValor)) {
                 $_ENV[$qaChave] = $qaValor;

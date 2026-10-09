@@ -32,6 +32,7 @@
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use Util\Bootstrap;
+use Util\LogSistema;
 use App\Dao\RateLimitOcrDao;
 
 // Defesa adicional: rejeita execucao fora de PHP CLI. Nao ha rota HTTP
@@ -100,10 +101,14 @@ try {
         $lotes,
         $corteUnixTime
     ));
+    LogSistema::registrar('cron_resumo', ['job' => 'limpar_rate_limit_ocr', 'itens' => $totalApagado, 'lotes' => $lotes]);
+    LogSistema::descarregar();
 
     exit(0);
 } catch (\PDOException $e) {
     logFalhaBancoPdoCron('limpar-rate-limit-ocr', $e);
+    LogSistema::registrar('cron_falhou', ['job' => 'limpar_rate_limit_ocr', 'excecao' => $e, 'motivo' => 'erro_banco']);
+    LogSistema::descarregar();
     exit(1);
 } catch (\Throwable $e) {
     // Cobre falha de Util\Bootstrap::conectar() (.env ausente/malformado,
@@ -112,5 +117,7 @@ try {
     // ponto NENHUM DELETE foi sequer preparado (falha ocorre antes de
     // qualquer chamada a RateLimitOcrDao).
     error_log('limpar-rate-limit-ocr: falha de bootstrap (.env/conexao) -- nenhuma exclusao iniciada');
+    LogSistema::registrar('cron_falhou', ['job' => 'limpar_rate_limit_ocr', 'excecao' => $e, 'motivo' => 'falha_inesperada']);
+    LogSistema::descarregar();
     exit(1);
 }

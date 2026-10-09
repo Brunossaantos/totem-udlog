@@ -6,6 +6,7 @@ use FPDF;
 use App\Dao\AtendimentoDao;
 use Util\ConfiguracaoServicoImpressao;
 use Util\EtiquetaLayout;
+use Util\LogSistema;
 use Util\Resposta;
 use Util\TextoEtiqueta;
 
@@ -68,6 +69,7 @@ class ImpressaoAtendimentoController
             $config = ConfiguracaoServicoImpressao::obter();
         } catch (\RuntimeException $e) {
             error_log('impressao configuracao-servico-local: ' . get_class($e));
+            LogSistema::registrar('impressao_config_falhou', ['excecao' => $e, 'motivo' => 'config_invalida']);
             Resposta::erro('Servico local de impressao nao configurado', 503);
             return;
         }
@@ -129,7 +131,7 @@ class ImpressaoAtendimentoController
             return;
         }
 
-        $config = $this->lerConfiguracaoEtiqueta();
+        $config = $this->lerConfiguracaoEtiqueta($idAtendimento, $idTotem, (string) $atendimento['tipo']);
 
         // Identificador SEMPRE novo — nunca reaproveita um job de impressao
         // anterior, mesmo em reimpressao (cada chamada e um novo job,
@@ -140,6 +142,7 @@ class ImpressaoAtendimentoController
             $pdfBytes = $this->montarPdf($config, $nomeMotorista, $nrRegAcesso, $nomeAjudante, $destinatario);
         } catch (\Throwable $e) {
             error_log('impressao gerar-etiqueta: falha ao gerar PDF: ' . get_class($e));
+            LogSistema::registrar('etiqueta_pdf_falhou', ['id_atendimento' => $idAtendimento, 'id_totem' => $idTotem, 'tipo' => (string) $atendimento['tipo'], 'excecao' => $e]);
             Resposta::erro('Nao foi possivel gerar a etiqueta agora', 500);
             return;
         }
@@ -196,7 +199,7 @@ class ImpressaoAtendimentoController
      * diretamente, que e isolado por design) — leitura de config e simples
      * o bastante para nao justificar acoplamento entre os dois controllers.
      */
-    private function lerConfiguracaoEtiqueta(): array
+    private function lerConfiguracaoEtiqueta(int $idAtendimento, int $idTotem, string $tipo): array
     {
         $largura = $_ENV['ETIQUETA_LARGURA_MM'] ?? '';
         $comprimento = $_ENV['ETIQUETA_COMPRIMENTO_MM'] ?? '';
@@ -210,6 +213,7 @@ class ImpressaoAtendimentoController
             || !in_array(strtolower((string) $corte), ['true', 'false'], true)
         ) {
             error_log('impressao gerar-etiqueta: configuracao de etiqueta ausente/invalida no .env (ETIQUETA_LARGURA_MM/ETIQUETA_COMPRIMENTO_MM/ETIQUETA_ORIENTACAO/ETIQUETA_CORTE_APOS_IMPRESSAO)');
+            LogSistema::registrar('etiqueta_config_invalida', ['id_atendimento' => $idAtendimento, 'id_totem' => $idTotem, 'tipo' => $tipo, 'motivo' => 'config_invalida']);
             Resposta::erro('Configuracao de etiqueta ausente ou invalida', 500);
         }
 

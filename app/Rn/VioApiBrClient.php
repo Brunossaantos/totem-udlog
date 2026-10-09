@@ -2,6 +2,8 @@
 
 namespace App\Rn;
 
+use Util\LogSistema;
+
 /**
  * Cliente da API contratada `vio.api.br` — SUBSTITUI o USO direto do Serpro
  * (App\Rn\VioDecodeClient, removido do repositorio na demanda
@@ -426,5 +428,33 @@ class VioApiBrClient
     private function logFalhaTecnica(string $categoria): void
     {
         error_log('VioApiBrClient: falha tecnica categoria=' . $categoria);
+
+        // Log central: so o codigo HTTP (quando a categoria o traz) e um motivo do
+        // catalogo derivado da categoria tecnica fixa. Este cliente nao conhece
+        // atendimento, totem nem documento, entao o evento vai para a aba API.
+        $http = preg_match('/_(\d{3})\z/D', $categoria, $m) === 1 ? (int) $m[1] : null;
+        $ctx = ['motivo' => self::motivoDoLogCentral($categoria, $http)];
+        if ($http !== null) {
+            $ctx['http'] = $http;
+        }
+        LogSistema::registrar('vio_falha_integracao', $ctx);
+    }
+
+    private static function motivoDoLogCentral(string $categoria, ?int $http): string
+    {
+        if (str_contains($categoria, 'timeout')) {
+            return 'timeout';
+        }
+        if (str_contains($categoria, 'rede_sem_conexao') || str_contains($categoria, '5xx') || ($http !== null && $http >= 500)) {
+            return 'indisponivel';
+        }
+        if ($http === 401 || $http === 403) {
+            return 'nao_autorizado';
+        }
+        if ($http === 400 || $http === 422 || str_contains($categoria, 'formato_invalido') || str_contains($categoria, 'sem_id')) {
+            return 'dados_invalidos';
+        }
+
+        return 'falha_inesperada';
     }
 }

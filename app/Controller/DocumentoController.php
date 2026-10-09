@@ -3,6 +3,7 @@
 namespace App\Controller;
 
 use PDO;
+use Util\LogSistema;
 use Util\UploadHelper;
 use Util\Resposta;
 use App\Dao\AtendimentoDao;
@@ -656,6 +657,7 @@ class DocumentoController
     private function logFalhaTecnica(string $contexto, \Throwable $e): void
     {
         error_log($contexto . ': falha nao prevista [' . get_class($e) . ']');
+        LogSistema::registrar('erro_tecnico', ['excecao' => $e]);
     }
 
     private function obterLock(string $chave): bool

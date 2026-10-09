@@ -64,6 +64,7 @@ final class GestaoHttp
     {
         set_exception_handler(static function (\Throwable $e): void {
             error_log('gestao: excecao_nao_tratada ' . get_class($e));
+            LogSistema::registrar('gestao_erro_interno', ['excecao' => $e, 'http' => 500, 'motivo' => 'falha_inesperada']);
             self::erroInterno();
         });
     }

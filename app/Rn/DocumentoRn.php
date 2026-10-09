@@ -5,6 +5,7 @@ namespace App\Rn;
 use App\Dao\AtendimentoDao;
 use App\Dao\VioCacheDao;
 use Util\CpfValidador;
+use Util\LogSistema;
 
 /**
  * Orquestra a validacao de CNH/CRLV (Expedicao e Recebimento) via
@@ -181,7 +182,7 @@ class DocumentoRn
             // pode_avancar=false, nunca uma excecao/HTTP 500. Nenhum dado
             // (exercicio ou qualquer outro campo) e persistido; origem e
             // status_revisao permanecem exatamente os anteriores.
-            error_log($e->getMessage());
+            $this->logErroTipoVio($atendimento, 'crlv', $e);
 
             return [
                 'ok' => false,
@@ -715,7 +716,7 @@ class DocumentoRn
             $cpf = CpfValidador::normalizarEValidar($this->extrairCampoTexto($dados, 'cnh_vio_api', self::CAMPO_REAL_CNH_CPF));
             $dataValidade = $this->normalizarData($this->extrairCampoTexto($dados, 'cnh_vio_api', self::CAMPO_REAL_CNH_VALIDADE));
         } catch (DocumentoVioTipoInvalidoException $e) {
-            error_log($e->getMessage());
+            $this->logErroTipoVio($atendimento, 'cnh', $e);
             return $this->respostaVioApiBrNaoAprovada($atendimento, 'cnh', 'tipo_invalido_campo');
         }
 
@@ -774,7 +775,7 @@ class DocumentoRn
             $tipoBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_TIPO);
             $renavamBruto = $this->extrairCampoTexto($dados, 'crlv_vio_api', self::CAMPO_REAL_CRLV_RENAVAM);
         } catch (DocumentoVioTipoInvalidoException $e) {
-            error_log($e->getMessage());
+            $this->logErroTipoVio($atendimento, 'crlv', $e);
             return $this->respostaVioApiBrNaoAprovada($atendimento, 'crlv', $codigoExcecao);
         }
 
@@ -863,6 +864,23 @@ class DocumentoRn
         }
 
         return true;
+    }
+
+    /**
+     * Log de DocumentoVioTipoInvalidoException: texto FIXO (nunca getMessage()) no
+     * error_log e um registro no log central com so a classe da excecao, o
+     * documento (cnh|crlv) e o id do atendimento ja validado pelo controller.
+     */
+    private function logErroTipoVio(array $atendimento, string $documento, \Throwable $e): void
+    {
+        error_log('DocumentoRn: campo VIO com tipo invalido (documento=' . $documento . ')');
+
+        $ctx = ['excecao' => $e, 'documento' => $documento, 'motivo' => 'dados_invalidos'];
+        $idAtendimento = (int) ($atendimento['id_atendimento'] ?? 0);
+        if ($idAtendimento > 0) {
+            $ctx['id_atendimento'] = $idAtendimento;
+        }
+        LogSistema::registrar('vio_erro_interno', $ctx);
     }
 
     private function respostaVioApiBrNaoAprovada(array $atendimento, string $tipo, string $motivoCodigo = 'persistencia_nao_vigente'): array

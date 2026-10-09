@@ -18,6 +18,7 @@ require_once __DIR__ . '/../../vendor/autoload.php';
 
 use Dotenv\Dotenv;
 use Util\AuthServidor;
+use Util\LogSistema;
 use Util\OrdemColetaArquivoStorage;
 use Util\Resposta;
 use App\Controller\OrdemColetaAnexoController;
@@ -58,5 +59,6 @@ try {
     $controller->processar($_SERVER, is_string($authorization) ? $authorization : null, static fn () => fopen('php://input', 'rb'));
 } catch (\Throwable $e) {
     error_log('ordem-coleta-anexo: falha_inesperada ' . get_class($e));
+    LogSistema::registrar('n8n_anexo_erro', ['excecao' => $e, 'http' => 500, 'motivo' => 'falha_inesperada']);
     Resposta::erroComDados('Erro interno ao processar o arquivo.', 'ERRO_INTERNO', [], 500);
 }

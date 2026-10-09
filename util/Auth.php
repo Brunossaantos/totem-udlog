@@ -25,6 +25,7 @@ class Auth
         $totem = $stmt->fetch();
 
         if (!$totem) {
+            LogSistema::registrar('totem_nao_autorizado');
             Resposta::erro('Totem nao autorizado', 401);
         }
 

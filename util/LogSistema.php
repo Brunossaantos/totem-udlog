@@ -44,6 +44,18 @@ use Throwable;
  *    contagem na descarga, SO para linha nova (o 1o passo e o UPDATE da linha
  *    existente da mesma dedup_chave+janela, sem COUNT): processos simultaneos
  *    podem passar do teto por poucas linhas (aceito).
+ *  - Teto diario POR CATEGORIA (TETO_DIARIO_POR_CATEGORIA linhas novas/dia; `cron_*`
+ *    e `log_suprimido` ficam fora): uma categoria com cardinalidade alta (ids
+ *    variaveis) nao esgota o teto global das demais. Estourado: sem linha nova, so
+ *    soma em `log_suprimido` (motivo=teto_categoria). 1 COUNT por categoria por
+ *    descarga, so para linha nova.
+ *  - Throttle de escrita pre-auth (flag `throttle_escrita` no catalogo, so no web, nao
+ *    em CLI/cron): 1 tentativa de escrita por categoria por 60 s por servidor,
+ *    marcador em STORAGE_PATH/log_throttle/<hmac da categoria>.json (so timestamp).
+ *    Dentro da janela, ou se o marcador/pasta nao puder ser lido/gravado, o evento
+ *    e DESCARTADO em silencio (nunca amplifica): nem conexao dedicada nem UPDATE. O
+ *    contador dessas categorias fica SUBESTIMADO (conta ~1 por minuto por servidor,
+ *    nao o total real de tentativas).
  *  - O contador em memoria por requisicao (repeticoes da mesma entrada antes do
  *    flush) e TRUNCADO em OCORRENCIAS_MAXIMAS_POR_ENTRADA (1000) por
  *    entrada/requisicao: acima disso as repeticoes nao somam mais nada.
@@ -56,6 +68,10 @@ final class LogSistema
     public const TETO_DIARIO = 2000;
 
     public const TETO_TOTAL = 100000;
+
+    public const TETO_DIARIO_POR_CATEGORIA = 500;
+
+    public const THROTTLE_SEGUNDOS = 60;
 
     /** Teto de repeticoes somadas na memoria para uma mesma entrada antes do flush. */
     private const OCORRENCIAS_MAXIMAS_POR_ENTRADA = 1000;
@@ -135,6 +151,10 @@ final class LogSistema
             return;
         }
 
+        if (!empty($def['throttle_escrita']) && PHP_SAPI !== 'cli' && !self::throttlePermiteEscrita($categoria)) {
+            return;
+        }
+
         $norm = self::validar($def['contexto'], $ctx);
         if (is_string($norm)) {
             self::rejeitar($norm, $categoria);
@@ -142,6 +162,58 @@ final class LogSistema
             return;
         }
         self::enfileirar($categoria, $def, $norm);
+    }
+
+    /**
+     * 1 escrita por categoria por THROTTLE_SEGUNDOS por servidor. Falha segura =
+     * descartar (false). Publico so para os testes em CLI.
+     *
+     * @param int|null $agora so para teste
+     */
+    public static function throttlePermiteEscrita(string $categoria, ?int $agora = null): bool
+    {
+        try {
+            if (!isset(LogCatalogo::CATEGORIAS[$categoria])) {
+                return false;
+            }
+            $base = rtrim((string) ($_ENV['STORAGE_PATH'] ?? ''), '/\\');
+            if ($base === '') {
+                return false;
+            }
+            $dir = $base . DIRECTORY_SEPARATOR . 'log_throttle';
+            if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
+                return false;
+            }
+            $sal = (string) ($_ENV['GESTAO_HASH_SALT'] ?? '');
+            if (strlen($sal) < 16) {
+                $sal = 'totem-udlog/log-throttle/v1';
+            }
+            $arquivo = $dir . DIRECTORY_SEPARATOR . substr(hash_hmac('sha256', $categoria, $sal), 0, 40) . '.json';
+            $h = @fopen($arquivo, 'c+b');
+            if ($h === false) {
+                return false;
+            }
+            try {
+                if (!@flock($h, LOCK_EX | LOCK_NB)) {
+                    return false;
+                }
+                $agora ??= time();
+                $ultimo = (int) trim((string) stream_get_contents($h));
+                if ($ultimo > 0 && $agora - $ultimo >= 0 && $agora - $ultimo < self::THROTTLE_SEGUNDOS) {
+                    return false;
+                }
+                if (!ftruncate($h, 0) || fseek($h, 0) !== 0 || fwrite($h, (string) $agora) === false || !fflush($h)) {
+                    return false;
+                }
+                @flock($h, LOCK_UN);
+
+                return true;
+            } finally {
+                @fclose($h);
+            }
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     /**
@@ -345,7 +417,7 @@ final class LogSistema
             return;
         }
 
-        $estado = ['hoje' => null, 'total' => null];
+        $estado = ['hoje' => null, 'total' => null, 'cat' => []];
         foreach ($itens as $indice => $item) {
             try {
                 self::gravar($dao, $item, $estado);
@@ -363,7 +435,7 @@ final class LogSistema
 
     /**
      * @param array<string,mixed> $item
-     * @param array{hoje:?int,total:?int} $estado
+     * @param array{hoje:?int,total:?int,cat:array<string,int>} $estado
      */
     private static function gravar(LogSistemaDao $dao, array $item, array &$estado): void
     {
@@ -398,6 +470,12 @@ final class LogSistema
                 $teto = 'teto_total';
             }
         }
+        if ($teto === null && !str_starts_with($item['categoria'], 'cron_') && $item['categoria'] !== 'log_suprimido') {
+            $estado['cat'][$item['categoria']] ??= $dao->contarCriadosHojePorCategoria($item['categoria']);
+            if ($estado['cat'][$item['categoria']] >= self::TETO_DIARIO_POR_CATEGORIA) {
+                $teto = 'teto_categoria';
+            }
+        }
         if ($teto !== null) {
             self::registrarSuprimido($dao, $teto, $ocorrencias);
 
@@ -417,6 +495,9 @@ final class LogSistema
         ], $ocorrencias);
         // estimativa local (corrida: outro processo pode ter criado a linha entre o UPDATE e o INSERT)
         $estado['hoje']++;
+        if (isset($estado['cat'][$item['categoria']])) {
+            $estado['cat'][$item['categoria']]++;
+        }
         if ($estado['total'] !== null) {
             $estado['total']++;
         }

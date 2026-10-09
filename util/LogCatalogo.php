@@ -17,7 +17,10 @@ namespace Util;
  *  - mensagem: texto FIXO (ate 160 caracteres);
  *  - janela:   segundos do balde de deduplicacao;
  *  - contexto: chaves de contexto aceitas (qualquer outra descarta o evento);
- *  - interna:  (opcional) so a propria infraestrutura de log pode usar.
+ *  - interna:  (opcional) so a propria infraestrutura de log pode usar;
+ *  - throttle_escrita: (opcional) evento que um anonimo dispara sem ids (401, recusa
+ *              4xx): no web, no maximo 1 tentativa de escrita no banco por categoria
+ *              por 60 s por servidor (ver Util\LogSistema).
  *
  * Eventos que um anonimo consegue disparar (token de totem invalido, 401) NAO
  * listam id_totem nem id_atendimento: uma linha por janela, sem cardinalidade
@@ -42,7 +45,8 @@ final class LogCatalogo
         'metodo_nao_permitido', 'auditoria_indisponivel', 'erro_banco', 'timeout',
         'falha_inesperada', 'config_ausente', 'config_invalida', 'lock_ocupado',
         'categoria_desconhecida', 'chave_desconhecida', 'valor_invalido',
-        'categoria_interna', 'teto_diario', 'teto_total',
+        'categoria_interna', 'teto_diario', 'teto_total', 'teto_categoria',
+        'baixa_pendente', 'pendencia_nao_registrada',
     ];
 
     public const CATEGORIAS_ERRO_TALENT = [
@@ -68,16 +72,18 @@ final class LogCatalogo
         'logs_apagados' => ['int', 0, 999999999],
         'auditoria_apagados' => ['int', 0, 999999999],
         'lotes' => ['int', 0, 99999],
+        'itens' => ['int', 0, 99999],
+        'falhas' => ['int', 0, 99999],
     ];
 
     /** Ordem fixa das chaves no `detalhe` (apos classe, sqlstate e http). */
-    public const ORDEM_DOMINIO = ['alvo', 'job', 'motivo', 'categoria_erro', 'documento', 'logs_apagados', 'auditoria_apagados', 'lotes'];
+    public const ORDEM_DOMINIO = ['alvo', 'job', 'motivo', 'categoria_erro', 'documento', 'logs_apagados', 'auditoria_apagados', 'lotes', 'itens', 'falhas'];
 
     public const CATEGORIAS = [
         'totem_nao_autorizado' => [
             'origem' => 'API', 'nivel' => 'AVISO',
             'mensagem' => 'Requisição à API com token de totem informado e inválido.',
-            'janela' => 900, 'contexto' => [],
+            'janela' => 900, 'contexto' => [], 'throttle_escrita' => true,
         ],
         'oc_consulta_falhou' => [
             'origem' => 'EXPEDICAO', 'nivel' => 'ERRO',
@@ -97,7 +103,7 @@ final class LogCatalogo
         'n8n_anexo_recusado' => [
             'origem' => 'API', 'nivel' => 'AVISO',
             'mensagem' => 'Anexo de ordem de coleta recusado pela API.',
-            'janela' => 300, 'contexto' => ['http', 'motivo'],
+            'janela' => 300, 'contexto' => ['http', 'motivo'], 'throttle_escrita' => true,
         ],
         'n8n_anexo_erro' => [
             'origem' => 'API', 'nivel' => 'ERRO',
@@ -137,7 +143,7 @@ final class LogCatalogo
         'rate_limit_ocr_excedido' => [
             'origem' => 'RECEBIMENTO', 'nivel' => 'AVISO',
             'mensagem' => 'Limite de leitura de notas excedido pelo totem.',
-            'janela' => 300, 'contexto' => ['id_atendimento', 'id_totem'],
+            'janela' => 600, 'contexto' => ['id_atendimento', 'id_totem'],
         ],
         'etiqueta_pdf_falhou' => [
             'origem' => 'por_tipo', 'nivel' => 'ERRO',
@@ -147,7 +153,7 @@ final class LogCatalogo
         'etiqueta_config_invalida' => [
             'origem' => 'por_tipo', 'nivel' => 'ERRO',
             'mensagem' => 'Configuração da etiqueta inválida.',
-            'janela' => 300, 'contexto' => ['id_atendimento', 'id_totem', 'tipo', 'motivo'],
+            'janela' => 3600, 'contexto' => ['id_atendimento', 'id_totem', 'tipo', 'motivo'],
         ],
         'impressao_config_falhou' => [
             'origem' => 'por_tipo', 'nivel' => 'ERRO',
@@ -157,12 +163,12 @@ final class LogCatalogo
         'cron_resumo' => [
             'origem' => 'CRON', 'nivel' => 'INFO',
             'mensagem' => 'Rotina agendada concluída.',
-            'janela' => 300, 'contexto' => ['job', 'logs_apagados', 'auditoria_apagados', 'lotes'],
+            'janela' => 300, 'contexto' => ['job', 'logs_apagados', 'auditoria_apagados', 'lotes', 'itens', 'falhas'],
         ],
         'cron_falhou' => [
             'origem' => 'CRON', 'nivel' => 'ERRO',
             'mensagem' => 'Rotina agendada falhou.',
-            'janela' => 300, 'contexto' => ['excecao', 'job', 'motivo', 'logs_apagados', 'auditoria_apagados', 'lotes'],
+            'janela' => 300, 'contexto' => ['excecao', 'job', 'motivo', 'logs_apagados', 'auditoria_apagados', 'lotes', 'itens', 'falhas'],
         ],
         'gestao_erro_interno' => [
             'origem' => 'GESTAO', 'nivel' => 'ERRO',

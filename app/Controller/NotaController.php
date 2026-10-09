@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Rn\NotaFiscalRn;
 use App\Dao\AtendimentoDao;
 use App\Dao\RateLimitOcrDao;
+use Util\LogSistema;
 use Util\NotaArquivoStorage;
 use Util\UploadHelper;
 use Util\Resposta;
@@ -56,6 +57,7 @@ class NotaController
             $contexto . ': falha de banco (PDOException)'
             . ($sqlstateValidado !== null ? " [SQLSTATE={$sqlstateValidado}]" : '')
         );
+        LogSistema::registrar('erro_banco_pdo', ['tipo' => 'recebimento', 'excecao' => $e]);
     }
 
     /**
@@ -69,6 +71,7 @@ class NotaController
     private function logFalhaTecnica(string $contexto, \Throwable $e): void
     {
         error_log($contexto . ': falha nao prevista [' . get_class($e) . ']');
+        LogSistema::registrar('erro_tecnico', ['tipo' => 'recebimento', 'excecao' => $e]);
     }
 
     // ------------------------------------------------------------------
@@ -845,6 +848,7 @@ class NotaController
             // nunca um erro fatal cru. Log interno minimo, sem interpolar
             // a mensagem da excecao (pode conter detalhe tecnico interno).
             error_log('identificarCliente (rate limit): falha inesperada na dependencia de rate limit');
+            LogSistema::registrar('erro_tecnico', ['tipo' => 'recebimento', 'excecao' => $e, 'http' => 503, 'motivo' => 'indisponivel']);
             Resposta::erro('Servico de protecao indisponivel no momento. Tente novamente em instantes.', 503);
             return;
         }
@@ -852,6 +856,7 @@ class NotaController
         if ($contador > self::RATE_LIMIT_MAX_CHAMADAS) {
             $segundosRestantes = self::RATE_LIMIT_JANELA_SEGUNDOS - ($agora % self::RATE_LIMIT_JANELA_SEGUNDOS);
             header('Retry-After: ' . $segundosRestantes);
+            LogSistema::registrar('rate_limit_ocr_excedido', ['id_totem' => $idTotem]);
             Resposta::erro('Muitas requisicoes de identificacao de cliente em pouco tempo. Tente novamente em instantes.', 429);
         }
     }

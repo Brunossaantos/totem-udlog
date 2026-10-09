@@ -36,6 +36,7 @@
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use Dotenv\Dotenv;
+use Util\LogSistema;
 use Util\NotaArquivoStorage;
 
 if (PHP_SAPI !== 'cli') {
@@ -50,6 +51,8 @@ try {
     Dotenv::createImmutable(__DIR__ . '/../')->safeLoad();
 } catch (\Throwable $e) {
     error_log('limpar-notas-quarentena: falha ao carregar .env (malformado) -- nenhuma exclusao iniciada');
+    LogSistema::registrar('cron_falhou', ['job' => 'limpar_notas_quarentena', 'excecao' => $e, 'motivo' => 'config_invalida']);
+    LogSistema::descarregar();
     exit(1);
 }
 
@@ -61,6 +64,8 @@ try {
 } catch (\Throwable $e) {
     // raiz ausente/inexistente ou falha inesperada: nada foi apagado
     error_log('limpar-notas-quarentena: STORAGE_PATH ausente ou inacessivel -- nenhuma exclusao iniciada');
+    LogSistema::registrar('cron_falhou', ['job' => 'limpar_notas_quarentena', 'excecao' => $e, 'motivo' => 'config_ausente']);
+    LogSistema::descarregar();
     exit(1);
 }
 
@@ -78,5 +83,17 @@ error_log(sprintf(
 if ($resultado['erros_leitura'] > 0) {
     error_log('limpar-notas-quarentena: varredura INCOMPLETA (diretorio ilegivel) -- verificar permissoes de STORAGE_PATH');
 }
+
+if ($resultado['falhas'] > 0 || $resultado['erros_leitura'] > 0) {
+    LogSistema::registrar('cron_falhou', [
+        'job' => 'limpar_notas_quarentena',
+        'motivo' => 'falha_inesperada',
+        'itens' => $resultado['removidos'],
+        'falhas' => $resultado['falhas'] + $resultado['erros_leitura'],
+    ]);
+} else {
+    LogSistema::registrar('cron_resumo', ['job' => 'limpar_notas_quarentena', 'itens' => $resultado['removidos'], 'falhas' => 0]);
+}
+LogSistema::descarregar();
 
 exit(($resultado['falhas'] > 0 || $resultado['erros_leitura'] > 0) ? 1 : 0);

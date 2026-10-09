@@ -5,6 +5,7 @@ namespace App\Rn;
 use App\Dao\AtendimentoNotaDao;
 use App\Dao\ClienteDao;
 use Util\CnpjValidador;
+use Util\LogSistema;
 use Util\RazaoSocialMatcher;
 
 class NotaFiscalRn
@@ -596,6 +597,7 @@ class NotaFiscalRn
     private function logFalhaTecnica(string $contexto, \Throwable $e, int $idAtendimento, int $idNota): void
     {
         error_log($contexto . ' [' . get_class($e) . '] id_atendimento=' . $idAtendimento . ' id_nota=' . $idNota);
+        LogSistema::registrar('erro_tecnico', ['tipo' => 'recebimento', 'excecao' => $e]);
     }
 
     /**

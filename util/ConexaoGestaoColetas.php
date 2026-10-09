@@ -37,6 +37,7 @@ class ConexaoGestaoColetas
 
             if ($host === '' || $nome === '') {
                 error_log('ConexaoGestaoColetas: DB_HOST ou GESTAO_COLETAS_DB_NAME ausente no .env');
+                LogSistema::registrar('banco_coletas_indisponivel');
                 throw new \RuntimeException('Nao foi possivel conectar ao banco de ordens de coleta');
             }
 
@@ -50,7 +51,9 @@ class ConexaoGestaoColetas
                 ]);
                 self::$instancia->exec("SET time_zone = '-03:00'");
             } catch (PDOException $e) {
-                error_log('ConexaoGestaoColetas: falha na conexao: ' . $e->getMessage());
+                // Texto FIXO: getMessage() de PDOException pode conter host, usuario e porta.
+                error_log('ConexaoGestaoColetas: falha na conexao com o banco de ordens de coleta');
+                LogSistema::registrar('banco_coletas_indisponivel', ['excecao' => $e]);
                 throw new \RuntimeException('Nao foi possivel conectar ao banco de ordens de coleta');
             }
         }
