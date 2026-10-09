@@ -3,14 +3,14 @@
 /**
  * Teste manual da demanda remocao-fila-reenvio-talent (2026-10-05): a fila de
  * reenvio ao Talent (tb_fila_envio, FilaEnvioDao, cron/reenviar-fila.php) foi
- * removida e a tabela e derrubada pela migration 019.
+ * removida e a tabela nao existe mais.
  *
  * Parte 1 (estatica, sem banco): nenhuma referencia remanescente em app/ cron/
  * public/ util/, arquivos removidos, schema.sql sem a tabela, assinatura nova do
  * construtor de TalentRn, textos fixos por categoria do 202.
  *
  * Parte 2 (banco QA descartavel qa_qr_exclusivo_<hex>, nunca udlog_totem): tabela
- * inexistente, migration 019 idempotente (e derruba a tabela se existir),
+ * inexistente,
  * finalizar() com Talent falso/mock = 202 com os textos esperados, sem a frase
  * antiga, UMA linha de log sanitizada, nova tentativa sem excecao de banco,
  * processarCheckin com ENVIO_INDETERMINADO sem chamar o client.
@@ -62,8 +62,6 @@ afirmar('app/Dao/FilaEnvioDao.php removido', !file_exists($raiz . '/app/Dao/Fila
 afirmar('cron/reenviar-fila.php removido', !file_exists($raiz . '/cron/reenviar-fila.php'));
 $schema = (string) file_get_contents($raiz . '/sql/schema.sql');
 afirmar('sql/schema.sql nao cria mais tb_fila_envio', !preg_match('/CREATE\s+TABLE\s+`?tb_fila_envio/i', $schema));
-$mig019 = (string) file_get_contents($raiz . '/sql/migrations/019_drop_tb_fila_envio.sql');
-afirmar('migration 019 usa DROP TABLE IF EXISTS tb_fila_envio', preg_match('/^DROP TABLE IF EXISTS tb_fila_envio;/m', $mig019) === 1);
 afirmar('classe FilaEnvioDao nao e carregavel', !class_exists('App\\Dao\\FilaEnvioDao'));
 afirmar('TalentRn::registrarFalhaParaReenvio nao existe', !method_exists(TalentRn::class, 'registrarFalhaParaReenvio'));
 $params = array_map(fn ($p) => $p->getName(), (new ReflectionMethod(TalentRn::class, '__construct'))->getParameters());
@@ -93,15 +91,7 @@ try {
     $tabelaExiste = fn () => (int) $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_fila_envio'")->fetchColumn() === 1;
     $pdo->exec('USE `' . $banco . '`');
 
-    afirmar('banco QA novo (schema + migrations ate 019): tb_fila_envio inexistente', !$tabelaExiste());
-    $f019 = $raiz . '/sql/migrations/019_drop_tb_fila_envio.sql';
-    $erro019 = null;
-    try { qaQrAplicarSql($pdo, $f019); qaQrAplicarSql($pdo, $f019); } catch (Throwable $e) { $erro019 = get_class($e); }
-    afirmar('migration 019 aplicada duas vezes sem erro (idempotente)' . ($erro019 ? " [{$erro019}]" : ''), $erro019 === null && !$tabelaExiste());
-    $pdo->exec('CREATE TABLE tb_fila_envio (id_fila INT PRIMARY KEY, id_atendimento BIGINT UNSIGNED NOT NULL) ENGINE=InnoDB');
-    afirmar('pre-condicao: tabela criada manualmente existe', $tabelaExiste());
-    qaQrAplicarSql($pdo, $f019);
-    afirmar('migration 019 derruba a tabela quando ela existe (banco legado)', !$tabelaExiste());
+    afirmar('banco QA novo (schema.sql): tb_fila_envio inexistente', !$tabelaExiste());
 
     $pdo->exec("INSERT INTO tb_empresa (nome, cnpj) VALUES ('Maua I', '14706199000182')");
     $atendimentoDao = new AtendimentoDao($pdo);

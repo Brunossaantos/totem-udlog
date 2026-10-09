@@ -129,23 +129,26 @@ function inCriarTabelasExternas(PDO $pdo): void
         cliente_id BIGINT UNSIGNED NOT NULL,
         placa_prevista VARCHAR(10) DEFAULT NULL,
         cnh_prevista VARCHAR(20) DEFAULT NULL,
+        status ENUM(\'ATIVA\',\'INATIVA\') NOT NULL DEFAULT \'ATIVA\',
+        inativada_em DATETIME DEFAULT NULL,
         criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uk_ordem_cliente (cliente_id, numero_ordem_coleta)
+        UNIQUE KEY uk_ordem_cliente (cliente_id, numero_ordem_coleta),
+        KEY idx_ordens_placa_status (placa_prevista, status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
-    foreach (['001_status_ordem_coleta.sql', '002_tb_ordem_coleta_arquivos.sql', '003_inativada_em_ordem_coleta.sql'] as $m) {
-        $sql = (string) file_get_contents(dirname(__DIR__, 2) . '/sql/migrations_gestao_coletas/' . $m);
-        $linhas = array_filter(explode("\n", $sql), static fn ($l) => preg_match('/^\s*--/', $l) !== 1);
-        foreach (preg_split('/;\s*\R/', implode("\n", $linhas)) as $comando) {
-            $comando = rtrim(trim($comando), ';');
-            if ($comando !== '') {
-                $st = $pdo->query($comando);
-                if ($st !== false) {
-                    $st->closeCursor();
-                }
-            }
-        }
-    }
+    $pdo->exec('CREATE TABLE tb_ordem_coleta_arquivos (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        cnpj_cliente CHAR(14) NOT NULL,
+        numero_ordem_coleta VARCHAR(50) NOT NULL,
+        caminho_relativo VARCHAR(255) NOT NULL,
+        tamanho_bytes INT UNSIGNED NOT NULL,
+        sha256 CHAR(64) NOT NULL,
+        criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_oc_arquivo_cnpj_numero (cnpj_cliente, numero_ordem_coleta),
+        UNIQUE KEY uk_oc_arquivo_caminho (caminho_relativo)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
 }
 
 /** GET com Bearer opcional no servidor embutido. @return array{status:int,corpo:string} */

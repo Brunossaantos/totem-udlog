@@ -10,8 +10,7 @@
  * Uso: php tests/manual/teste_gestao_qa_logs.php
  *
  * Banco QA descartavel `qa_qr_exclusivo_<hex>` (nunca udlog_totem), sem rede, sem
- * Talent/VIO/n8n; nenhum cron e ativado. Bancos extras (migration sobre schema
- * pre-023) tambem `qa_qr_exclusivo_<hex>` e sao dropados no fim.
+ * Talent/VIO/n8n; nenhum cron e ativado.
  */
 declare(strict_types=1);
 
@@ -1094,49 +1093,7 @@ try {
     afirmar('R3: LogSistema nao usa getMessage/getTraceAsString/getFile/getLine/__toString nem AuditoriaDao', !preg_match('/getMessage|getTrace|getFile|getLine|__toString|AuditoriaDao|\(string\)\s*\$e/', $cLs) && !preg_match('/getMessage|getTrace|getFile|getLine|\(string\)\s*\$e/', $semComentarios($raiz . '/util/LogCatalogo.php')));
     afirmar('R3: nenhum SQL de LogSistemaDao/AuditoriaRetencaoDao concatena variavel de entrada (apenas $where montado de condicoes fixas e $ordem/$direcao validados)', preg_match_all('/prepare\([^;]*\.\s*\$(?!where|ordem|direcao)/', $cLog . $cRet) === 0);
 
-    // =====================================================================
-    // M1. Migration 023: idempotencia sobre schema pre-023 e leitura 5.7
-    // =====================================================================
-    $schemaHead = (string) shell_exec('git -C ' . escapeshellarg($raiz) . ' show ' . escapeshellarg('c4411ce^:sql/schema.sql') . ' 2>NUL');
-    if ($schemaHead === '') {
-        $schemaHead = (string) shell_exec('git -C ' . escapeshellarg($raiz) . ' show ' . escapeshellarg('c4411ce^:sql/schema.sql'));
-    }
-    afirmar('M1: schema.sql do HEAD obtido e NAO contem tb_log_sistema (estado pre-023)', strlen($schemaHead) > 1000 && !str_contains($schemaHead, 'tb_log_sistema'));
     $srv = qaQrPdoServidor(qaQrConfiguracao());
-    $bancoMig = qaQrNomeBanco();
-    qaQrValidarNomeBanco($bancoMig);
-    $srv->exec("CREATE DATABASE `{$bancoMig}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-    $srv->exec("USE `{$bancoMig}`");
-    $tmpSchema = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qa_schema_head_' . bin2hex(random_bytes(3)) . '.sql';
-    file_put_contents($tmpSchema, $schemaHead);
-    qaQrAplicarSql($srv, $tmpSchema);
-    @unlink($tmpSchema);
-    foreach (['014_tb_lgpd_aceite', '015_vio_api_br_estados_e_id_externo', '016_vio_api_br_cache', '017_cnh_modo_captura', '018_nota_client_uid', '019_drop_tb_fila_envio', '020_gestao_usuario_sessao', '021_gestao_auditoria', '022_totem_gestao'] as $mig) {
-        try {
-            qaQrAplicarSql($srv, $raiz . '/sql/migrations/' . $mig . '.sql');
-        } catch (Throwable $e) {
-            // migrations ja convergidas no schema do HEAD podem falhar so se nao forem idempotentes: registrado abaixo
-            echo "   (migration $mig sobre o schema do HEAD: " . get_class($e) . ")\n";
-        }
-    }
-    $existeAntes = (int) $srv->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '{$bancoMig}' AND TABLE_NAME = 'tb_log_sistema'")->fetchColumn();
-    afirmar('M1: banco pre-023 (schema do HEAD + 014..022) ainda NAO tem tb_log_sistema', $existeAntes === 0);
-    $falha023 = null;
-    try {
-        qaQrAplicarSql($srv, $raiz . '/sql/migrations/023_log_sistema.sql');
-    } catch (Throwable $e) {
-        $falha023 = get_class($e);
-    }
-    $srv->exec("INSERT INTO tb_log_sistema (nivel,origem,categoria,mensagem,dedup_chave,janela) VALUES ('INFO','CRON','cron_resumo','m','" . str_repeat('c', 40) . "', '2026-01-01 00:00:00')");
-    $falha023b = null;
-    $stmtsAntes = null;
-    try {
-        qaQrAplicarSql($srv, $raiz . '/sql/migrations/023_log_sistema.sql');
-        qaQrAplicarSql($srv, $raiz . '/sql/migrations/023_log_sistema.sql');
-    } catch (Throwable $e) {
-        $falha023b = get_class($e);
-    }
-    afirmar('M1: 023 aplicada sobre pre-023 sem erro; reaplicada 2x (idempotente) sem erro e sem perder a linha existente', $falha023 === null && $falha023b === null && (int) $srv->query('SELECT COUNT(*) FROM tb_log_sistema')->fetchColumn() === 1);
     $estrutura = static function (PDO $p, string $db): array {
         $c = $p->query("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, CHARACTER_SET_NAME, COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '$db' AND TABLE_NAME = 'tb_log_sistema' ORDER BY ORDINAL_POSITION")->fetchAll(PDO::FETCH_ASSOC);
         $i = $p->query("SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = '$db' AND TABLE_NAME = 'tb_log_sistema' ORDER BY INDEX_NAME, SEQ_IN_INDEX")->fetchAll(PDO::FETCH_ASSOC);
@@ -1144,13 +1101,12 @@ try {
 
         return [$c, $i, $e];
     };
-    afirmar('M1: estrutura (colunas, tipos, defaults, charset, indices, engine) da migration sobre pre-023 == schema.sql novo', $estrutura($srv, $bancoMig) === $estrutura($srv, $banco));
     $contratoTipos = [
         'id_log' => 'bigint(20) unsigned', 'nivel' => "enum('INFO','AVISO','ERRO')", 'origem' => "enum('API','RECEBIMENTO','EXPEDICAO','CRON','GESTAO')",
         'categoria' => 'varchar(40)', 'mensagem' => 'varchar(160)', 'id_atendimento' => 'bigint(20) unsigned', 'id_totem' => 'int(10) unsigned',
         'detalhe' => 'varchar(255)', 'dedup_chave' => 'char(40)', 'janela' => 'datetime', 'contador' => 'int(10) unsigned', 'criado_em' => 'datetime', 'ultima_ocorrencia' => 'datetime',
     ];
-    foreach ([['migration sobre pre-023', $bancoMig], ['schema.sql', $banco]] as [$rotulo, $db]) {
+    foreach ([['schema.sql', $banco]] as [$rotulo, $db]) {
         $tipos = [];
         foreach ($estrutura($srv, $db)[0] as $c) {
             $tipos[$c['COLUMN_NAME']] = preg_replace('/\s+/', ' ', strtolower((string) $c['COLUMN_TYPE']));
@@ -1160,15 +1116,6 @@ try {
         $norm = static fn (array $a): array => array_map(static fn ($t) => preg_replace('/\((?:20|10)\)/', '', (string) $t), $a);
         afirmar("M1: contrato de tipos ($rotulo): sem TEXT/BLOB/JSON, detalhe VARCHAR(255), mensagem VARCHAR(160), categoria VARCHAR(40), dedup CHAR(40), enums fechados", $norm($tipos) === $norm($esperado));
     }
-    $sql023 = (string) file_get_contents($raiz . '/sql/migrations/023_log_sistema.sql');
-    $sql023Sem = (string) preg_replace('/^\s*--.*$/m', '', $sql023);
-    $incompat = [];
-    foreach (['CHECK\s*\(' => 'CHECK', 'GENERATED|AS\s*\(' => 'coluna gerada', 'IF\s+NOT\s+EXISTS\s+\w+\s+(ADD|COLUMN)|ADD\s+COLUMN\s+IF' => 'ADD COLUMN IF NOT EXISTS', '\bJSON\b' => 'JSON', 'DEFAULT\s*\(' => 'DEFAULT expressao', '\bWITH\b|\bOVER\s*\(' => 'CTE/janela', 'RETURNING' => 'RETURNING', 'utf8mb4_0900' => 'collation 8.0', 'INVISIBLE' => 'INVISIBLE', 'ALGORITHM\s*=\s*INSTANT' => 'INSTANT', 'RENAME\s+COLUMN' => 'RENAME COLUMN', 'CREATE\s+INDEX\s+IF' => 'CREATE INDEX IF NOT EXISTS'] as $re => $nome) {
-        if (preg_match('/' . $re . '/i', $sql023Sem) === 1) {
-            $incompat[] = $nome;
-        }
-    }
-    afirmar('M1: SQL da 023 (sem comentarios) livre de construcoes ausentes no MySQL 5.7' . ($incompat === [] ? '' : ' ' . implode(',', $incompat)), $incompat === [] && preg_match('/CREATE TABLE IF NOT EXISTS tb_log_sistema/', $sql023Sem) === 1 && !preg_match('/\bDROP\b|\bDELETE\b|\bTRUNCATE\b|\bALTER\b/i', $sql023Sem));
     $sqlsPhp = $cLog . $cRet . $semComentarios($raiz . '/app/Dao/AuditoriaDao.php');
     afirmar('M1: SQL dos DAOs sem recursos so do MariaDB/8.0 (RETURNING, WITH, OVER, JSON_, ->>, ROW_NUMBER, LIMIT em subquery)', preg_match('/RETURNING|\bWITH\s|\bOVER\s*\(|JSON_|->>|ROW_NUMBER|INSERT\s+IGNORE\s+INTO.*SELECT/i', $sqlsPhp) === 0);
     $nomesParam = [];
@@ -1176,8 +1123,6 @@ try {
     preg_match_all('/:([a-z_]+)/', $mIns[0][0] ?? '', $mp);
     $contagem = array_count_values($mp[1] ?? []);
     afirmar('M1: UPSERT sem placeholder nomeado repetido (contador_novo/contador_soma distintos)', $contagem !== [] && max($contagem) === 1);
-    $srv->exec("DROP DATABASE IF EXISTS `{$bancoMig}`");
-    $bancoMig = null;
 } catch (Throwable $e) {
     echo "\nEXCECAO NO TESTE: " . get_class($e) . ' em ' . basename($e->getFile()) . ':' . $e->getLine() . ' - ' . $e->getMessage() . "\n";
     $GLOBALS['gtFalhas']++;

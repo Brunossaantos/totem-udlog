@@ -1,8 +1,8 @@
 <?php
 
 /**
- * Log central do sistema (demanda gestao-totem, fase F3a, 2026-10-08): migration
- * 023, Util\LogCatalogo, Util\LogSistema, App\Dao\LogSistemaDao e
+ * Log central do sistema (demanda gestao-totem, fase F3a, 2026-10-08): estrutura
+ * de tb_log_sistema, Util\LogCatalogo, Util\LogSistema, App\Dao\LogSistemaDao e
  * Util\Conexao::criarDedicada. Banco QA descartavel `qa_qr_exclusivo_<hex>`
  * (nunca udlog_totem), sem rede.
  *
@@ -136,7 +136,7 @@ try {
     $raiz = dirname(__DIR__, 2);
 
     // =====================================================================
-    // 1. Migration/estrutura da tabela
+    // 1. Estrutura da tabela
     // =====================================================================
     $colunas = gtLinhas($pdo, "SELECT COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH AS tam FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_log_sistema' ORDER BY ORDINAL_POSITION");
     $nomesColunas = array_column($colunas, 'COLUMN_NAME');
@@ -870,14 +870,6 @@ try {
     afirmar('estatico: guard de reentrancia em registrar e em descarregar', substr_count($fonteLog, 'if (self::$ocupado)') === 2);
     afirmar('estatico: registrar aceita qualquer tipo (sem TypeError) e a escrita usa so a conexao dedicada', str_contains($fonteLog, 'public static function registrar($categoria, $ctx = []): void') && str_contains($fonteLog, 'Conexao::criarDedicada()') && !str_contains($fonteLog, 'Conexao::obter'));
     afirmar('estatico: UPSERT atomico com teto do contador no DAO', str_contains($fonteDao, 'ON DUPLICATE KEY UPDATE') && str_contains($fonteDao, 'LEAST(contador + :contador_soma, 4294967295)') && str_contains($fonteDao, 'ultima_ocorrencia = NOW()'));
-    $migracao = (string) file_get_contents($raiz . '/sql/migrations/023_log_sistema.sql');
-    $schema = (string) file_get_contents($raiz . '/sql/schema.sql');
-    $bloco = static function (string $sql): string {
-        preg_match('/CREATE TABLE (?:IF NOT EXISTS )?tb_log_sistema \(.*?\) ENGINE=InnoDB[^;]*;/s', $sql, $m);
-
-        return (string) ($m[0] ?? '');
-    };
-    afirmar('schema.sql traz o mesmo bloco da migration 023 (exceto IF NOT EXISTS)', $bloco($migracao) !== '' && str_replace('IF NOT EXISTS ', '', $bloco($migracao)) === $bloco($schema));
 } catch (Throwable $e) {
     afirmar('execucao sem excecao inesperada (' . get_class($e) . ' em linha ' . $e->getLine() . ')', false);
 } finally {

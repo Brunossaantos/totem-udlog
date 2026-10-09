@@ -201,8 +201,8 @@ try {
     @unlink($logCgi);
 
     // arquivo da pagina nao altera nada alem do pedido (git)
-    $alterados = (string) shell_exec('git -C ' . escapeshellarg($raiz) . ' status --porcelain -- util/Auth.php public/totem/assets app/Dao/TotemDao.php sql/migrations/008_tb_empresa_totem_vinculo.sql');
-    afirmar('escopo F0: Util\Auth, assets do totem, TotemDao e a estrutura de tb_totem NAO foram alterados', trim($alterados) === '');
+    $alterados = (string) shell_exec('git -C ' . escapeshellarg($raiz) . ' status --porcelain -- util/Auth.php public/totem/assets app/Dao/TotemDao.php');
+    afirmar('escopo F0: Util\Auth, assets do totem, TotemDao NAO foram alterados', trim($alterados) === '');
 } catch (Throwable $e) {
     afirmar('execucao sem excecao inesperada (' . get_class($e) . ' em ' . basename($e->getFile()) . ':' . $e->getLine() . ')', false);
 } finally {

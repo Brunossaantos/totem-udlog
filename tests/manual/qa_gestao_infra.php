@@ -2,8 +2,8 @@
 
 /**
  * Infra compartilhada dos testes da Gestao Totem (demanda gestao-totem, F0/F1,
- * 2026-10-06): banco QA descartavel `qa_qr_exclusivo_<hex>` (so schema.sql +
- * migrations, via qa_qr_exclusivo_bootstrap.php), storage temporario, semeadura
+ * 2026-10-06): banco QA descartavel `qa_qr_exclusivo_<hex>` (so schema.sql,
+ * via qa_qr_exclusivo_bootstrap.php), storage temporario, semeadura
  * de usuarios e chamada de paginas REAIS por php-cgi (cookies, formulario,
  * cabecalhos). Nunca toca em udlog_totem; sem rede, sem Talent/VIO/n8n.
  */

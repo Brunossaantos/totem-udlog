@@ -3,7 +3,6 @@
 /**
  * QA adversarial da normalizacao sem acentos (RazaoSocialMatcher::normalizar). Complementa (nao duplica) teste_razao_social_normalizacao.php.
  *   (a) paridade com o algoritmo ANTIGO (copia verbatim do HEAD) em >=10.000 entradas ASCII: 0 divergencias
- *   (b) seed da migration 003: quantos dos 38 divergem da funcao nova (so REPORTA)
  *   (c) colisoes novas (par distinto no antigo, igual no novo) em 50.000 pares sinteticos (so REPORTA)
  *   (d) idempotencia em 20.000 entradas + contra-exemplos (so REPORTA contra-exemplos de borda)
  * Uso: php tests/manual/teste_qa_normalizacao.php
@@ -78,31 +77,6 @@ for ($i = 0; $i < 12000; $i++) {
     }
 }
 afirmar("(a) paridade ASCII com o algoritmo antigo: {$n} entradas, {$div} divergencias" . ($exemplo !== null ? ' ex=' . json_encode($exemplo) : ''), $div === 0 && $n >= 10000);
-
-// ---------------------------------------------------------------- (b)
-$sql = (string) file_get_contents(dirname(__DIR__, 2) . '/sql/migrations/003_tb_cliente_razao_normalizada.sql');
-$seed = [];
-if (preg_match_all("/^\\s*\\('((?:[^'\\\\]|\\\\.|'')*)', '((?:[^'\\\\]|\\\\.|'')*)', '\\d+', [01]\\)[,;]/m", $sql, $m, PREG_SET_ORDER)) {
-    foreach ($m as $l) {
-        $seed[] = [str_replace(["''", "\\'"], "'", $l[1]), str_replace(["''", "\\'"], "'", $l[2])];
-    }
-}
-$divSeed = [];
-$ascii = 0;
-$divAscii = 0;
-foreach ($seed as [$nome, $esperada]) {
-    $isAscii = preg_match('/[^\x00-\x7F]/', $nome) !== 1;
-    $ascii += $isAscii ? 1 : 0;
-    if ($N($nome) !== $esperada) {
-        $divSeed[] = $nome;
-        $divAscii += $isAscii ? 1 : 0;
-    }
-}
-echo '(b) seed 003: ' . count($seed) . ' clientes extraidos, ' . $ascii . ' ASCII, ' . (count($seed) - $ascii) . ' acentuados; divergentes da funcao nova: ' . count($divSeed) . ' (ASCII divergentes: ' . $divAscii . ")\n";
-foreach ($divSeed as $nome) {
-    echo '    diverge: ' . json_encode($nome, JSON_UNESCAPED_UNICODE) . ' novo=' . json_encode($N($nome)) . "\n";
-}
-afirmar('(b) seed: 38 extraidos e 0 ASCII divergentes', count($seed) === 38 && $divAscii === 0);
 
 // ---------------------------------------------------------------- (c)
 $base = ['Café', 'Indústria', 'Química', 'Ação', 'Comércio', 'Distribuidora', 'Pão', 'Açúcar', 'Óleos', 'Têxtil', 'São Paulo', 'Álcool', 'Logística', 'Cerâmica', 'Plásticos', 'Eletrônica', 'Paraná', 'Máquinas', 'Ônix', 'Ótica', 'Acme', 'Beta', 'Gama', 'Brasil', 'Sul', 'Norte', 'Ltda', 'S/A', 'ME', 'Ñandú', 'Müller', 'Straße'];

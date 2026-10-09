@@ -10,7 +10,7 @@
  *
  * BANCO SEMPRE DESCARTAVEL (ver tests/manual/_fixtures_lgpd.php) — nome
  * sintetico qa_lgpd_testes_<timestamp>_<random>, criado do zero
- * (sql/schema.sql + sql/migrations/014_tb_lgpd_aceite.sql), validado via
+ * (sql/schema.sql), validado via
  * SELECT DATABASE() ANTES de qualquer escrita, removido ao final (mesmo em
  * caso de falha, via register_shutdown_function). NUNCA usa o banco de
  * desenvolvimento real (DB_NAME do .env local).

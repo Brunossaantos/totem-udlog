@@ -507,9 +507,6 @@ try {
     afirmar('B4: so com FALHAS de login a limpeza oportunista roda (sessoes vencidas diminuem)', (int) gtEscalar($pdo, 'SELECT COUNT(*) FROM tb_gestao_sessao') < $antesExp);
     $pdo->exec('DELETE FROM tb_gestao_sessao');
     $pdo->exec('DELETE FROM tb_gestao_login_tentativa');
-    $fAud = (string) file_get_contents($raiz . '/app/Dao/AuditoriaDao.php') . (string) file_get_contents($raiz . '/sql/migrations/021_gestao_auditoria.sql') . (string) file_get_contents($raiz . '/util/GestaoConfig.php');
-    afirmar('B4: docs corrigidos: auditoria grava IP em claro (forense), retencao de 90 dias na F3; sem "hash de IP ... auditoria"', str_contains($fAud, 'EM CLARO') && str_contains($fAud, '90 dias') && str_contains($fAud, 'F3') && !str_contains($fAud, 'hash de IP dos
- *    contadores e da auditoria'));
 
     // =====================================================================
     // K. M1: excecoes (em processo) nao vazam senha/hash

@@ -3,7 +3,7 @@
 /**
  * Suite F7 (rodada corretiva /01, 2026-10-01) da demanda
  * hardening-revisao-notas-e-cliente: reconciliacao idempotente entre o uid
- * gerado pelo front e a nota persistida (migration 018, coluna client_uid,
+ * gerado pelo front e a nota persistida (coluna client_uid,
  * UNIQUE (id_atendimento, client_uid)).
  *
  * Cobre: processar com uid (nota nova e retry idempotente, sem duplicar nem
@@ -13,7 +13,7 @@
  * concorrencia real com processos paralelos (mesmo uid = exatamente uma nota);
  * UNIQUE no banco; acao listar (somente leitura, escopo do atendimento, totem
  * autenticado, contrato exato, sem dado sensivel); 409/422 nunca apontam nota
- * invisivel (enumerar e excluir); migration 018 idempotente; rota HTTP real
+ * invisivel (enumerar e excluir); rota HTTP real
  * (nota.php?acao=listar e processar com token, em porta 8395-8399).
  *
  * Banco `qa_` DESCARTAVEL (prefixo qa_r4be_) + STORAGE_PATH temporario.
@@ -54,26 +54,11 @@ try {
     $uidDe = static fn(string $sufixo): string => 'uid_' . $sufixo . '_' . bin2hex(random_bytes(4));
 
     // ---------------------------------------------------------------
-    hdSecao('U1 migration 018: coluna, indice unico e idempotencia');
+    hdSecao('U1 schema: coluna client_uid e indice unico');
     $colunas = array_column($pdo->query("SHOW COLUMNS FROM tb_atendimento_nota")->fetchAll(), 'Field');
     hdAfirmar('U1: coluna client_uid existe', in_array('client_uid', $colunas, true));
     $indice = $pdo->query("SHOW INDEX FROM tb_atendimento_nota WHERE Key_name = 'uk_atendimento_client_uid'")->fetchAll();
     hdAfirmar('U1: indice UNIQUE (id_atendimento, client_uid)', count($indice) === 2 && (int) $indice[0]['Non_unique'] === 0 && $indice[0]['Column_name'] === 'id_atendimento' && $indice[1]['Column_name'] === 'client_uid');
-    qaDbAplicarArquivoSql($pdo, __DIR__ . '/../../sql/migrations/018_nota_client_uid.sql');
-    qaDbAplicarArquivoSql($pdo, __DIR__ . '/../../sql/migrations/018_nota_client_uid.sql');
-    $colunas2 = array_column($pdo->query("SHOW COLUMNS FROM tb_atendimento_nota")->fetchAll(), 'Field');
-    $indice2 = $pdo->query("SHOW INDEX FROM tb_atendimento_nota WHERE Key_name = 'uk_atendimento_client_uid'")->fetchAll();
-    hdAfirmar('U1: reaplicar a migration 2x e no-op (mesmas colunas, 1 indice de 2 colunas)', $colunas === $colunas2 && count($indice2) === 2);
-
-    // migration aplicada sobre tabela SEM a coluna (banco antigo) e depois reversao documentada
-    $pdo->exec('ALTER TABLE tb_atendimento_nota DROP INDEX uk_atendimento_client_uid');
-    $pdo->exec('ALTER TABLE tb_atendimento_nota DROP COLUMN client_uid');
-    $semColuna = !in_array('client_uid', array_column($pdo->query("SHOW COLUMNS FROM tb_atendimento_nota")->fetchAll(), 'Field'), true);
-    hdAfirmar('U1: reversao documentada (DROP INDEX + DROP COLUMN) remove coluna e indice', $semColuna);
-    qaDbAplicarArquivoSql($pdo, __DIR__ . '/../../sql/migrations/018_nota_client_uid.sql');
-    $voltou = in_array('client_uid', array_column($pdo->query("SHOW COLUMNS FROM tb_atendimento_nota")->fetchAll(), 'Field'), true)
-        && count($pdo->query("SHOW INDEX FROM tb_atendimento_nota WHERE Key_name = 'uk_atendimento_client_uid'")->fetchAll()) === 2;
-    hdAfirmar('U1: migration reaplicada depois da reversao recria coluna e indice', $voltou);
 
     // ---------------------------------------------------------------
     hdSecao('U2 processar com uid: nota nova');

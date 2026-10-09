@@ -3,7 +3,7 @@
 /**
  * Servidor local descartavel do harness de layout da Gestao Totem
  * (tests/manual/gestao_layout.js). Cria um banco QA `qa_qr_exclusivo_<hex>`
- * (schema + migrations, mesma infra de qa_gestao_infra.php), semeia usuarios,
+ * (schema.sql, mesma infra de qa_gestao_infra.php), semeia usuarios,
  * sobe `php -S 127.0.0.1:<porta>` servindo public/ (paginas REAIS /gestao/*.php,
  * com o prepend QA que forca o banco QA, o storage temporario e o
  * GESTAO_PERMITIR_HTTP=true so deste processo), imprime uma linha JSON "PRONTO"

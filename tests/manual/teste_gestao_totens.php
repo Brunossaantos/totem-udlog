@@ -5,8 +5,8 @@
  * regras de negocio (criar, nome repetido, colisao, desativar, regerar, legado),
  * paginas REAIS por php-cgi (RBAC, CSRF, IDOR, PRG, token nunca exposto, XSS,
  * TOTEM_URL_BASE, Host forjado), efeito imediato no quiosque e em Util\Auth,
- * auditoria sem segredo, concorrencia (2 processos) e migration 022 (idempotente
- * e equivalente ao schema.sql). Banco QA descartavel; NUNCA udlog_totem.
+ * auditoria sem segredo, concorrencia (2 processos) e estrutura de tb_totem
+ * no schema.sql. Banco QA descartavel; NUNCA udlog_totem.
  *
  * Uso: php tests/manual/teste_gestao_totens.php
  */
@@ -745,135 +745,31 @@ try {
         return true;
     })());
 
-    // =====================================================================
-    // F. Migration 022: idempotente e equivalente ao schema.sql
-    // =====================================================================
-    $sql022 = (string) file_get_contents($raiz . '/sql/migrations/022_totem_gestao.sql');
-    $sem = preg_replace('/^--.*$/m', '', $sql022);
-    afirmar('022: sem CHECK, coluna gerada, ADD COLUMN IF NOT EXISTS nem DROP/TRUNCATE/DELETE', stripos((string) $sem, 'CHECK (') === false && stripos((string) $sem, 'GENERATED') === false && stripos((string) $sem, 'ADD COLUMN IF NOT EXISTS') === false && preg_match('/\b(DROP|TRUNCATE|DELETE\s+FROM)\b/i', (string) $sem) !== 1);
-    $comentComPv = 0;
-    foreach (preg_split('/\R/', $sql022) as $linha) {
-        if (str_starts_with($linha, '--') && str_contains($linha, ';')) {
-            $comentComPv++;
-        }
-    }
-    afirmar('022: nenhum comentario com ponto e virgula (loader dos QA)', $comentComPv === 0);
-    afirmar('022: cabecalho com Problema, Solucao, Idempotencia e REVERSAO', str_contains($sql022, 'Problema') && str_contains($sql022, 'Solucao') && str_contains($sql022, 'Idempotencia') && str_contains($sql022, 'REVERSAO'));
-
-    $admin = qaQrPdoServidor(qaQrConfiguracao());
-    $criarVazio = static function () use ($admin, &$bancos): array {
-        $nome = qaQrNomeBanco();
-        qaQrValidarNomeBanco($nome);
-        $admin->exec("CREATE DATABASE `{$nome}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-        $bancos[] = $nome;
-        $c = qaQrConfiguracao();
-        $p = new PDO("mysql:host={$c['host']};port={$c['port']};dbname={$nome};charset=utf8mb4", $c['user'], $c['pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
-
-        return [$p, $nome];
-    };
     $estrutura = static function (PDO $p): array {
         $cols = $p->query("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' ORDER BY ORDINAL_POSITION")->fetchAll();
         $idx = $p->query("SELECT INDEX_NAME, SEQ_IN_INDEX, COLUMN_NAME, NON_UNIQUE FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' ORDER BY INDEX_NAME, SEQ_IN_INDEX")->fetchAll();
-        $fk = $p->query("SELECT k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME, r.DELETE_RULE, r.UPDATE_RULE FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS r ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND r.TABLE_NAME = k.TABLE_NAME WHERE k.TABLE_SCHEMA = DATABASE() AND k.TABLE_NAME = 'tb_totem' AND k.REFERENCED_TABLE_NAME IS NOT NULL ORDER BY k.COLUMN_NAME")->fetchAll();
 
-        return ['colunas' => $cols, 'indices' => $idx, 'fks' => $fk];
+        return ['colunas' => $cols, 'indices' => $idx];
     };
-
-    // (1) caminho de producao: schema.sql ANTIGO (HEAD) + 014..021 + 022 duas vezes
-    $schemaAntigo = shell_exec('git -C ' . escapeshellarg($raiz) . ' show ' . escapeshellarg('fab53ab^:sql/schema.sql') . '');
-    afirmar('git: schema.sql pre-F2 (fab53ab^) disponivel e ainda com codigo VARCHAR(30)', is_string($schemaAntigo) && str_contains($schemaAntigo, 'codigo        VARCHAR(30)'));
-    [$pAnt, $bAnt] = $criarVazio();
-    $tmpSchema = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qa_schema_antigo_' . bin2hex(random_bytes(4)) . '.sql';
-    file_put_contents($tmpSchema, (string) $schemaAntigo);
-    qaQrAplicarSql($pAnt, $tmpSchema);
-    @unlink($tmpSchema);
-    $prefixoMig = ['014_tb_lgpd_aceite', '015_vio_api_br_estados_e_id_externo', '016_vio_api_br_cache', '017_cnh_modo_captura', '018_nota_client_uid', '019_drop_tb_fila_envio', '020_gestao_usuario_sessao', '021_gestao_auditoria'];
-    foreach ($prefixoMig as $m) {
-        qaQrAplicarSql($pAnt, $raiz . '/sql/migrations/' . $m . '.sql');
-    }
-    $pAnt->exec("INSERT INTO tb_empresa (nome, cnpj) VALUES ('Maua I', '14706199000182')");
-    $tkLeg = bin2hex(random_bytes(32));
-    $pAnt->exec("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api) VALUES ('RECEPCAO-01', 'Totem Recepcao', 1, '{$tkLeg}')");
-    $antesMig = $pAnt->query('SELECT id_totem, codigo, nome, id_empresa, token_api, ativo FROM tb_totem')->fetchAll();
-    afirmar('022 (antes): tb_totem.codigo = VARCHAR(30) e sem as colunas novas', (int) $pAnt->query("SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo'")->fetchColumn() === 30 && (int) $pAnt->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME IN ('criado_por','atualizado_em','url_regerada_em','url_versao')")->fetchColumn() === 0);
-    $erroMig = null;
-    try {
-        qaQrAplicarSql($pAnt, $raiz . '/sql/migrations/022_totem_gestao.sql');
-    } catch (Throwable $e) {
-        $erroMig = get_class($e) . ': ' . $e->getMessage();
-    }
-    afirmar('022: 1a aplicacao sem erro' . ($erroMig !== null ? ' (' . $erroMig . ')' : ''), $erroMig === null);
-    $estApos1 = $estrutura($pAnt);
-    $erroMig = null;
-    try {
-        qaQrAplicarSql($pAnt, $raiz . '/sql/migrations/022_totem_gestao.sql');
-    } catch (Throwable $e) {
-        $erroMig = get_class($e);
-    }
-    afirmar('022: 2a aplicacao (idempotente) sem erro e a estrutura NAO muda', $erroMig === null && $estrutura($pAnt) === $estApos1);
-    afirmar('022: codigo agora VARCHAR(64) NOT NULL e o indice UNIQUE de codigo foi mantido', (int) $pAnt->query("SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo'")->fetchColumn() === 64 && (int) $pAnt->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo' AND NON_UNIQUE = 0")->fetchColumn() === 1);
-    $fkCriado = $pAnt->query("SELECT r.DELETE_RULE, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS r JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE k ON k.CONSTRAINT_SCHEMA = r.CONSTRAINT_SCHEMA AND k.CONSTRAINT_NAME = r.CONSTRAINT_NAME AND k.TABLE_NAME = r.TABLE_NAME WHERE r.CONSTRAINT_SCHEMA = DATABASE() AND r.CONSTRAINT_NAME = 'fk_totem_criado_por'")->fetch();
-    afirmar('022: FK criado_por -> tb_gestao_usuario(id_usuario) com ON DELETE SET NULL, tipo igual ao da PK (INT UNSIGNED)', is_array($fkCriado) && $fkCriado['DELETE_RULE'] === 'SET NULL' && $fkCriado['REFERENCED_TABLE_NAME'] === 'tb_gestao_usuario' && $fkCriado['REFERENCED_COLUMN_NAME'] === 'id_usuario' && $pAnt->query("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'criado_por'")->fetchColumn() === $pAnt->query("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_gestao_usuario' AND COLUMN_NAME = 'id_usuario'")->fetchColumn());
-    afirmar('022: indices idx_totem_empresa_ativo (id_empresa, ativo) e UNIQUE uk_totem_empresa_nome (id_empresa, nome) criados', count(array_filter($estApos1['indices'], static fn ($i) => $i['INDEX_NAME'] === 'idx_totem_empresa_ativo')) === 2 && count(array_filter($estApos1['indices'], static fn ($i) => $i['INDEX_NAME'] === 'uk_totem_empresa_nome' && (int) $i['NON_UNIQUE'] === 0)) === 2);
-    afirmar('022: dados existentes INTACTOS (RECEPCAO-01 com o mesmo codigo, nome, empresa, token e ativo) e url_versao = 1', $pAnt->query('SELECT id_totem, codigo, nome, id_empresa, token_api, ativo FROM tb_totem')->fetchAll() === $antesMig && (int) $pAnt->query('SELECT url_versao FROM tb_totem')->fetchColumn() === 1);
-    $pAnt->exec("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api) VALUES ('" . str_repeat('X', 64) . "', 'LONGO', 1, '" . bin2hex(random_bytes(32)) . "')");
-    afirmar('022: aceita codigo de 64 caracteres depois de aplicada', (int) $pAnt->query("SELECT COUNT(*) FROM tb_totem WHERE CHAR_LENGTH(codigo) = 64")->fetchColumn() === 1);
-
-    // (2) equivalencia: schema.sql NOVO + 014..022 (QA padrao) tem a MESMA estrutura de tb_totem
-    afirmar('022 vs schema.sql: estrutura de tb_totem (colunas, indices e FKs) IDENTICA nos dois caminhos', $estrutura($pdo) === $estrutura($pAnt));
-    afirmar('022: reaplicar 022 no banco criado pelo schema.sql novo e no-op (estrutura igual)', (static function () use ($pdo, $raiz, $estrutura): bool {
-        $a = $estrutura($pdo);
-        qaQrAplicarSql($pdo, $raiz . '/sql/migrations/022_totem_gestao.sql');
-
-        return $estrutura($pdo) === $a;
-    })());
-
-    // (3) duplicados (id_empresa, nome): nao cria o UNIQUE, devolve SELECT informativo, depois de corrigir cria
-    [$pDup, $bDup] = $criarVazio();
-    $tmpSchema = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qa_schema_antigo_' . bin2hex(random_bytes(4)) . '.sql';
-    file_put_contents($tmpSchema, (string) $schemaAntigo);
-    qaQrAplicarSql($pDup, $tmpSchema);
-    @unlink($tmpSchema);
-    foreach ($prefixoMig as $m) {
-        qaQrAplicarSql($pDup, $raiz . '/sql/migrations/' . $m . '.sql');
-    }
-    $pDup->exec("INSERT INTO tb_empresa (nome, cnpj) VALUES ('Maua I', '14706199000182')");
-    $pDup->exec("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api) VALUES ('DUP-A', 'REPETIDO', 1, '" . bin2hex(random_bytes(32)) . "'), ('DUP-B', 'REPETIDO', 1, '" . bin2hex(random_bytes(32)) . "'), ('SEMEMP-A', 'IGUAL', NULL, '" . bin2hex(random_bytes(32)) . "'), ('SEMEMP-B', 'IGUAL', NULL, '" . bin2hex(random_bytes(32)) . "')");
-    // executa a 022 "a mao" para capturar o resultset do SELECT informativo
-    $achouAviso = false;
-    foreach (preg_split('/;\s*\R/', $sql022) as $cmd) {
-        $cmd = trim($cmd);
-        if ($cmd === '') {
-            continue;
-        }
-        $st = $pDup->query($cmd);
-        if ($st !== false) {
-            do {
-                $linhas = $st->fetchAll();
-                foreach ($linhas as $l) {
-                    if (isset($l['aviso']) && str_contains((string) $l['aviso'], 'uk_totem_empresa_nome NAO criado') && (string) $l['nome'] === 'REPETIDO' && (int) $l['repeticoes'] === 2) {
-                        $achouAviso = true;
-                    }
-                }
-            } while ($st->nextRowset());
-            $st->closeCursor();
-        }
-    }
-    afirmar('022 com nomes repetidos na mesma empresa: NAO cria o UNIQUE e devolve o SELECT informativo (par, repeticoes e aviso)', $achouAviso && (int) $pDup->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND INDEX_NAME = 'uk_totem_empresa_nome'")->fetchColumn() === 0);
-    afirmar('022 com repetidos: as demais alteracoes (codigo 64, colunas, FK, indice) foram aplicadas e as linhas seguem intactas', (int) $pDup->query("SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo'")->fetchColumn() === 64 && (int) $pDup->query('SELECT COUNT(*) FROM tb_totem')->fetchColumn() === 4);
-    $pDup->exec("UPDATE tb_totem SET nome = 'REPETIDO-2' WHERE codigo = 'DUP-B'");
-    qaQrAplicarSql($pDup, $raiz . '/sql/migrations/022_totem_gestao.sql');
-    afirmar('022 depois de corrigir o repetido: reaplicar cria o UNIQUE (e totens sem empresa nunca conflitam)', (int) $pDup->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND INDEX_NAME = 'uk_totem_empresa_nome'")->fetchColumn() === 2);
+    $estSchema = $estrutura($pdo);
+    afirmar('schema.sql: tb_totem.codigo VARCHAR(64) NOT NULL e o indice UNIQUE de codigo existe', (int) $pdo->query("SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo'")->fetchColumn() === 64 && (int) $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo' AND NON_UNIQUE = 0")->fetchColumn() === 1);
+    $fkCriado = $pdo->query("SELECT r.DELETE_RULE, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS r JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE k ON k.CONSTRAINT_SCHEMA = r.CONSTRAINT_SCHEMA AND k.CONSTRAINT_NAME = r.CONSTRAINT_NAME AND k.TABLE_NAME = r.TABLE_NAME WHERE r.CONSTRAINT_SCHEMA = DATABASE() AND r.CONSTRAINT_NAME = 'fk_totem_criado_por'")->fetch();
+    afirmar('schema.sql: FK criado_por -> tb_gestao_usuario(id_usuario) com ON DELETE SET NULL, tipo igual ao da PK (INT UNSIGNED)', is_array($fkCriado) && $fkCriado['DELETE_RULE'] === 'SET NULL' && $fkCriado['REFERENCED_TABLE_NAME'] === 'tb_gestao_usuario' && $fkCriado['REFERENCED_COLUMN_NAME'] === 'id_usuario' && $pdo->query("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'criado_por'")->fetchColumn() === $pdo->query("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_gestao_usuario' AND COLUMN_NAME = 'id_usuario'")->fetchColumn());
+    afirmar('schema.sql: indices idx_totem_empresa_ativo (id_empresa, ativo) e UNIQUE uk_totem_empresa_nome (id_empresa, nome) criados', count(array_filter($estSchema['indices'], static fn ($i) => $i['INDEX_NAME'] === 'idx_totem_empresa_ativo')) === 2 && count(array_filter($estSchema['indices'], static fn ($i) => $i['INDEX_NAME'] === 'uk_totem_empresa_nome' && (int) $i['NON_UNIQUE'] === 0)) === 2);
+    $pdo->exec("INSERT INTO tb_empresa (nome, cnpj) VALUES ('Empresa QA Unique', '99999999000191')");
+    $idEmpUk = (int) $pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api) VALUES (:c, 'LONGO', :e, :t)")->execute(['c' => str_repeat('X', 64), 'e' => $idEmpUk, 't' => bin2hex(random_bytes(32))]);
+    afirmar('schema.sql: aceita codigo de 64 caracteres', (int) $pdo->query("SELECT COUNT(*) FROM tb_totem WHERE CHAR_LENGTH(codigo) = 64")->fetchColumn() >= 1);
+    $pdo->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api) VALUES ('DUP-A', 'REPETIDO', :e, :t)")->execute(['e' => $idEmpUk, 't' => bin2hex(random_bytes(32))]);
+    $pdo->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api) VALUES ('SEMEMP-A', 'IGUAL', NULL, :t)")->execute(['t' => bin2hex(random_bytes(32))]);
+    $pdo->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api) VALUES ('SEMEMP-B', 'IGUAL', NULL, :t)")->execute(['t' => bin2hex(random_bytes(32))]);
     $dupBloqueado = false;
     try {
-        $pDup->exec("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api) VALUES ('DUP-C', 'REPETIDO', 1, '" . bin2hex(random_bytes(32)) . "')");
+        $pdo->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api) VALUES ('DUP-C', 'REPETIDO', :e, :t)")->execute(['e' => $idEmpUk, 't' => bin2hex(random_bytes(32))]);
     } catch (PDOException $e) {
         $dupBloqueado = (int) ($e->errorInfo[1] ?? 0) === 1062;
     }
-    afirmar('UNIQUE (id_empresa, nome) vale no banco: segundo INSERT igual => 1062', $dupBloqueado);
-
-    // bootstraps dos QA incluem a 022
-    afirmar('bootstraps QA aplicam a 022 (qa_db_bootstrap e qa_qr_exclusivo_bootstrap)', str_contains((string) file_get_contents(__DIR__ . '/qa_db_bootstrap.php'), '022_totem_gestao.sql') && str_contains((string) file_get_contents(__DIR__ . '/qa_qr_exclusivo_bootstrap.php'), '022_totem_gestao.sql'));
+    afirmar('UNIQUE (id_empresa, nome) vale no banco: segundo INSERT igual => 1062 (e totens sem empresa nunca conflitam)', $dupBloqueado);
     afirmar('.env.example documenta TOTEM_URL_BASE vazia (sem valor real) e o 503 fail-closed', (static function () use ($raiz): bool {
         $e = (string) file_get_contents($raiz . '/.env.example');
 

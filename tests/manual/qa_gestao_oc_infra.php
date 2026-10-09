@@ -8,8 +8,8 @@
  *   - "externo": schema do banco de gestao de coletas fiel ao dump real
  *     (docs/udlogo59_db_gestao_coletas.sql: tb_clientes + tb_ordens_coleta com
  *     os indices reais e a FK para o cliente; as FKs de e-mail/motorista ficam
- *     de fora por falta das tabelas) + as migrations REAIS 001, 002 e 003 e,
- *     opcionalmente, a 004.
+ *     de fora por falta das tabelas), ja com status, inativada_em,
+ *     tb_ordem_coleta_arquivos e os indices de gestao de OC.
  * Os dois sao bancos DIFERENTES de proposito: um DAO que usar a conexao errada
  * falha em vez de passar por acaso. NUNCA toca em udlog_totem nem no banco
  * externo real; sem rede. As conexoes imitam as de producao (exceptions,
@@ -38,7 +38,7 @@ function ogAbrir(string $banco, string $classe = PDO::class): PDO
 /**
  * @return array{totem: PDO, banco_totem: string, externo: PDO, banco_externo: string}
  */
-function ogCriarAmbiente(bool $aplicar004 = true): array
+function ogCriarAmbiente(): array
 {
     [$tmp, $bancoTotem] = qaQrCriarBanco();
     unset($tmp);
@@ -74,6 +74,8 @@ function ogCriarAmbiente(bool $aplicar004 = true): array
             placa_prevista VARCHAR(10) DEFAULT NULL,
             motorista_nome_previsto VARCHAR(150) DEFAULT NULL,
             cnh_prevista VARCHAR(20) DEFAULT NULL,
+            status ENUM(\'ATIVA\',\'INATIVA\') NOT NULL DEFAULT \'ATIVA\',
+            inativada_em DATETIME DEFAULT NULL,
             criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uk_ordem_cliente (cliente_id, numero_ordem_coleta),
@@ -83,17 +85,25 @@ function ogCriarAmbiente(bool $aplicar004 = true): array
             KEY idx_ordens_email_recebido_id (email_recebido_id),
             KEY idx_ordens_placa_prevista (placa_prevista),
             KEY idx_ordens_transportadora (transportadora_nome),
+            KEY idx_ordens_placa_status (placa_prevista, status),
+            KEY idx_oc_status_criado (status, criado_em),
+            KEY idx_oc_status_inativada (status, inativada_em),
             CONSTRAINT fk_ordens_cliente FOREIGN KEY (cliente_id) REFERENCES tb_clientes (id) ON UPDATE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
 
-        $raiz = dirname(__DIR__, 2) . '/sql/migrations_gestao_coletas/';
-        $migrations = ['001_status_ordem_coleta.sql', '002_tb_ordem_coleta_arquivos.sql', '003_inativada_em_ordem_coleta.sql'];
-        if ($aplicar004) {
-            $migrations[] = '004_indices_gestao_oc.sql';
-        }
-        foreach ($migrations as $m) {
-            ocQaAplicarMigration($ext, $raiz . $m);
-        }
+        $ext->exec('CREATE TABLE tb_ordem_coleta_arquivos (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            cnpj_cliente CHAR(14) NOT NULL,
+            numero_ordem_coleta VARCHAR(50) NOT NULL,
+            caminho_relativo VARCHAR(255) NOT NULL,
+            tamanho_bytes INT UNSIGNED NOT NULL,
+            sha256 CHAR(64) NOT NULL,
+            criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uk_oc_arquivo_cnpj_numero (cnpj_cliente, numero_ordem_coleta),
+            UNIQUE KEY uk_oc_arquivo_caminho (caminho_relativo)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
 
         return ['totem' => ogAbrir($bancoTotem), 'banco_totem' => $bancoTotem, 'externo' => $ext, 'banco_externo' => $bancoExterno];
     } catch (Throwable $e) {

@@ -5,32 +5,12 @@
  * 2026-10-05): banco QA descartavel `qa_qr_exclusivo_<hex>` (mesma infra de
  * qa_qr_exclusivo_bootstrap.php) que tambem faz o papel do banco EXTERNO de
  * gestao de coletas: tb_clientes + tb_ordens_coleta minimas (sem FKs de e-mail/
- * motorista) + as migrations REAIS 001, 002 e 003. Storage temporario.
+ * motorista), ja com status, inativada_em e tb_ordem_coleta_arquivos. Storage temporario.
  * NUNCA toca em udlog_totem nem no banco externo real; sem rede.
  */
 declare(strict_types=1);
 
 require_once __DIR__ . '/qa_qr_exclusivo_bootstrap.php';
-
-/** Aplica um arquivo SQL ignorando linhas de comentario (migrations externas). */
-function ocQaAplicarMigration(PDO $pdo, string $arquivo): void
-{
-    $sql = file_get_contents($arquivo);
-    if ($sql === false) {
-        throw new RuntimeException('Migration ausente');
-    }
-    $linhas = array_filter(explode("\n", $sql), static fn ($l) => preg_match('/^\s*--/', $l) !== 1);
-    foreach (preg_split('/;\s*\R/', implode("\n", $linhas)) as $comando) {
-        $comando = rtrim(trim($comando), ';');
-        if ($comando === '') {
-            continue;
-        }
-        $stmt = $pdo->query($comando);
-        if ($stmt !== false) {
-            $stmt->closeCursor();
-        }
-    }
-}
 
 /** @return array{0: PDO, 1: string, 2: string} [pdo QA, banco, storage temporario] */
 function ocQaCriarAmbiente(): array
@@ -50,15 +30,26 @@ function ocQaCriarAmbiente(): array
         cliente_id BIGINT UNSIGNED NOT NULL,
         placa_prevista VARCHAR(10) DEFAULT NULL,
         cnh_prevista VARCHAR(20) DEFAULT NULL,
+        status ENUM(\'ATIVA\',\'INATIVA\') NOT NULL DEFAULT \'ATIVA\',
+        inativada_em DATETIME DEFAULT NULL,
         criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uk_ordem_cliente (cliente_id, numero_ordem_coleta)
+        UNIQUE KEY uk_ordem_cliente (cliente_id, numero_ordem_coleta),
+        KEY idx_ordens_placa_status (placa_prevista, status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
-
-    $raiz = dirname(__DIR__, 2) . '/sql/migrations_gestao_coletas/';
-    foreach (['001_status_ordem_coleta.sql', '002_tb_ordem_coleta_arquivos.sql', '003_inativada_em_ordem_coleta.sql'] as $m) {
-        ocQaAplicarMigration($pdo, $raiz . $m);
-    }
+    $pdo->exec('CREATE TABLE tb_ordem_coleta_arquivos (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        cnpj_cliente CHAR(14) NOT NULL,
+        numero_ordem_coleta VARCHAR(50) NOT NULL,
+        caminho_relativo VARCHAR(255) NOT NULL,
+        tamanho_bytes INT UNSIGNED NOT NULL,
+        sha256 CHAR(64) NOT NULL,
+        criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_oc_arquivo_cnpj_numero (cnpj_cliente, numero_ordem_coleta),
+        UNIQUE KEY uk_oc_arquivo_caminho (caminho_relativo)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
 
     $storage = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qa_oc_storage_' . bin2hex(random_bytes(6));
     if (!mkdir($storage, 0750, true) && !is_dir($storage)) {

@@ -2,9 +2,8 @@
 
 /**
  * Helper de teste (prefixo `_`, mesmo padrao de tests/manual/_caso_*.php) —
- * cria um banco `qa_`-prefixado DESCARTAVEL, carrega sql/schema.sql +
- * migrations/014..016 (schema.sql ja consolida 001-013, ver seu cabecalho) e
- * devolve um PDO conectado a esse banco. Usado exclusivamente pela bateria
+ * cria um banco `qa_`-prefixado DESCARTAVEL, carrega sql/schema.sql (estrutura
+ * completa atual, ver seu cabecalho) e devolve um PDO conectado a esse banco. Usado exclusivamente pela bateria
  * de testes da demanda migracao-vio-api-br-com-cache (2026-09-25) — NUNCA
  * toca em udlog_totem nem em qualquer banco de outra pessoa.
  *
@@ -51,12 +50,6 @@ if (!function_exists('qaDbAplicarArquivoSql')) {
             if ($comando === '') {
                 continue;
             }
-            // query() (nao exec()) -- algumas migrations executam SQL dinamico
-            // via PREPARE/EXECUTE que pode devolver um resultset (ex.: quando
-            // o SQL montado e o no-op "SELECT 1"); em modo buffered (setado na
-            // conexao), query() consome e fecha o cursor imediatamente,
-            // evitando o erro "unbuffered queries are active" na instrucao
-            // seguinte (DEALLOCATE PREPARE).
             $stmt = $pdo->query($comando);
             if ($stmt !== false) {
                 $stmt->closeCursor();
@@ -94,32 +87,6 @@ if (!function_exists('qaDbCriar')) {
 
         $raiz = __DIR__ . '/../../';
         qaDbAplicarArquivoSql($admin, $raiz . 'sql/schema.sql');
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/014_tb_lgpd_aceite.sql');
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/015_vio_api_br_estados_e_id_externo.sql');
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/016_vio_api_br_cache.sql');
-        // Migration 017 (demanda suporte-cnh-digital, 2026-09-27) -- coluna
-        // cnh_modo_captura, aditiva, aplicada por padrao em todo banco qa_
-        // novo desta bateria.
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/017_cnh_modo_captura.sql');
-        // Migration 018 (demanda hardening-revisao-notas-e-cliente, rodada
-        // corretiva F7, 2026-10-01) -- client_uid em tb_atendimento_nota,
-        // aditiva e idempotente.
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/018_nota_client_uid.sql');
-        // Migration 019 (demanda remocao-fila-reenvio-talent, 2026-10-05) --
-        // DROP TABLE IF EXISTS tb_fila_envio (no-op: schema.sql ja nao cria).
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/019_drop_tb_fila_envio.sql');
-        // Migrations 020 e 021 (demanda gestao-totem, F1, 2026-10-06) -- usuarios,
-        // sessoes, tentativas de login e auditoria da Gestao Totem (CREATE TABLE IF
-        // NOT EXISTS: no-op, pois schema.sql ja cria).
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/020_gestao_usuario_sessao.sql');
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/021_gestao_auditoria.sql');
-        // Migration 022 (demanda gestao-totem, F2, 2026-10-07) -- colunas de gestao em
-        // tb_totem e codigo VARCHAR(64) (no-op: schema.sql ja traz tudo).
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/022_totem_gestao.sql');
-        // Migration 023 (demanda gestao-totem, F3a, 2026-10-08) -- tb_log_sistema (no-op:
-        // schema.sql ja cria).
-        qaDbAplicarArquivoSql($admin, $raiz . 'sql/migrations/023_log_sistema.sql');
-
         return [$admin, $nomeBanco];
     }
 }

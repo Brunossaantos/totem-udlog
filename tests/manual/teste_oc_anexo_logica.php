@@ -4,7 +4,7 @@
  * Teste (demanda anexo-ordem-coleta-n8n, 2026-10-05) da LOGICA do anexo da
  * Ordem de Coleta, em processo, contra banco QA descartavel
  * `qa_qr_exclusivo_<hex>` (que tambem faz o papel do banco externo de gestao
- * de coletas, com as migrations REAIS 001/002/003) e storage temporario.
+ * de coletas, com status, inativada_em e tb_ordem_coleta_arquivos) e storage temporario.
  * Nunca toca em udlog_totem nem no banco externo real; sem rede, sem Talent
  * real, sem impressao.
  *
@@ -131,17 +131,7 @@ try {
     [$pdo, $banco, $storage] = ocQaCriarAmbiente();
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
     afirmar('ambiente QA e banco QA (nunca udlog_totem)', preg_match('/\Aqa_qr_exclusivo_[a-f0-9]{8}\z/', $banco) === 1 && $banco !== 'udlog_totem');
-    afirmar('migrations 001/002/003 aplicadas (colunas status, inativada_em e tabela de arquivos)', (int) $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='tb_ordens_coleta' AND COLUMN_NAME IN ('status','inativada_em')) OR TABLE_NAME='tb_ordem_coleta_arquivos')")->fetchColumn() >= 10);
-    // migrations idempotentes: reaplicar nao falha nem altera nada
-    $mig = dirname(__DIR__, 2) . '/sql/migrations_gestao_coletas/';
-    $semErro = true;
-    try {
-        ocQaAplicarMigration($pdo, $mig . '002_tb_ordem_coleta_arquivos.sql');
-        ocQaAplicarMigration($pdo, $mig . '003_inativada_em_ordem_coleta.sql');
-    } catch (Throwable $e) {
-        $semErro = false;
-    }
-    afirmar('migrations 002/003 idempotentes (reaplicar nao falha)', $semErro);
+    afirmar('estrutura externa criada (colunas status, inativada_em e tabela de arquivos)', (int) $pdo->query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='tb_ordens_coleta' AND COLUMN_NAME IN ('status','inativada_em')) OR TABLE_NAME='tb_ordem_coleta_arquivos')")->fetchColumn() >= 10);
 
     $dao = new OrdemColetaArquivoDao($pdo);
     $relogioFixo = new DateTimeImmutable('2026-10-05 10:00:00', new DateTimeZone('America/Sao_Paulo'));
@@ -549,13 +539,6 @@ try {
     afirmar('marcarInativaPorClienteNumero: ja INATIVA => false e inativada_em original preservada', $r3 === false && $pdo->query("SELECT inativada_em FROM tb_ordens_coleta WHERE id=$oJaInativa")->fetchColumn() === '2026-01-01 08:00:00');
     afirmar('marcarInativaPorClienteNumero: numero inexistente => false', $daoOc->marcarInativaPorClienteNumero('33444555000100', 'NAO-EXISTE') === false);
     afirmar('statusPorClienteNumero funcionando', $daoOc->statusPorClienteNumero('33444555000100', 'BAIXA-1') === 'INATIVA' && $daoOc->statusPorClienteNumero('33444555000100', 'NAO-EXISTE') === null);
-    // backfill da migration 003 (re-executada): INATIVA sem inativada_em recebe atualizado_em; ATIVA fica NULL
-    $oSem = ocQaOrdem($pdo, $cid, 'BACKFILL-1', 'INATIVA', null);
-    $oAt = ocQaOrdem($pdo, $cid, 'BACKFILL-2', 'ATIVA', null);
-    $pdo->exec("UPDATE tb_ordens_coleta SET atualizado_em='2026-02-02 10:00:00' WHERE id IN ($oSem, $oAt)");
-    ocQaAplicarMigration($pdo, $mig . '003_inativada_em_ordem_coleta.sql');
-    $bf = $pdo->query("SELECT id, inativada_em, atualizado_em FROM tb_ordens_coleta WHERE id IN ($oSem, $oAt) ORDER BY id")->fetchAll();
-    afirmar('migration 003: backfill INATIVA => inativada_em = atualizado_em (atualizado_em preservado); ATIVA segue NULL', $bf[0]['inativada_em'] === '2026-02-02 10:00:00' && $bf[0]['atualizado_em'] === '2026-02-02 10:00:00' && $bf[1]['inativada_em'] === null);
 
     // ======================= RETENCAO =======================
     $pdo->exec('DELETE FROM tb_ordem_coleta_arquivos');

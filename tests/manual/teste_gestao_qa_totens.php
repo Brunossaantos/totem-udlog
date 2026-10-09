@@ -5,12 +5,11 @@
  * Testes ADVERSARIAIS escritos pelo QA (nao pelos implementadores): nome hostil,
  * formato/entropia do codigo, concorrencia (processos reais), RBAC/CSRF/IDOR,
  * token nunca exposto, TOTEM_URL_BASE, desativar/regerar com efeito imediato,
- * quiosque (58/65 caracteres, rate limit so em falhas), auditoria, migration 022
- * (sobre o schema ANTIGO do HEAD), XSS, acentuacao e menu.
+ * quiosque (58/65 caracteres, rate limit so em falhas), auditoria, estrutura de
+ * tb_totem (schema.sql), XSS, acentuacao e menu.
  *
  * Uso: php tests/manual/teste_gestao_qa_totens.php
  * Banco QA descartavel (qa_qr_exclusivo_<hex>); NUNCA toca em udlog_totem; sem rede.
- * Requer `git` no PATH (le o schema.sql pre-F2 (fab53ab^) para a prova da migration).
  */
 declare(strict_types=1);
 
@@ -805,65 +804,23 @@ try {
     afirmar('(n) menu: o admin ve "Totens" (link /gestao/totens.php) e o perfil usuario NAO ve', str_contains($cA['corpo'], 'href="/gestao/totens.php"') && !str_contains($cU['corpo'], '/gestao/totens.php') && !str_contains($cU['corpo'], '>Totens<'));
     afirmar('(n) item atual destacado na pagina de totens (aria-current)', str_contains($lx['corpo'], 'aria-current'));
 
-    // =====================================================================
-    // (k) Migration 022 sobre o schema ANTIGO do HEAD
-    // =====================================================================
-    $schemaHead = shell_exec('git -C ' . escapeshellarg($raiz) . ' show ' . escapeshellarg('fab53ab^:sql/schema.sql') . ' 2>NUL');
-    afirmar('(k) schema.sql pre-F2 (fab53ab^) lido via git (tem tb_totem com codigo VARCHAR(30))', is_string($schemaHead) && str_contains($schemaHead, 'codigo        VARCHAR(30) NOT NULL UNIQUE'));
-    $sql022 = (string) file_get_contents($raiz . '/sql/migrations/022_totem_gestao.sql');
-    $aplicarHead = static function () use ($schemaHead, $raiz): array {
-        [$p, $n] = criarBancoVazioQa();
-        aplicarSqlComRetorno($p, (string) $schemaHead);
-        foreach (['014_tb_lgpd_aceite', '015_vio_api_br_estados_e_id_externo', '016_vio_api_br_cache', '017_cnh_modo_captura', '018_nota_client_uid', '019_drop_tb_fila_envio', '020_gestao_usuario_sessao', '021_gestao_auditoria'] as $m) {
-            aplicarSqlComRetorno($p, (string) file_get_contents($raiz . '/sql/migrations/' . $m . '.sql'));
-        }
-
-        return [$p, $n];
-    };
-    [$pOld, $nOld] = $aplicarHead();
-    $bancos[] = $nOld;
-    afirmar('(k) base antiga: codigo VARCHAR(30) e SEM criado_por/url_versao/uk_totem_empresa_nome', (int) gtEscalar($pOld, "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo'") === 30 && (int) gtEscalar($pOld, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME IN ('criado_por','url_versao','atualizado_em','url_regerada_em')") === 0);
-    $pOld->exec("INSERT INTO tb_empresa (nome, cnpj, ativo) VALUES ('Maua I', '14706199000182', 1)");
-    $idEmpOld = (int) $pOld->lastInsertId();
-    $tkOld = bin2hex(random_bytes(32));
-    $pOld->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo) VALUES ('RECEPCAO-01', 'RECEPCAO-01', :e, :t, 1)")->execute(['e' => $idEmpOld, 't' => $tkOld]);
-    $pOld->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo) VALUES ('SEM-EMPRESA-A', 'X', NULL, :t, 0)")->execute(['t' => bin2hex(random_bytes(32))]);
-    $pOld->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo) VALUES ('SEM-EMPRESA-B', 'X', NULL, :t, 1)")->execute(['t' => bin2hex(random_bytes(32))]);
-    $dadosAntes = json_encode(gtLinhas($pOld, 'SELECT id_totem, codigo, nome, localizacao, id_empresa, token_api, ativo, criado_em FROM tb_totem ORDER BY id_totem'));
-    $collAntes = gtEscalar($pOld, "SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo'");
-    $retorno1 = aplicarSqlComRetorno($pOld, $sql022);
-    $estr1 = estruturaTotem($pOld);
-    $retorno2 = aplicarSqlComRetorno($pOld, $sql022);
-    $estr2 = estruturaTotem($pOld);
-    $dadosDepois = json_encode(gtLinhas($pOld, 'SELECT id_totem, codigo, nome, localizacao, id_empresa, token_api, ativo, criado_em FROM tb_totem ORDER BY id_totem'));
-    afirmar('(k) migration 022 sobre o schema antigo: aplica sem erro, 2a aplicacao e no-op (estrutura identica)', $estr1 === $estr2 && $retorno1 === [] && $retorno2 === []);
-    afirmar('(k) dados existentes (codigo, nome, token, ativo, empresa, criado_em) INTACTOS; totens sem empresa duplicados nao conflitam', $dadosAntes === $dadosDepois);
-    afirmar('(k) codigo passou a VARCHAR(64) NOT NULL mantendo a collation', (int) gtEscalar($pOld, "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo'") === 64 && gtEscalar($pOld, "SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo'") === $collAntes && gtEscalar($pOld, "SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo'") === 'NO');
-    $ukCodigo = (int) gtEscalar($pOld, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'codigo' AND NON_UNIQUE = 0");
-    afirmar('(k) UNIQUE de codigo mantido (nao duplicou nem perdeu)', $ukCodigo === 1);
-    // equivalencia com o schema.sql NOVO (so ele, sem migrations)
     [$pNew, $nNew] = criarBancoVazioQa();
     $bancos[] = $nNew;
     aplicarSqlComRetorno($pNew, (string) file_get_contents($raiz . '/sql/schema.sql'));
     $estrNew = estruturaTotem($pNew);
-    $norm = static function (array $e): array {
-        // o nome do indice UNIQUE de codigo e automatico; comparamos por colunas
-        return $e;
-    };
-    afirmar('(k) estrutura de tb_totem (colunas, tipos, defaults, indices, FKs) migrada == schema.sql novo', $norm($estr2) === $norm($estrNew));
-    if ($estr2 !== $estrNew) {
-        echo 'INFO - (k) diferencas: ' . json_encode(['mig' => $estr2, 'novo' => $estrNew], JSON_UNESCAPED_UNICODE) . "\n";
-    }
-    $fk = array_values(array_filter($estr2['fks'], static fn ($f) => $f['c'] === 'criado_por'));
+    $pNew->exec("INSERT INTO tb_empresa (nome, cnpj, ativo) VALUES ('Maua I', '14706199000182', 1)");
+    $idEmpOld = (int) $pNew->lastInsertId();
+    $pNew->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo) VALUES ('RECEPCAO-01', 'RECEPCAO-01', :e, :t, 1)")->execute(['e' => $idEmpOld, 't' => bin2hex(random_bytes(32))]);
+    $fk = array_values(array_filter($estrNew['fks'], static fn ($f) => $f['c'] === 'criado_por'));
     afirmar('(k) FK criado_por -> tb_gestao_usuario(id_usuario) com ON DELETE SET NULL', count($fk) === 1 && $fk[0]['rt'] === 'tb_gestao_usuario' && $fk[0]['rc'] === 'id_usuario' && $fk[0]['dr'] === 'SET NULL');
-    $pOld->exec("INSERT INTO tb_gestao_usuario (login, nome, perfil, senha_hash, ativo) VALUES ('fk.teste', 'Fk Teste', 'admin', 'x', 1)");
-    $idFk = (int) $pOld->lastInsertId();
-    $pOld->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo, criado_por) VALUES ('FK-TESTE-MAUAI-AAAAAAAAAAAAAAAA', 'FK-TESTE', :e, :t, 1, :u)")->execute(['e' => $idEmpOld, 't' => bin2hex(random_bytes(32)), 'u' => $idFk]);
-    $idTFk = (int) $pOld->lastInsertId();
-    $pOld->prepare('DELETE FROM tb_gestao_usuario WHERE id_usuario = :i')->execute(['i' => $idFk]);
-    afirmar('(k) apagar o usuario criador => totem permanece e criado_por vira NULL', gtEscalar($pOld, 'SELECT criado_por FROM tb_totem WHERE id_totem = :i', ['i' => $idTFk]) === null && (int) gtEscalar($pOld, 'SELECT COUNT(*) FROM tb_totem WHERE id_totem = :i', ['i' => $idTFk]) === 1);
+    $pNew->exec("INSERT INTO tb_gestao_usuario (login, nome, perfil, senha_hash, ativo) VALUES ('fk.teste', 'Fk Teste', 'admin', 'x', 1)");
+    $idFk = (int) $pNew->lastInsertId();
+    $pNew->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo, criado_por) VALUES ('FK-TESTE-MAUAI-AAAAAAAAAAAAAAAA', 'FK-TESTE', :e, :t, 1, :u)")->execute(['e' => $idEmpOld, 't' => bin2hex(random_bytes(32)), 'u' => $idFk]);
+    $idTFk = (int) $pNew->lastInsertId();
+    $pNew->prepare('DELETE FROM tb_gestao_usuario WHERE id_usuario = :i')->execute(['i' => $idFk]);
+    afirmar('(k) apagar o usuario criador => totem permanece e criado_por vira NULL', gtEscalar($pNew, 'SELECT criado_por FROM tb_totem WHERE id_totem = :i', ['i' => $idTFk]) === null && (int) gtEscalar($pNew, 'SELECT COUNT(*) FROM tb_totem WHERE id_totem = :i', ['i' => $idTFk]) === 1);
     try {
-        $pOld->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo, criado_por) VALUES ('FK-OUTRO-MAUAI-AAAAAAAAAAAAAAAA', 'FK-OUTRO', :e, :t, 1, 999999)")->execute(['e' => $idEmpOld, 't' => bin2hex(random_bytes(32))]);
+        $pNew->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo, criado_por) VALUES ('FK-OUTRO-MAUAI-AAAAAAAAAAAAAAAA', 'FK-OUTRO', :e, :t, 1, 999999)")->execute(['e' => $idEmpOld, 't' => bin2hex(random_bytes(32))]);
         $fkRejeita = false;
     } catch (PDOException $e) {
         $fkRejeita = true;
@@ -871,25 +828,11 @@ try {
     afirmar('(k) FK rejeita criado_por inexistente', $fkRejeita);
     $okUk = false;
     try {
-        $pOld->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo) VALUES ('DUP-X-MAUAI-AAAAAAAAAAAAAAAA', 'RECEPCAO-01', :e, :t, 1)")->execute(['e' => $idEmpOld, 't' => bin2hex(random_bytes(32))]);
+        $pNew->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo) VALUES ('DUP-X-MAUAI-AAAAAAAAAAAAAAAA', 'RECEPCAO-01', :e, :t, 1)")->execute(['e' => $idEmpOld, 't' => bin2hex(random_bytes(32))]);
     } catch (PDOException $e) {
         $okUk = (int) ($e->errorInfo[1] ?? 0) === 1062;
     }
     afirmar('(k) UNIQUE (id_empresa, nome) criado e efetivo (1062 no nome repetido na mesma empresa)', $okUk);
-    // nome duplicado pre-existente
-    [$pDup, $nDup] = $aplicarHead();
-    $bancos[] = $nDup;
-    $pDup->exec("INSERT INTO tb_empresa (nome, cnpj, ativo) VALUES ('Maua I', '14706199000182', 1)");
-    $idEmpDup = (int) $pDup->lastInsertId();
-    foreach (['A1', 'A2'] as $cod) {
-        $pDup->prepare("INSERT INTO tb_totem (codigo, nome, id_empresa, token_api, ativo) VALUES (:c, 'REPETIDO', :e, :t, 1)")->execute(['c' => $cod, 'e' => $idEmpDup, 't' => bin2hex(random_bytes(32))]);
-    }
-    $info1 = aplicarSqlComRetorno($pDup, $sql022);
-    $temUk = (int) gtEscalar($pDup, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND INDEX_NAME = 'uk_totem_empresa_nome'");
-    afirmar('(k) nome duplicado pre-existente: UNIQUE NAO criado, SELECT informativo devolve o par repetido, resto da migration aplicado, linhas intactas', $temUk === 0 && count($info1) === 1 && (int) $info1[0]['repeticoes'] === 2 && str_contains((string) $info1[0]['aviso'], 'NAO criado') && (int) gtEscalar($pDup, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND COLUMN_NAME = 'url_versao'") === 1 && (int) gtEscalar($pDup, 'SELECT COUNT(*) FROM tb_totem') === 2);
-    $pDup->exec("UPDATE tb_totem SET nome = 'REPETIDO-2' WHERE codigo = 'A2'");
-    $info2 = aplicarSqlComRetorno($pDup, $sql022);
-    afirmar('(k) corrigidos os nomes e reaplicando: UNIQUE criado, sem aviso', $info2 === [] && (int) gtEscalar($pDup, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_totem' AND INDEX_NAME = 'uk_totem_empresa_nome'") === 2);
 
     // =====================================================================
     // Integridade final

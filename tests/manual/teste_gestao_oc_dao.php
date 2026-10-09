@@ -126,7 +126,7 @@ register_shutdown_function(static function () use (&$bancos, &$storage): void {
 });
 
 try {
-    $amb = ogCriarAmbiente(true);
+    $amb = ogCriarAmbiente();
     $bancos = [$amb['banco_totem'], $amb['banco_externo']];
     /** @var PDO $totem */
     $totem = $amb['totem'];
