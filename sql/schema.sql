@@ -1,3 +1,9 @@
+-- Estrutura COMPLETA e ATUAL do banco do totem. Equivale a aplicar, sobre um
+-- banco vazio, todas as migrations historicas ate a 023 (inclusive); as
+-- migrations antigas foram removidas do repositorio e este arquivo e a unica
+-- fonte da estrutura. Aplicar so este arquivo numa instalacao nova.
+-- Referencias "migration NNN" nos comentarios abaixo sao apenas historico.
+
 -- Empresa/armazem do Talent (Portaria/Checkin) — cnpjArmazem do payload
 -- enviado ao Talent vem EXCLUSIVAMENTE daqui, via tb_totem.id_empresa,
 -- nunca do frontend. Ver sql/migrations/008_tb_empresa_totem_vinculo.sql.
@@ -52,12 +58,32 @@ CREATE TABLE tb_cliente (
     INDEX idx_razao_social_normalizada (razao_social_normalizada)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Registro temporario do aceite do Aviso de Privacidade/LGPD emitido pelo
+-- totem antes de existir atendimento (token_hash = SHA-256 do token opaco; o
+-- token bruto nunca e gravado). tb_atendimento.id_aceite_lgpd referencia
+-- id_aceite logicamente, sem FOREIGN KEY (decisao da migration 014).
+CREATE TABLE tb_lgpd_aceite (
+    id_aceite      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    token_hash     CHAR(64) NOT NULL UNIQUE,
+    id_totem       INT UNSIGNED NOT NULL,
+    versao_termo   VARCHAR(20) NOT NULL,
+    hash_termo     CHAR(64) NOT NULL,
+    criado_em      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expira_em      DATETIME NOT NULL,
+    usado_em       DATETIME NULL,
+    status         ENUM('PENDENTE_USO', 'USADO') NOT NULL DEFAULT 'PENDENTE_USO',
+    FOREIGN KEY (id_totem) REFERENCES tb_totem(id_totem),
+    INDEX idx_lgpd_aceite_totem_status (id_totem, status),
+    INDEX idx_lgpd_aceite_status_expira (status, expira_em)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Sessao de atendimento: funciona como state machine.
 -- Se o totem travar/reiniciar no meio do fluxo, retoma daqui em vez de perder tudo
 CREATE TABLE tb_atendimento (
     id_atendimento    BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     codigo_publico    CHAR(36) NOT NULL UNIQUE,
     id_totem          INT UNSIGNED NOT NULL,
+    id_aceite_lgpd    BIGINT UNSIGNED NULL,
     tipo              ENUM('expedicao','recebimento') NOT NULL,
     etapa_atual       VARCHAR(40) NOT NULL DEFAULT 'placa',
     status            ENUM('em_andamento','concluido','cancelado','bloqueado') NOT NULL DEFAULT 'em_andamento',
@@ -72,7 +98,7 @@ CREATE TABLE tb_atendimento (
     cnh_validade      DATE NULL,
     -- Origem/status/timestamp da validacao de CNH via VIO Decode (Serpro,
     -- QR Code) ou preenchimento manual. Ver sql/migrations/005_vio_decode_cnh_crlv.sql.
-    cnh_origem_validacao  ENUM('VIO_TRIAL','VIO_VALIDADO','MANUAL','NAO_VALIDADO') NOT NULL DEFAULT 'NAO_VALIDADO',
+    cnh_origem_validacao  ENUM('VIO_TRIAL','VIO_VALIDADO','MANUAL','NAO_VALIDADO','VIO_CACHE','VIO_API_BR') NOT NULL DEFAULT 'NAO_VALIDADO',
     cnh_status_revisao    ENUM('OK','PENDENTE_REVISAO') NOT NULL DEFAULT 'OK',
     cnh_validado_em       DATETIME NULL,
     -- Snapshot do valor EXATO retornado pelo VIO/cache no momento em que
@@ -89,9 +115,14 @@ CREATE TABLE tb_atendimento (
     -- responde "o backend terminou de tentar" (nao "com que resultado").
     -- tentativa_id/processamento_iniciado_em protegem contra respostas
     -- "zumbi" e timeout. Ver sql/migrations/007_status_processamento_assincrono_vio.sql.
-    cnh_status_processamento      ENUM('PENDENTE','PROCESSANDO','CONCLUIDO','ERRO') NOT NULL DEFAULT 'PENDENTE',
+    cnh_status_processamento      ENUM('PENDENTE','PROCESSANDO','ENVIANDO','PROCESSANDO_LEITURA','PROCESSANDO_COMPARACAO','CONCLUIDO','ERRO','INDETERMINADO') NOT NULL DEFAULT 'PENDENTE',
+    cnh_modo_captura              ENUM('FISICA','DIGITAL') NULL DEFAULT NULL,
     cnh_processamento_iniciado_em DATETIME NULL,
     cnh_tentativa_id              VARCHAR(32) NULL,
+    cnh_vio_api_id                VARCHAR(128) NULL,
+    cnh_vio_api_enviado_em        DATETIME NULL,
+    cnh_vio_api_fingerprint       CHAR(64) NULL,
+    cnh_vio_api_fingerprint_versao TINYINT UNSIGNED NULL,
     crlv_ano          SMALLINT NULL,
     -- UF do veiculo (obrigatoria pelo Talent, veiculo.uf) — extraida de
     -- data.uf da resposta VIO Decode do CRLV ou preenchida manualmente
@@ -107,7 +138,7 @@ CREATE TABLE tb_atendimento (
     -- manualmente. Ver sql/migrations/010_talent_rntc_tipo_veiculo.sql.
     crlv_rntc         VARCHAR(20) NULL,
     crlv_tipo_veiculo VARCHAR(60) NULL,
-    crlv_origem_validacao ENUM('VIO_TRIAL','VIO_VALIDADO','MANUAL','NAO_VALIDADO') NOT NULL DEFAULT 'NAO_VALIDADO',
+    crlv_origem_validacao ENUM('VIO_TRIAL','VIO_VALIDADO','MANUAL','NAO_VALIDADO','VIO_CACHE','VIO_API_BR') NOT NULL DEFAULT 'NAO_VALIDADO',
     crlv_status_revisao   ENUM('OK','PENDENTE_REVISAO') NOT NULL DEFAULT 'OK',
     crlv_validado_em      DATETIME NULL,
     crlv_snapshot_placa      VARCHAR(8) NULL,
@@ -115,9 +146,13 @@ CREATE TABLE tb_atendimento (
     crlv_snapshot_uf         VARCHAR(2) NULL,
     crlv_snapshot_rntc         VARCHAR(20) NULL,
     crlv_snapshot_tipo_veiculo VARCHAR(60) NULL,
-    crlv_status_processamento      ENUM('PENDENTE','PROCESSANDO','CONCLUIDO','ERRO') NOT NULL DEFAULT 'PENDENTE',
+    crlv_status_processamento      ENUM('PENDENTE','PROCESSANDO','ENVIANDO','PROCESSANDO_LEITURA','PROCESSANDO_COMPARACAO','CONCLUIDO','ERRO','INDETERMINADO') NOT NULL DEFAULT 'PENDENTE',
     crlv_processamento_iniciado_em DATETIME NULL,
     crlv_tentativa_id              VARCHAR(32) NULL,
+    crlv_vio_api_id                VARCHAR(128) NULL,
+    crlv_vio_api_enviado_em        DATETIME NULL,
+    crlv_vio_api_fingerprint       CHAR(64) NULL,
+    crlv_vio_api_fingerprint_versao TINYINT UNSIGNED NULL,
 
     possui_ajudante   TINYINT(1) NOT NULL DEFAULT 0,
     ajudante_nome     VARCHAR(150) NULL,
@@ -143,7 +178,8 @@ CREATE TABLE tb_atendimento (
 
     FOREIGN KEY (id_totem) REFERENCES tb_totem(id_totem),
     INDEX idx_placa (placa),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    INDEX idx_atendimento_aceite_lgpd (id_aceite_lgpd)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Notas fiscais do recebimento (1 atendimento pode ter varias)
@@ -151,7 +187,8 @@ CREATE TABLE tb_atendimento_nota (
     id_nota               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     id_atendimento        BIGINT UNSIGNED NOT NULL,
     ordem                 TINYINT UNSIGNED NOT NULL,
-    arquivo               VARCHAR(255) NOT NULL,
+    client_uid            VARCHAR(64) NULL,
+    arquivo              VARCHAR(255) NOT NULL,
     chave_acesso          CHAR(44) NULL,
     -- numero_nota/numero_nota_origem: numero da NF-e (OCR confirmado ou
     -- digitado manualmente), sempre normalizado no backend (sem zero a
@@ -175,8 +212,9 @@ CREATE TABLE tb_atendimento_nota (
     INDEX idx_chave (chave_acesso),
     INDEX idx_status_ocr (status_ocr),
     UNIQUE KEY uk_atendimento_ordem (id_atendimento, ordem),
-    UNIQUE KEY uk_atendimento_numero_nota (id_atendimento, numero_nota)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    UNIQUE KEY uk_atendimento_numero_nota (id_atendimento, numero_nota),
+    UNIQUE KEY uk_atendimento_client_uid (id_atendimento, client_uid)
+)ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Registro de auditoria interno (banco do TOTEM) para o cenario "Talent
 -- aceitou o check-in, mas o UPDATE de status da ordem de coleta para
@@ -251,6 +289,57 @@ CREATE TABLE tb_vio_cache_crlv (
     criado_em       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_qr_ambiente (identificador_qr, ambiente),
     INDEX idx_valido_ate (valido_ate)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Cache local de CNH/CRLV validados pela vio.api.br, chaveado por fingerprint
+-- HMAC-SHA256 do QR (o QR bruto nunca e persistido); dados pessoais cifrados.
+CREATE TABLE tb_vio_api_cache_cnh (
+    id_cache                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    fingerprint                   CHAR(64) NOT NULL,
+    hmac_versao                   TINYINT UNSIGNED NOT NULL,
+    fornecedor                    ENUM('VIO_API_BR') NOT NULL DEFAULT 'VIO_API_BR',
+    versao_mapeamento             SMALLINT UNSIGNED NOT NULL,
+    nome_cifrado                  VARBINARY(512) NOT NULL,
+    cpf_cifrado                   VARBINARY(512) NOT NULL,
+    data_validade                 DATE NOT NULL,
+    resumo_comparacao_reliable    TINYINT(1) NOT NULL,
+    resumo_comparacao_mismatched  SMALLINT UNSIGNED NOT NULL,
+    estado                        ENUM('VALIDO','REVOGADO') NOT NULL DEFAULT 'VALIDO',
+    origem_original                ENUM('VIO_API_BR') NOT NULL DEFAULT 'VIO_API_BR',
+    validado_em                   DATETIME NOT NULL,
+    revalidar_apos                DATETIME NULL,
+    expira_em                     DATETIME NOT NULL,
+    criado_em                     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em                 DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_fingerprint_versao_cnh (fingerprint, hmac_versao, fornecedor, versao_mapeamento),
+    INDEX idx_expira_em_cnh (expira_em),
+    INDEX idx_estado_cnh (estado)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE tb_vio_api_cache_crlv (
+    id_cache                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    fingerprint                   CHAR(64) NOT NULL,
+    hmac_versao                   TINYINT UNSIGNED NOT NULL,
+    fornecedor                    ENUM('VIO_API_BR') NOT NULL DEFAULT 'VIO_API_BR',
+    versao_mapeamento             SMALLINT UNSIGNED NOT NULL,
+    placa                         VARCHAR(8) NOT NULL,
+    exercicio                     SMALLINT NOT NULL,
+    uf                            VARCHAR(2) NULL,
+    rntc                          VARCHAR(32) NULL,
+    tipo_veiculo                  VARCHAR(60) NULL,
+    renavam_cifrado                VARBINARY(512) NULL,
+    resumo_comparacao_reliable    TINYINT(1) NOT NULL,
+    resumo_comparacao_mismatched  SMALLINT UNSIGNED NOT NULL,
+    estado                        ENUM('VALIDO','REVOGADO') NOT NULL DEFAULT 'VALIDO',
+    origem_original                ENUM('VIO_API_BR') NOT NULL DEFAULT 'VIO_API_BR',
+    validado_em                   DATETIME NOT NULL,
+    revalidar_apos                DATETIME NULL,
+    expira_em                     DATETIME NOT NULL,
+    criado_em                     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em                 DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_fingerprint_versao_crlv (fingerprint, hmac_versao, fornecedor, versao_mapeamento),
+    INDEX idx_expira_em_crlv (expira_em),
+    INDEX idx_estado_crlv (estado)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- (tb_fila_envio, a fila de reenvio ao Talent, foi removida pela migration 019)
