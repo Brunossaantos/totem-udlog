@@ -1,20 +1,17 @@
 <?php
 
 /**
- * QA adversarial da normalizacao sem acentos (RazaoSocialMatcher::normalizar) e da ferramenta
- * tools/recalcular-razao-normalizada.php. Complementa (nao duplica) teste_razao_social_normalizacao.php.
+ * QA adversarial da normalizacao sem acentos (RazaoSocialMatcher::normalizar). Complementa (nao duplica) teste_razao_social_normalizacao.php.
  *   (a) paridade com o algoritmo ANTIGO (copia verbatim do HEAD) em >=10.000 entradas ASCII: 0 divergencias
  *   (b) seed da migration 003: quantos dos 38 divergem da funcao nova (so REPORTA)
  *   (c) colisoes novas (par distinto no antigo, igual no novo) em 50.000 pares sinteticos (so REPORTA)
  *   (d) idempotencia em 20.000 entradas + contra-exemplos (so REPORTA contra-exemplos de borda)
- *   (e) ferramenta CLI em banco QA descartavel: checksum, so divergentes, recusas, lock, CGI
- * Uso: php tests/manual/teste_qa_normalizacao.php   (banco QA qa_qr_exclusivo_<hex>, nunca udlog_totem)
+ * Uso: php tests/manual/teste_qa_normalizacao.php
  */
 declare(strict_types=1);
 
 require_once __DIR__ . '/qa_gestao_infra.php';
 
-use App\Dao\ClienteGestaoDao;
 use Util\RazaoSocialMatcher;
 
 /** Copia VERBATIM de HEAD:util/RazaoSocialMatcher.php::normalizar (strtoupper + iconv TRANSLIT). */
@@ -181,107 +178,5 @@ for ($i = 0; $i < 20000; $i++) {
     $naoId2 += $N($N($s)) === $N($s) ? 0 : 1;
 }
 afirmar("(d) idempotencia em 20000 nomes comuns (sem sufixos de borda): {$naoId2} nao idempotentes", $naoId2 === 0);
-
-// ---------------------------------------------------------------- (e)
-function qaRodar(string $args = '', bool $cgi = false): array
-{
-    $raiz = dirname(__DIR__, 2);
-    $log = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qa_qaz_' . bin2hex(random_bytes(4)) . '.log';
-    file_put_contents($log, '');
-    $prepend = __DIR__ . '/qa_gestao_prepend.php';
-    $script = $raiz . '/tools/recalcular-razao-normalizada.php';
-    if ($cgi) {
-        $cmd = [gtCgiBinario(), '-q', '-d', 'auto_prepend_file=' . $prepend, '-d', 'error_log="' . $log . '"', $script];
-        $env = ['QA_QR_FORCE_DB_NAME' => (string) getenv('QA_QR_FORCE_DB_NAME'), 'REQUEST_METHOD' => 'GET', 'REDIRECT_STATUS' => '200', 'SystemRoot' => (string) getenv('SystemRoot')];
-        $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pp, $raiz, $env);
-    } else {
-        $cmd = array_merge([PHP_BINARY, '-d', 'auto_prepend_file=' . $prepend, '-d', 'display_errors=0', '-d', 'error_log="' . $log . '"', $script], $args === '' ? [] : explode(' ', $args));
-        $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pp, $raiz);
-    }
-    $out = (string) stream_get_contents($pp[1]);
-    $err = (string) stream_get_contents($pp[2]);
-    fclose($pp[1]);
-    fclose($pp[2]);
-    $c = proc_close($proc);
-    @unlink($log);
-
-    return ['c' => $c, 'out' => $out, 'err' => $err];
-}
-
-function qaChecksum(PDO $pdo): string
-{
-    return md5(json_encode($pdo->query('SELECT id_cliente, nome, razao_social_normalizada, cnpj, ativo FROM tb_cliente ORDER BY id_cliente')->fetchAll(PDO::FETCH_ASSOC)));
-}
-
-$banco = null;
-$storage = null;
-try {
-    [$pdo, $banco, $storage] = gtCriarAmbiente();
-    echo "    banco QA: {$banco}\n";
-    afirmar('(e) banco e QA descartavel', preg_match('/\Aqa_qr_exclusivo_[a-f0-9]{8}\z/', $banco) === 1);
-    $ins = $pdo->prepare('INSERT INTO tb_cliente (nome, razao_social_normalizada, cnpj, ativo) VALUES (:n, :r, :c, :a)');
-    $semear = static function (array $linhas) use ($pdo, $ins): void {
-        $pdo->exec('DELETE FROM tb_cliente');
-        foreach ($linhas as $i => [$nome, $razao, $ativo]) {
-            $ins->execute(['n' => $nome, 'r' => $razao, 'c' => sprintf('%014d', 91000000000000 + $i), 'a' => $ativo]);
-        }
-    };
-    // cenario 1: 2 iguais, 2 divergentes (um NULL), tudo distinto
-    $semear([["Café Central Ltda", 'CAF CENTRAL', 1], ['Acme Tintas', 'ACME TINTAS', 1], ['Ação Forte', 'A O FORTE', 1], ['Zeta Sul', 'ZETA SUL', 1]]);
-    $pdo->exec("UPDATE tb_cliente SET razao_social_normalizada = NULL WHERE nome = 'Zeta Sul'");
-    $pdo->exec("UPDATE tb_cliente SET razao_social_normalizada = 'ZETA SUL' WHERE nome = 'Zeta Sul'");
-    $pdo->exec("UPDATE tb_cliente SET razao_social_normalizada = 'CAF CENTRAL' WHERE nome LIKE 'Caf%'");
-    $antes = qaChecksum($pdo);
-    $dry = qaRodar();
-    afirmar('(e) dry-run: exit 0, checksum da tabela inalterado, diz DRY-RUN e 2 diferentes', $dry['c'] === 0 && qaChecksum($pdo) === $antes && str_contains($dry['out'], 'DRY-RUN') && str_contains($dry['out'], 'diferentes: 2'));
-    $dry2 = qaRodar('--dry-run');
-    afirmar('(e) --dry-run explicito: idem, sem gravar', $dry2['c'] === 0 && qaChecksum($pdo) === $antes);
-    $nomes0 = $pdo->query('SELECT nome FROM tb_cliente ORDER BY id_cliente')->fetchAll(PDO::FETCH_COLUMN);
-    $ap = qaRodar('--aplicar');
-    $linhas = $pdo->query('SELECT nome, razao_social_normalizada r FROM tb_cliente ORDER BY id_cliente')->fetchAll(PDO::FETCH_KEY_PAIR);
-    afirmar('(e) --aplicar: exit 0, so os 2 divergentes mudam (CAFE CENTRAL, ACAO FORTE), iguais intactos, nome nunca tocado', $ap['c'] === 0 && $linhas['Café Central Ltda'] === 'CAFE CENTRAL' && $linhas['Ação Forte'] === 'ACAO FORTE' && $linhas['Acme Tintas'] === 'ACME TINTAS' && $linhas['Zeta Sul'] === 'ZETA SUL' && $pdo->query('SELECT nome FROM tb_cliente ORDER BY id_cliente')->fetchAll(PDO::FETCH_COLUMN) === $nomes0 && str_contains($ap['out'], 'APLICADO: 2'));
-    $depois = qaChecksum($pdo);
-    $ap2 = qaRodar('--aplicar');
-    afirmar('(e) 2a execucao --aplicar: idempotente (0 atualizadas, checksum igual)', $ap2['c'] === 0 && qaChecksum($pdo) === $depois && str_contains($ap2['out'], 'APLICADO: 0'));
-    $ap3 = qaRodar('--aplicar --dry-run');
-    $ap4 = qaRodar('--xyz');
-    afirmar('(e) argumentos invalidos/excludentes: exit 2', $ap3['c'] === 2 && $ap4['c'] === 2);
-
-    // duplicidade entre ativos
-    $semear([['Café Sul', 'CAF SUL', 1], ['Cafe Sul', 'CAFE SUL', 1], ['Outro', 'OUTRO', 1]]);
-    $antes = qaChecksum($pdo);
-    $r = qaRodar('--aplicar');
-    afirmar('(e) duplicidade entre ativos: --aplicar recusa (exit 1), checksum inalterado', $r['c'] === 1 && qaChecksum($pdo) === $antes && str_contains($r['out'], 'RECUSADO'));
-    // duplicidade com um inativo: permitido
-    $pdo->exec("UPDATE tb_cliente SET ativo = 0 WHERE nome = 'Cafe Sul'");
-    $antes = qaChecksum($pdo);
-    $r = qaRodar('--aplicar');
-    afirmar('(e) duplicidade com 1 inativo: aplica (exit 0)', $r['c'] === 0 && qaChecksum($pdo) !== $antes);
-    // vazio
-    $semear([['Ввод', 'X', 1], ['Normal', 'NORMAL', 1]]);
-    $antes = qaChecksum($pdo);
-    $r = qaRodar('--aplicar');
-    afirmar('(e) nome que normaliza para vazio (cirilico): recusa (exit 1), checksum inalterado', $r['c'] === 1 && qaChecksum($pdo) === $antes);
-    // acima da coluna
-    $semear([[str_repeat('ß', 80), 'X', 1]]);
-    $antes = qaChecksum($pdo);
-    $r = qaRodar('--aplicar');
-    afirmar('(e) valor acima da coluna (150; 80 x ß => 160): recusa (exit 1), checksum inalterado', $r['c'] === 1 && qaChecksum($pdo) === $antes);
-    // lock
-    $semear([['Café Lock', 'CAF LOCK', 1]]);
-    $antes = qaChecksum($pdo);
-    $pdo2 = qaQrAbrirBanco($banco);
-    $seguro = (new ClienteGestaoDao($pdo2))->obterLock(0);
-    $r = qaRodar('--aplicar');
-    $dryLock = qaRodar();
-    (new ClienteGestaoDao($pdo2))->liberarLock();
-    afirmar('(e) lock segurado por outra conexao: --aplicar recusa (exit 1) sem gravar; dry-run nao depende do lock (exit 0)', $seguro && $r['c'] === 1 && qaChecksum($pdo) === $antes && $dryLock['c'] === 0);
-    // CGI
-    $cgi = qaRodar('', true);
-    $semSaida = !str_contains($cgi['out'], 'modo:') && !str_contains($cgi['out'], 'total:') && qaChecksum($pdo) === $antes;
-    afirmar('(e) via CGI: 404/exit 1, sem imprimir contagens e sem gravar (status=' . json_encode(strtok($cgi['out'], "\n")) . ' exit=' . $cgi['c'] . ')', $semSaida && ($cgi['c'] === 1 || str_contains($cgi['out'], '404')));
-} finally {
-    gtDestruirAmbiente($banco, $storage);
-}
 
 exit(gtResumo('teste_qa_normalizacao'));

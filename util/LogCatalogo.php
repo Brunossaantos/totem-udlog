@@ -32,7 +32,7 @@ final class LogCatalogo
 
     public const JOBS = [
         'abandonar_atendimentos', 'limpar_notas_quarentena', 'limpar_anexos_oc',
-        'limpar_rate_limit_ocr', 'limpar_logs_gestao', 'recalcular_razao',
+        'limpar_rate_limit_ocr', 'limpar_logs_gestao',
     ];
 
     public const DOMINIO = [

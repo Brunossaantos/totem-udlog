@@ -2,8 +2,7 @@
 
 /**
  * Normalizacao SEM acentos de Util\RazaoSocialMatcher::normalizar (decisao do usuario,
- * 2026-10-09: "sempre normalizar os textos para nao ter acentos") e ferramenta
- * tools/recalcular-razao-normalizada.php (CLI real, subprocesso).
+ * 2026-10-09: "sempre normalizar os textos para nao ter acentos").
  *
  *   A. normalizar sem banco: goldens, caixa (minuscula/maiuscula/mista), NFC/NFD, ß/Æ/Œ/Ø/Ł/Đ,
  *      cobertura de TODO o Latin-1 Supplement e Latin Extended-A, entrada invalida/emoji/CJK/RTL,
@@ -11,21 +10,16 @@
  *      (copia verbatim strtoupper+iconv, usada SO para ASCII) e fonte sem iconv/setlocale.
  *   B. OCR fuzzy ponta a ponta (NotaFiscalRn::avaliarNota + ClienteDao reais no banco QA):
  *      "Cafe Central" no OCR casa com o cliente cadastrado como "Café Central Ltda" e vice-versa.
- *   C. Ferramenta de recalculo: dry-run so imprime contagens e ids (sem nome/CNPJ/razao) e nao
- *      altera; --aplicar altera so as divergencias, e idempotente; aborta por duplicidade entre
- *      ATIVOS, valor vazio e valor acima da coluna; respeita o lock; argumentos; so CLI.
  * Banco QA descartavel `qa_qr_exclusivo_<hex>` (prepend fail-closed); NUNCA udlog_totem.
  *
- * Variaveis de teste de mutacao (opcionais): QA_RAZAO_PREPEND (prepend que carrega uma copia
- * mutante de RazaoSocialMatcher depois do prepend QA) e QA_RAZAO_FERRAMENTA (copia mutante da
- * ferramenta). Uso: php tests/manual/teste_razao_social_normalizacao.php
+ * Variavel de teste de mutacao (opcional): QA_RAZAO_PREPEND (prepend que carrega uma copia
+ * mutante de RazaoSocialMatcher depois do prepend QA). Uso: php tests/manual/teste_razao_social_normalizacao.php
  */
 declare(strict_types=1);
 
 require_once __DIR__ . '/qa_gestao_infra.php';
 
 use App\Dao\ClienteDao;
-use App\Dao\ClienteGestaoDao;
 use App\Dao\AtendimentoNotaDao;
 use App\Rn\ClienteGestaoRn;
 use App\Rn\NotaFiscalRn;
@@ -68,31 +62,6 @@ function cnpjRz(string $base12): string
     return $base12 . $d1 . $d2;
 }
 
-/** Roda a ferramenta como CLI real no banco QA. @return array{codigo:int,out:string,err:string,log:string} */
-function rodarFerramenta(array $args = []): array
-{
-    $raiz = dirname(__DIR__, 2);
-    $log = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qa_razao_' . bin2hex(random_bytes(4)) . '.log';
-    file_put_contents($log, '');
-    $prepend = (string) (getenv('QA_RAZAO_PREPEND') ?: __DIR__ . '/qa_gestao_prepend.php');
-    $script = (string) (getenv('QA_RAZAO_FERRAMENTA') ?: $raiz . '/tools/recalcular-razao-normalizada.php');
-    $cmd = array_merge([PHP_BINARY, '-d', 'auto_prepend_file=' . $prepend, '-d', 'display_errors=0', '-d', 'error_log="' . $log . '"', $script], $args);
-    $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $raiz);
-    $out = str_replace("", '', (string) stream_get_contents($pipes[1]));
-    $err = str_replace("", '', (string) stream_get_contents($pipes[2]));
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    $codigo = proc_close($proc);
-    $texto = (string) preg_replace('/^\[[^\]]+\] /m', '', (string) file_get_contents($log));
-    @unlink($log);
-
-    return ['codigo' => $codigo, 'out' => $out, 'err' => $err, 'log' => $texto];
-}
-
-function tudoCliente(PDO $pdo): array
-{
-    return gtLinhas($pdo, 'SELECT id_cliente, nome, razao_social_normalizada, cnpj, ativo FROM tb_cliente ORDER BY id_cliente');
-}
 
 // ===========================================================================
 // A. normalizar (sem banco)
@@ -234,7 +203,7 @@ foreach (token_get_all($fonteBruta) as $tok) {
 afirmar('fonte (sem comentarios): sem iconv e sem setlocale; usa mb_strtoupper, \p{Mn} e strtr com mapa fixo', !str_contains($codigo, 'iconv') && !str_contains($codigo, 'setlocale') && str_contains($codigo, 'mb_strtoupper') && str_contains($codigo, '\p{Mn}') && str_contains($codigo, 'strtr(') && str_contains($codigo, "'LTDA ME', 'LTDA', 'S A', 'S/A', 'SA', 'EIRELI', 'ME', 'EPP', 'MEI', 'CIA'"));
 
 // ===========================================================================
-// B e C: banco QA
+// B: banco QA
 // ===========================================================================
 $banco = null;
 $storage = null;
@@ -273,142 +242,6 @@ try {
     $r = RazaoSocialMatcher::melhorCandidato('Café Central Ltda', [['id' => 1, 'razao_social' => 'Cafe Central', 'cnpj' => '1']]);
     afirmar('B: melhorCandidato("Café Central Ltda") contra "Cafe Central": identificado (vice-versa)', $r['identificado'] === true && $r['score1'] >= 99.0);
     $pdo->exec('DELETE FROM tb_cliente');
-
-    // -----------------------------------------------------------------
-    // C. Ferramenta
-    // -----------------------------------------------------------------
-    $ins = $pdo->prepare('INSERT INTO tb_cliente (nome, razao_social_normalizada, cnpj, ativo) VALUES (:n, :r, :c, :a)');
-    $semear = static function (array $linhas) use ($pdo, $ins): array {
-        $pdo->exec('DELETE FROM tb_cliente');
-        $ids = [];
-        foreach ($linhas as $i => [$nome, $razao, $ativo]) {
-            $ins->execute(['n' => $nome, 'r' => $razao, 'c' => cnpjRz(sprintf('%012d', 600000000000 + $i)), 'a' => $ativo]);
-            $ids[$i] = (int) $pdo->lastInsertId();
-        }
-
-        return $ids;
-    };
-    // A diverge (seed antigo perdeu letras), B igual, C diverge, D inativo diverge, E razao NULL diverge
-    $ids = $semear([
-        ['Café Central Ltda', 'CAF CENTRAL', 1],
-        ['Acme Comercio LTDA', 'ACME COMERCIO', 1],
-        ['Ação Tintas', 'A O TINTAS', 1],
-        ['Química Inativa', 'QU MICA INATIVA', 0],
-        ['Zeta Plasticos', null, 1],
-    ]);
-    $antes = tudoCliente($pdo);
-
-    $dry = rodarFerramenta();
-    if (getenv('QA_RAZAO_DEBUG')) {
-        echo 'DBG:' . $dry['out'] . '|' . $dry['err'] . '|' . $dry['log'] . "\n";
-    }
-    $esperadoIds = $ids[0] . ',' . $ids[2] . ',' . $ids[3] . ',' . $ids[4];
-    afirmar('dry-run (padrao): exit 0, modo DRY-RUN, total 5, iguais 1, diferentes 4, ids exatos', $dry['codigo'] === 0 && str_contains($dry['out'], 'modo: DRY-RUN') && str_contains($dry['out'], "total: 5\n") && str_contains($dry['out'], "iguais: 1\n") && str_contains($dry['out'], "diferentes: 4\n") && str_contains($dry['out'], 'ids_diferentes: ' . $esperadoIds . "\n") && str_contains($dry['out'], "vazias_que_ficariam_vazias: 0 "));
-    afirmar('dry-run: NAO altera nenhuma linha (nome, razao, cnpj, ativo)', tudoCliente($pdo) === $antes);
-    $saidaCompleta = $dry['out'] . $dry['err'] . $dry['log'];
-    afirmar('dry-run: a saida/log NAO contem nome, razao nem CNPJ de cliente', !preg_match('/Caf|CAFE|Acme|ACME|Zeta|ZETA|Tintas|TINTAS|Qu[ií]mica|CENTRAL|\d{14}/i', $saidaCompleta));
-    afirmar('dry-run: a saida diz que a aplicacao seria permitida', str_contains($dry['out'], 'a aplicacao seria PERMITIDA'));
-    $dry2 = rodarFerramenta(['--dry-run']);
-    afirmar('--dry-run explicito equivale ao padrao e tambem nao altera', $dry2['codigo'] === 0 && str_contains($dry2['out'], 'modo: DRY-RUN') && tudoCliente($pdo) === $antes);
-
-    $audAntes = (int) gtEscalar($pdo, 'SELECT COUNT(*) FROM tb_gestao_auditoria');
-    $ap = rodarFerramenta(['--aplicar']);
-    $depois = tudoCliente($pdo);
-    $porId = [];
-    foreach ($depois as $l) {
-        $porId[(int) $l['id_cliente']] = $l;
-    }
-    afirmar('--aplicar: exit 0 e APLICADO 4', $ap['codigo'] === 0 && str_contains($ap['out'], 'APLICADO: 4 '));
-    afirmar('--aplicar: atualizou so as divergencias (razao nova sem acento; inativo e NULL inclusive)', $porId[$ids[0]]['razao_social_normalizada'] === 'CAFE CENTRAL' && $porId[$ids[2]]['razao_social_normalizada'] === 'ACAO TINTAS' && $porId[$ids[3]]['razao_social_normalizada'] === 'QUIMICA INATIVA' && $porId[$ids[4]]['razao_social_normalizada'] === 'ZETA PLASTICOS' && $porId[$ids[1]]['razao_social_normalizada'] === 'ACME COMERCIO');
-    $mudouAlemDaRazao = false;
-    foreach ($antes as $a) {
-        $d = $porId[(int) $a['id_cliente']];
-        $mudouAlemDaRazao = $mudouAlemDaRazao || $d['nome'] !== $a['nome'] || $d['cnpj'] !== $a['cnpj'] || (int) $d['ativo'] !== (int) $a['ativo'];
-    }
-    afirmar('--aplicar: nome, CNPJ e situacao de TODOS os clientes ficam intactos; sem linhas novas/apagadas', !$mudouAlemDaRazao && count($depois) === count($antes));
-    afirmar('--aplicar: saida/log sem nome, razao ou CNPJ', !preg_match('/Caf|CAFE|Acme|ACME|Zeta|ZETA|Tintas|TINTAS|Qu[ií]mica|CENTRAL|\d{14}/i', $ap['out'] . $ap['err'] . $ap['log']) && str_contains($ap['log'], 'recalcular-razao-normalizada: aplicado total=5 atualizadas=4'));
-    $resumo = gtLinhas($pdo, "SELECT nivel, origem, detalhe FROM tb_log_sistema WHERE categoria = 'cron_resumo' AND detalhe LIKE 'job=recalcular_razao%'");
-    afirmar('--aplicar: LogSistema cron_resumo (INFO, CRON) com job e contagem, sem PII', count($resumo) === 1 && $resumo[0]['nivel'] === 'INFO' && $resumo[0]['origem'] === 'CRON' && $resumo[0]['detalhe'] === 'job=recalcular_razao;itens=4');
-    afirmar('--aplicar: nao cria auditoria (acao nova NAO foi criada)', (int) gtEscalar($pdo, 'SELECT COUNT(*) FROM tb_gestao_auditoria') === $audAntes);
-
-    $ap2 = rodarFerramenta(['--aplicar']);
-    afirmar('idempotente: 2a execucao de --aplicar nao tem divergencias e nao altera nada', $ap2['codigo'] === 0 && str_contains($ap2['out'], "diferentes: 0\n") && str_contains($ap2['out'], 'APLICADO: 0 ') && tudoCliente($pdo) === $depois);
-    $dry3 = rodarFerramenta();
-    afirmar('apos aplicar o dry-run mostra 0 diferentes e 5 iguais', str_contains($dry3['out'], "diferentes: 0\n") && str_contains($dry3['out'], "iguais: 5\n"));
-
-    // Duplicidade entre ATIVOS -> aborta sem alterar, lista os ids
-    $ids = $semear([
-        ['Café Central Ltda', 'CAF CENTRAL', 1],
-        ['Cafe Central', 'CAFE CENTRAL', 1],
-        ['Outro Cliente SA', 'OUTRO CLIENTE SA', 1],
-    ]);
-    $antes = tudoCliente($pdo);
-    $dup = rodarFerramenta(['--aplicar']);
-    afirmar('duplicidade entre ATIVOS: --aplicar RECUSA (exit 1), lista os ids envolvidos e NAO altera nada (nem a divergencia valida)', $dup['codigo'] === 1 && str_contains($dup['out'], 'RECUSADO') && str_contains($dup['out'], 'duplicidade_1_ids: ' . $ids[0] . ',' . $ids[1] . "\n") && tudoCliente($pdo) === $antes);
-    $dupDry = rodarFerramenta();
-    afirmar('duplicidade: o dry-run informa os ids e que a aplicacao seria RECUSADA (exit 0, nada gravado)', $dupDry['codigo'] === 0 && str_contains($dupDry['out'], 'grupos_duplicados_entre_ativos: 1') && str_contains($dupDry['out'], 'a aplicacao seria RECUSADA') && tudoCliente($pdo) === $antes);
-    $falhou = gtLinhas($pdo, "SELECT detalhe FROM tb_log_sistema WHERE categoria = 'cron_falhou' AND detalhe LIKE 'job=recalcular_razao%'");
-    afirmar('duplicidade: LogSistema cron_falhou (ERRO) sem PII', count($falhou) === 1 && !preg_match('/Caf|CAFE|CENTRAL/i', (string) $falhou[0]['detalhe']));
-
-    // duplicidade com INATIVO nao bloqueia
-    $ids = $semear([
-        ['Café Central Ltda', 'CAF CENTRAL', 1],
-        ['Cafe Central', 'CAFE CENTRAL', 0],
-    ]);
-    $okInativo = rodarFerramenta(['--aplicar']);
-    afirmar('mesma razao entre um ATIVO e um INATIVO nao bloqueia (so ativos conflitam no OCR): aplica', $okInativo['codigo'] === 0 && str_contains($okInativo['out'], 'APLICADO: 1 '));
-
-    // Valor novo vazio -> aborta
-    $ids = $semear([
-        ['Café Central Ltda', 'CAF CENTRAL', 1],
-        ['LTDA', 'LTDA ANTIGA', 1],
-    ]);
-    $antes = tudoCliente($pdo);
-    $vz = rodarFerramenta(['--aplicar']);
-    afirmar('valor novo VAZIO: --aplicar RECUSA (exit 1), informa o id e NAO altera nada', $vz['codigo'] === 1 && str_contains($vz['out'], 'RECUSADO') && str_contains($vz['out'], 'ids_vazios_novos: ' . $ids[1] . "\n") && tudoCliente($pdo) === $antes);
-    $vzDry = rodarFerramenta();
-    afirmar('valor novo vazio: o dry-run conta 1 vazia que muda e informa que seria RECUSADA', str_contains($vzDry['out'], 'vazias_que_ficariam_vazias: 1 ') && str_contains($vzDry['out'], 'a aplicacao seria RECUSADA'));
-
-    // Vazio que JA era vazio e continua vazio: contado, nao muda
-    $ids = $semear([['LTDA', '', 1], ['Café Central Ltda', 'CAF CENTRAL', 1]]);
-    $vz2 = rodarFerramenta();
-    afirmar('vazia que continua vazia: contada em "vazias_que_ficariam_vazias" e nao conta como divergencia', str_contains($vz2['out'], 'vazias_que_ficariam_vazias: 1 (das quais 0 mudam') && str_contains($vz2['out'], "diferentes: 1\n"));
-
-    // Valor novo acima da coluna (ß expande para SS) -> aborta
-    $ids = $semear([[str_repeat('ß', 100), 'XX', 1]]);
-    $antes = tudoCliente($pdo);
-    $lg = rodarFerramenta(['--aplicar']);
-    afirmar('valor novo acima da coluna (150): --aplicar RECUSA e NAO altera', $lg['codigo'] === 1 && str_contains($lg['out'], 'ids_acima_da_coluna: ' . $ids[0] . "\n") && tudoCliente($pdo) === $antes);
-
-    // Lock do cadastro de clientes ocupado -> recusa
-    $ids = $semear([['Café Central Ltda', 'CAF CENTRAL', 1]]);
-    $antes = tudoCliente($pdo);
-    $outro = qaQrAbrirBanco($banco);
-    $outro->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    $daoOutro = new ClienteGestaoDao($outro);
-    $segurou = $daoOutro->obterLock(0);
-    $lk = rodarFerramenta(['--aplicar']);
-    $daoOutro->liberarLock();
-    afirmar('lock do cadastro de clientes ocupado: --aplicar RECUSA (exit 1) e NAO altera; dry-run nao precisa do lock', $segurou && $lk['codigo'] === 1 && str_contains($lk['err'], 'lock') && tudoCliente($pdo) === $antes);
-    $lk2 = rodarFerramenta(['--aplicar']);
-    afirmar('liberado o lock, --aplicar funciona e libera o lock ao terminar', $lk2['codigo'] === 0 && (int) gtEscalar($pdo, 'SELECT IS_FREE_LOCK(CONCAT(:n, MD5(DATABASE())))', ['n' => 'totem_gestao_clientes_']) === 1);
-
-    // Argumentos e CLI
-    $e1 = rodarFerramenta(['--forcar']);
-    $e2 = rodarFerramenta(['--aplicar', '--dry-run']);
-    $e3 = rodarFerramenta(['apagar']);
-    afirmar('argumento desconhecido ou conflitante: exit 2 sem tocar o banco', $e1['codigo'] === 2 && $e2['codigo'] === 2 && $e3['codigo'] === 2);
-    $antesCgi = tudoCliente($pdo);
-    $cgi = proc_open([gtCgiBinario(), '-q', '-d', 'auto_prepend_file=' . __DIR__ . '/qa_gestao_prepend.php', dirname(__DIR__, 2) . '/tools/recalcular-razao-normalizada.php'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pp, dirname(__DIR__, 2), ['QA_QR_FORCE_DB_NAME' => $banco, 'REQUEST_METHOD' => 'GET', 'REDIRECT_STATUS' => '200', 'SystemRoot' => (string) getenv('SystemRoot')]);
-    $saidaCgi = (string) stream_get_contents($pp[1]);
-    stream_get_contents($pp[2]);
-    fclose($pp[1]);
-    fclose($pp[2]);
-    proc_close($cgi);
-    afirmar('so CLI: via CGI responde 404 sem executar nada', str_contains($saidaCgi, '404') && !str_contains($saidaCgi, 'total:') && tudoCliente($pdo) === $antesCgi);
-
-    $fonteTool = (string) file_get_contents(dirname(__DIR__, 2) . '/tools/recalcular-razao-normalizada.php');
-    afirmar('fonte da ferramenta: PHP_SAPI, GET_LOCK/RELEASE via ClienteGestaoDao, transacao, UPDATE condicional <=> e prepared statements (sem $pdo->exec/concatenacao de entrada)', str_contains($fonteTool, "PHP_SAPI !== 'cli'") && str_contains($fonteTool, 'obterLock(') && str_contains($fonteTool, 'beginTransaction') && str_contains($fonteTool, '<=> :antiga') && !str_contains($fonteTool, '->exec(') && !str_contains($fonteTool, 'udlog_totem'));
 } finally {
     gtDestruirAmbiente($banco, $storage);
 }
