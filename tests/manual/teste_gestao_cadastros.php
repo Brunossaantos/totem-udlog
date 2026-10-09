@@ -145,11 +145,13 @@ function textoVisivel(string $html): string
 
 try {
     // =====================================================================
-    // A. RazaoSocialMatcher::normalizar publico e IDENTICO ao algoritmo antigo
+    // A. RazaoSocialMatcher::normalizar publico; IDENTICO ao algoritmo antigo para ASCII e SEM
+    //    acentos para o resto (decisao do usuario 2026-10-09: sempre normalizar sem acento)
     // =====================================================================
     $metodoNorm = new ReflectionMethod(RazaoSocialMatcher::class, 'normalizar');
     afirmar('normalizar: agora e public static', $metodoNorm->isPublic() && $metodoNorm->isStatic());
-    // Referencia: copia VERBATIM da implementacao anterior (private static, F5 e antes).
+    // Referencia: copia VERBATIM da implementacao anterior (strtoupper + iconv TRANSLIT), usada SO para
+    // entradas ASCII (a nova nao depende de iconv/locale; a antiga perdia letras acentuadas minusculas).
     $normalizarAntigo = static function (string $razaoSocial): string {
         $sufixos = ['LTDA ME', 'LTDA', 'S A', 'S/A', 'SA', 'EIRELI', 'ME', 'EPP', 'MEI', 'CIA'];
         $normalizada = strtoupper($razaoSocial);
@@ -183,13 +185,24 @@ try {
         afirmar('normalizar golden ' . json_encode($entrada, JSON_UNESCAPED_UNICODE) . ' => ' . json_encode($esperado), RazaoSocialMatcher::normalizar((string) $entrada) === $esperado);
     }
     $equivalente = true;
-    foreach (array_merge(array_keys($golden), ['Açúcar & Álcool S/A', 'Ünïcödé Comércio EIRELI - ME', 'Ação Ltda.', 'Maçã e Pêra S.A.', 'ÀÉÎÕÜ', 'Café São João LTDA ME', '日本語', 'ЖУК', '😀', "A\0B", 'ß æ œ']) as $entrada) {
+    foreach (array_merge(array_keys($golden), ['ACME & CIA LTDA', 'a/b S/A', 'Alfa-Beta, Gama (Delta) EIRELI - ME', "A\0B", 'ZZZ 123 epp']) as $entrada) {
         $equivalente = $equivalente && RazaoSocialMatcher::normalizar((string) $entrada) === $normalizarAntigo((string) $entrada);
     }
-    afirmar('normalizar publico == implementacao antiga (copia verbatim) em 23 entradas, incluindo acentos, CJK, cirilico e emoji', $equivalente);
+    afirmar('normalizar novo == implementacao antiga (copia verbatim) em 17 entradas ASCII', $equivalente);
+    // Acentos: sempre removidos, em qualquer caixa (antes "Cafe" minusculo perdia a letra)
+    foreach ([
+        'Café Ação Ltda' => 'CAFE ACAO', 'CAFÉ AÇÃO' => 'CAFE ACAO', 'Açúcar & Álcool S/A' => 'ACUCAR ALCOOL',
+        'Ünïcödé Comércio EIRELI - ME' => 'UNICODE COMERCIO', 'Maçã e Pêra S.A.' => 'MACA E PERA', 'ÀÉÎÕÜ' => 'AEIOU',
+        'Café São João LTDA ME' => 'CAFE SAO JOAO', "Cafe\u{0301} Central" => 'CAFE CENTRAL', 'ß æ œ' => 'SS AE OE', 'Ørsted Łódź Đakovo' => 'ORSTED LODZ DAKOVO',
+    ] as $entrada => $esperado) {
+        afirmar('normalizar sem acento ' . json_encode($entrada, JSON_UNESCAPED_UNICODE) . ' => ' . json_encode($esperado), RazaoSocialMatcher::normalizar((string) $entrada) === $esperado);
+    }
+    foreach (['日本語', 'ЖУК', '😀'] as $entrada) {
+        afirmar('normalizar: alfabeto sem mapa continua virando espaco ' . json_encode($entrada, JSON_UNESCAPED_UNICODE) . ' => ""', RazaoSocialMatcher::normalizar($entrada) === '');
+    }
     afirmar('normalizar: idempotente sobre texto ja normalizado (o OCR reaplica)', RazaoSocialMatcher::normalizar(RazaoSocialMatcher::normalizar('Acme Comercio LTDA')) === 'ACME COMERCIO');
     $fonteMatcher = codigoSemComentarios($raiz . '/util/RazaoSocialMatcher.php');
-    afirmar('RazaoSocialMatcher: SUFIXOS, logica e locale intactos (sem setlocale; mesma lista de sufixos)', !str_contains($fonteMatcher, 'setlocale') && str_contains($fonteMatcher, "'LTDA ME', 'LTDA', 'S A', 'S/A', 'SA', 'EIRELI', 'ME', 'EPP', 'MEI', 'CIA'") && str_contains($fonteMatcher, "iconv('UTF-8', 'ASCII//TRANSLIT'"));
+    afirmar('RazaoSocialMatcher: mesma lista de SUFIXOS; sem setlocale e SEM iconv (deterministico, independe de locale); usa mb_strtoupper', !str_contains($fonteMatcher, 'setlocale') && !str_contains($fonteMatcher, 'iconv') && str_contains($fonteMatcher, 'mb_strtoupper') && str_contains($fonteMatcher, "'LTDA ME', 'LTDA', 'S A', 'S/A', 'SA', 'EIRELI', 'ME', 'EPP', 'MEI', 'CIA'"));
 
     // =====================================================================
     // B. NomeCadastro (sem banco)
@@ -1070,7 +1083,7 @@ try {
     // A2: texto de ajuda
     $pAj = $get('cliente-form.php', $lAdm);
     $ajuda = preg_match('#id="cliente-nome-ajuda">(.*?)</span>#s', $pAj['corpo'], $mAj) === 1 ? $mAj[1] : '';
-    afirmar('A2: ajuda do nome = texto novo, sem prometer acentos ("compara o nome sem acentos" removido)', $ajuda === 'O nome é normalizado (maiúsculas, sem pontuação e sem termos como LTDA e S/A) para o reconhecimento automático das notas. Prefira escrever o nome como aparece na nota fiscal.' && !str_contains($pAj['corpo'], 'sem acentos') && !str_contains($pAj['corpo'], 'O OCR compara'));
+    afirmar('A2: ajuda do nome = texto atual (acentos ignorados na normalizacao; "O OCR compara" antigo removido)', $ajuda === 'O nome é normalizado (maiúsculas, sem acentos, sem pontuação e sem termos como LTDA e S/A) para o reconhecimento automático das notas; acentos são ignorados, então Café e Cafe são o mesmo nome. Prefira escrever o nome como aparece na nota fiscal.' && !str_contains($pAj['corpo'], 'O OCR compara'));
     // O3: em POST vale so o id do corpo
     $nomeAlH = (string) $linhasCli($idAlH)['nome'];
     $nAntesO3 = $nCli();

@@ -63,7 +63,7 @@ $atributosCampo = static fn (string $campo, string $ajuda = ''): string => isset
 <div class="gestao-campo<?= isset($erros['nome']) ? ' gestao-campo--erro' : '' ?>">
 <label class="gestao-campo__rotulo" for="cliente-nome">Nome do cliente</label>
 <input class="gestao-campo__entrada" id="cliente-nome" name="nome" type="text" value="<?= h($valores['nome']) ?>" maxlength="150" required<?= $atributosCampo('nome', 'cliente-nome-ajuda') ?>>
-<span class="gestao-campo__ajuda" id="cliente-nome-ajuda">O nome é normalizado (maiúsculas, sem pontuação e sem termos como LTDA e S/A) para o reconhecimento automático das notas. Prefira escrever o nome como aparece na nota fiscal.</span>
+<span class="gestao-campo__ajuda" id="cliente-nome-ajuda">O nome é normalizado (maiúsculas, sem acentos, sem pontuação e sem termos como LTDA e S/A) para o reconhecimento automático das notas; acentos são ignorados, então Café e Cafe são o mesmo nome. Prefira escrever o nome como aparece na nota fiscal.</span>
 <?= $erroCampo('nome') ?>
 </div>
 <div class="gestao-campo<?= isset($erros['cnpj']) ? ' gestao-campo--erro' : '' ?>">

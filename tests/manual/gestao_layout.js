@@ -2499,11 +2499,11 @@ async function cenarioCadastrosViewport(browser, srv, w, h, contadores) {
 async function cenarioCadastrosAmbiguidade(browser, srv, w, h, contadores) {
     const rot = w + 'x' + h + ' ambiguidade';
     const page = await paginaCad(browser, srv, w, h, rot, contadores, false);
-    const TXT_AJUDA = 'O nome é normalizado (maiúsculas, sem pontuação e sem termos como LTDA e S/A) para o reconhecimento automático das notas. Prefira escrever o nome como aparece na nota fiscal.';
+    const TXT_AJUDA = 'O nome é normalizado (maiúsculas, sem acentos, sem pontuação e sem termos como LTDA e S/A) para o reconhecimento automático das notas; acentos são ignorados, então Café e Cafe são o mesmo nome. Prefira escrever o nome como aparece na nota fiscal.';
     const RE_AVISO = '^Este nome é parecido com o de outros clientes e pode fazer o OCR das notas não identificar automaticamente (\\d+) cliente\\(s\\) \\(cairá no preenchimento manual\\)\\. Confirme para continuar\\.$';
     // ---- A2: texto de ajuda
     await irPara(page, srv.base, '/gestao/cliente-form.php');
-    ok(await page.evaluate(t => { const a = document.getElementById('cliente-nome-ajuda'); return !!a && a.textContent.trim() === t && !document.body.textContent.includes('sem acentos') && !document.body.textContent.includes('compara o nome'); }, TXT_AJUDA), rot + ' A2: ajuda do nome = texto novo (normalizacao e "prefira o nome da nota"), sem prometer acentos');
+    ok(await page.evaluate(t => { const a = document.getElementById('cliente-nome-ajuda'); return !!a && a.textContent.trim() === t && !document.body.textContent.includes('compara o nome'); }, TXT_AJUDA), rot + ' A2: ajuda do nome = texto atual (normalizacao, acentos ignorados e "prefira o nome da nota")');
     await verificarFormCliente(page, rot + ' A2 form novo', w, false);
     // ---- A1 (criar): 1o passo
     await page.type('#cliente-nome', 'Acme Logistica Sul');

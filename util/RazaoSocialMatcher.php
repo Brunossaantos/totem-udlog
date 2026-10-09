@@ -113,18 +113,66 @@ class RazaoSocialMatcher
     }
 
     /**
+     * Mapa FIXO de letras latinas acentuadas/especiais MAIUSCULAS para ASCII
+     * (Latin-1 Supplement e Latin Extended-A completos). Substitui o
+     * iconv('ASCII//TRANSLIT'), que dependia da libc/locale: em glibc traduzia
+     * so o que estava em maiuscula (strtoupper do PHP 8 e ASCII-only, entao
+     * "Cafe com acento" em minuscula virava "caf" + espaco) e no libiconv do
+     * Windows devolvia lixo ("'E" para E agudo). O mapa so recebe texto que
+     * ja passou por mb_strtoupper, logo so as maiusculas precisam constar.
+     */
+    private const MAPA_ASCII = [
+        // Latin-1 Supplement
+        'À' => 'A', 'Á' => 'A', 'Â' => 'A', 'Ã' => 'A', 'Ä' => 'A', 'Å' => 'A', 'Æ' => 'AE',
+        'Ç' => 'C', 'È' => 'E', 'É' => 'E', 'Ê' => 'E', 'Ë' => 'E',
+        'Ì' => 'I', 'Í' => 'I', 'Î' => 'I', 'Ï' => 'I', 'Ð' => 'D', 'Ñ' => 'N',
+        'Ò' => 'O', 'Ó' => 'O', 'Ô' => 'O', 'Õ' => 'O', 'Ö' => 'O', 'Ø' => 'O',
+        'Ù' => 'U', 'Ú' => 'U', 'Û' => 'U', 'Ü' => 'U', 'Ý' => 'Y', 'Þ' => 'TH', 'ß' => 'SS', 'ẞ' => 'SS',
+        // Latin Extended-A
+        'Ā' => 'A', 'Ă' => 'A', 'Ą' => 'A', 'Ć' => 'C', 'Ĉ' => 'C', 'Ċ' => 'C', 'Č' => 'C',
+        'Ď' => 'D', 'Đ' => 'D', 'Ē' => 'E', 'Ĕ' => 'E', 'Ė' => 'E', 'Ę' => 'E', 'Ě' => 'E',
+        'Ĝ' => 'G', 'Ğ' => 'G', 'Ġ' => 'G', 'Ģ' => 'G', 'Ĥ' => 'H', 'Ħ' => 'H',
+        'Ĩ' => 'I', 'Ī' => 'I', 'Ĭ' => 'I', 'Į' => 'I', 'İ' => 'I', 'Ĳ' => 'IJ', 'Ĵ' => 'J', 'Ķ' => 'K', 'ĸ' => 'K',
+        'Ĺ' => 'L', 'Ļ' => 'L', 'Ľ' => 'L', 'Ŀ' => 'L', 'Ł' => 'L',
+        'Ń' => 'N', 'Ņ' => 'N', 'Ň' => 'N', 'Ŋ' => 'NG',
+        'Ō' => 'O', 'Ŏ' => 'O', 'Ő' => 'O', 'Œ' => 'OE',
+        'Ŕ' => 'R', 'Ŗ' => 'R', 'Ř' => 'R', 'Ś' => 'S', 'Ŝ' => 'S', 'Ş' => 'S', 'Š' => 'S',
+        'Ţ' => 'T', 'Ť' => 'T', 'Ŧ' => 'T',
+        'Ũ' => 'U', 'Ū' => 'U', 'Ŭ' => 'U', 'Ů' => 'U', 'Ű' => 'U', 'Ų' => 'U',
+        'Ŵ' => 'W', 'Ŷ' => 'Y', 'Ÿ' => 'Y', 'Ź' => 'Z', 'Ż' => 'Z', 'Ž' => 'Z',
+    ];
+
+    /**
      * Publica desde a F6 (cadastro de clientes da gestao: a razao normalizada
      * gravada em tb_cliente tem de sair DESTE algoritmo, o mesmo que o OCR aplica
-     * ao comparar). Comportamento INALTERADO: nao mudar a logica nem o locale, pois
-     * o OCR compara contra valores ja gravados.
+     * ao comparar).
+     *
+     * DECISAO DO USUARIO (2026-10-09): "sempre normalizar os textos para nao ter
+     * acentos". A etapa antiga strtoupper + iconv TRANSLIT dependia de
+     * locale/libc e perdia letras acentuadas minusculas ("Cafe Acao" com
+     * acentos virava "CAF A O"). Agora e deterministica e sem locale/iconv:
+     *  1. UTF-8: entrada invalida tem os bytes/sequencias invalidos trocados por
+     *     '?' (mb_convert_encoding) e viram espaco adiante, como os bytes >= 0x80
+     *     viravam antes; letras validas da mesma string sao preservadas;
+     *  2. mb_strtoupper (Unicode, independe de locale; ß vira SS);
+     *  3. marcas combinantes (\p{Mn}, cobre NFD) removidas;
+     *  4. mapa fixo MAPA_ASCII (Latin-1 e Latin Extended-A);
+     *  5. restante IDENTICO ao algoritmo anterior (simbolos -> espaco, sufixos
+     *     societarios, colapso de espacos, trim).
+     * Para ASCII o resultado e identico ao algoritmo antigo. Alfabetos sem mapa
+     * (cirilico, CJK, arabe, emoji, latino estendido adicional) continuam
+     * virando espaco. Os valores ja gravados em tb_cliente.razao_social_normalizada
+     * antes desta mudanca podem divergir: ver tools/recalcular-razao-normalizada.php.
      */
     public static function normalizar(string $razaoSocial): string
     {
-        $normalizada = strtoupper($razaoSocial);
-        $transliterada = @iconv('UTF-8', 'ASCII//TRANSLIT', $normalizada);
-        if ($transliterada !== false && $transliterada !== null) {
-            $normalizada = $transliterada;
+        $normalizada = mb_convert_encoding($razaoSocial, 'UTF-8', 'UTF-8');
+        $normalizada = mb_strtoupper($normalizada, 'UTF-8');
+        $semMarcas = preg_replace('/\p{Mn}+/u', '', $normalizada);
+        if (is_string($semMarcas)) {
+            $normalizada = $semMarcas;
         }
+        $normalizada = strtr($normalizada, self::MAPA_ASCII);
 
         // remove pontuacao/simbolos, mantem letras/numeros/espacos
         $normalizada = preg_replace('/[^A-Z0-9 ]/', ' ', $normalizada);

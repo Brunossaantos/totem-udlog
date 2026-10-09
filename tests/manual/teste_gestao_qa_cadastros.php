@@ -345,8 +345,7 @@ try {
     $nfc = $rnC->criar($idAdmin, "Caf\u{00E9} Central Ltda", cnpjQa('430000000005'), '');
     $nfd = $rnC->criar($idAdmin, "Cafe\u{0301} Central", cnpjQa('430000000006'), '');
     $razoesCafe = array_column(gtLinhas($pdo, "SELECT razao_social_normalizada AS r FROM tb_cliente WHERE nome LIKE 'Caf%'"), 'r');
-    afirmar('NFC "Café" x NFD "Cafe+combinante": sem erro interno, razao nunca vazia nem repetida no banco (a razao vem do normalizar do OCR, que depende do iconv da plataforma)', in_array($nfc['codigo'] ?? 'ok', ['ok', 'validacao'], true) && in_array($nfd['codigo'] ?? 'ok', ['ok', 'validacao', 'confirmacao_ambiguidade'], true) && !in_array('', $razoesCafe, true) && count($razoesCafe) === count(array_unique($razoesCafe)));
-    echo 'INFO normalizar NFC/NFD nesta plataforma (nao e do F6: algoritmo antigo do OCR, inalterado): "Café Central Ltda" => ' . json_encode(RazaoSocialMatcher::normalizar("Caf\u{00E9} Central Ltda")) . ' ; "Cafe+U+0301 Central" => ' . json_encode(RazaoSocialMatcher::normalizar("Cafe\u{0301} Central")) . "\n";
+    afirmar('NFC "Café Central Ltda" e NFD "Cafe+combinante Central": razao SEMPRE "CAFE CENTRAL" (acentos ignorados); o 2o gera a MESMA razao e e recusado como duplicado; nunca erro interno', ($nfc['ok'] ?? false) === true && $cli((int) $nfc['id'])['razao_social_normalizada'] === 'CAFE CENTRAL' && ($nfd['ok'] ?? true) === false && ($nfd['codigo'] ?? '') === 'validacao' && $razoesCafe === ['CAFE CENTRAL']);
     // RTL + latim: razao so com o trecho latino; colisao tratada
     $rt1 = $rnC->criar($idAdmin, "Nova \u{05E9}\u{05DC}\u{05D5}\u{05DD} Brasil", cnpjQa('430000000007'), '');
     $rt2 = $rnC->criar($idAdmin, "Nova \u{0627}\u{0644}\u{0639}\u{0631}\u{0628}\u{064A}\u{0629} Brasil", cnpjQa('430000000008'), '');
