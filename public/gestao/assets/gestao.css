@@ -638,6 +638,8 @@ form[aria-busy="true"] .gestao-botao {
 .gestao-tabela--ordens th.col-cliente { width: 162px; }
 .gestao-tabela--ordens th.col-transportadora { width: 140px; }
 .gestao-tabela--ordens th.col-situacao { width: 100px; }
+.gestao-tabela--ordens .col-situacao { overflow-wrap: anywhere; }
+.gestao-tabela--ordens .col-situacao .gestao-celula-sec { margin-top: 2px; font-size: 13px; line-height: 1.25; }
 .gestao-tabela--ordens th.col-criada { width: 130px; }
 .gestao-tabela--ordens th.col-pdf { width: 92px; }
 .gestao-tabela--ordens th.col-acoes { width: 226px; }

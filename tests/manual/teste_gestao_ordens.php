@@ -599,6 +599,75 @@ try {
     afirmar('confirmar=1 sem nada a confirmar nao deixa marca de confirmacao na auditoria', queryDe(locOrdens($rSemConf))['msg'] === 'oc_inativada' && $detalheDe($ultima('OC_INATIVAR')) === 'status_de=ATIVA;status_para=INATIVA');
     $post('ordem-status.php', $lUsu, $form($oSem, 'ativar', 'INATIVA'));
 
+    // ---- ajuste 4: cliente INATIVO (tb_clientes.status): aviso, confirmacao em dois passos e motivo_oc proprio
+    $cnpjI = '88888888000188';
+    $cI = ogCliente($ext, $cnpjI, 'DELTA CLIENTE INATIVO SA', 'INATIVO');
+    $inativadaCli = $dias(2);
+    $oCI = ogOrdem($ext, $cI, 'OC-CLIINAT', 'INATIVA', $dias(6), $inativadaCli);
+    $gravarPdf($cnpjI, 'OC-CLIINAT', $pdfBytes);
+    $oCISem = ogOrdem($ext, $cI, 'OC-CLIINAT-SEMPDF', 'INATIVA', $dias(6), $dias(3));
+    $oCIBx = ogOrdem($ext, $cI, 'OC-CLIINAT-BX', 'INATIVA', $dias(6), $dias(3));
+    $oCIAt = ogOrdem($ext, $cI, 'OC-CLIINAT-ATIVA', 'ATIVA', $dias(1));
+    $oAtivoTmp = ogOrdem($ext, $cA, 'OC-ATIVO-TMP', 'INATIVA', $dias(6), $dias(2));
+    $mkAt('expedicao', 'OC-CLIINAT-BX', $cnpjI, 'concluido');
+    $aviso = 'Este cliente está inativo. O totem não vai mostrar esta ordem enquanto o cliente continuar inativo.';
+    $dCli = $dao->buscarPorId($oCI);
+    afirmar('DAO: buscarPorId traz cliente_status (INATIVO / ATIVO) junto com a OC', ($dCli['cliente_status'] ?? '') === 'INATIVO' && ($dao->buscarPorId($oA2)['cliente_status'] ?? '') === 'ATIVO');
+    $pCiDet = $get('ordem.php', $lUsu, ['id' => (string) $oCI]);
+    afirmar('detalhe de OC de cliente INATIVO: aviso permanente #ordem-cliente-inativo (gestao-estado--aviso, icone alerta, texto exato) sem role=alert e SEM #ordem-confirmacao', $pCiDet['status'] === 200 && str_contains($pCiDet['corpo'], 'id="ordem-cliente-inativo"') && str_contains($pCiDet['corpo'], $aviso) && preg_match('/<div class="gestao-estado gestao-estado--aviso" id="ordem-cliente-inativo"[^>]*><svg.*?#i-alerta/s', $pCiDet['corpo']) === 1 && !str_contains($pCiDet['corpo'], 'id="ordem-cliente-inativo" role=') && !str_contains($pCiDet['corpo'], 'id="ordem-confirmacao"'));
+    $pCiAtiva = $get('ordem.php', $lUsu, ['id' => (string) $oCIAt]);
+    afirmar('detalhe de OC ATIVA de cliente INATIVO: o aviso permanente tambem aparece (cliente inativo vale para qualquer situacao)', str_contains($pCiAtiva['corpo'], 'id="ordem-cliente-inativo"') && str_contains($pCiAtiva['corpo'], 'id="btn-ordem-inativar"'));
+    afirmar('detalhe de OC de cliente ATIVO: sem aviso de cliente inativo', !str_contains($get('ordem.php', $lUsu, ['id' => (string) $oA2])['corpo'], 'ordem-cliente-inativo') && !str_contains($get('ordem.php', $lUsu, ['id' => (string) $oI2])['corpo'], 'ordem-cliente-inativo'));
+    // lista: sinal "Cliente inativo" so nas OCs do cliente inativo + data de inativacao e "PDF sera apagado" na celula de situacao
+    $pCiLista = $get('ordens.php', $lUsu, ['aba' => 'inativas', 'cliente' => (string) $cI]);
+    $lnOrdem = static function (string $corpo, int $id): string {
+        return (string) preg_replace('/\A.*?(<tr class="gestao-tabela__linha" data-id-ordem="' . $id . '".*?<\/tr>).*\z/s', '$1', $corpo);
+    };
+    $lCi = $lnOrdem($pCiLista['corpo'], $oCI);
+    $lCiSem = $lnOrdem($pCiLista['corpo'], $oCISem);
+    $apagarEm = (new DateTimeImmutable($inativadaCli, new DateTimeZone('-03:00')))->modify('+15 days')->format('d/m/Y');
+    afirmar('lista (Inativas, cliente INATIVO): sinal "Cliente inativo" (icone alerta + texto + texto para leitor de tela) na coluna Cliente', $pCiLista['status'] === 200 && str_contains($lCi, 'class="gestao-sinal gestao-sinal--cliente-inativo" data-cliente-inativo="1"') && str_contains($lCi, '<span aria-hidden="true">Cliente inativo</span>') && str_contains($lCi, 'Cliente inativo: o totem não mostra esta ordem') && preg_match('/<td class="col-cliente">.*gestao-sinal--cliente-inativo.*?<\/td>/s', $lCi) === 1);
+    afirmar('lista (Inativas): celula de situacao com "Inativada em dd/mm/aaaa hh:mm" (<time>) em linha propria e, com PDF, "PDF será apagado em ' . $apagarEm . '" (inativada_em + 15 dias); sem PDF nao ha a linha', preg_match('/<td class="col-situacao">.*?Inativa<\/span><\/span> <span class="gestao-celula-sec gestao-situacao__inativada">Inativada em <time datetime="[^"]+">\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}<\/time><\/span> <span class="gestao-celula-sec gestao-situacao__pdf-apagado">PDF será apagado em ' . preg_quote($apagarEm, '/') . '<\/span><\/td>/s', $lCi) === 1 && str_contains($lCiSem, 'gestao-situacao__inativada') && !str_contains($lCiSem, 'PDF será apagado') && str_contains($lCi, '<td class="col-pdf">Disponível</td>'));
+    $pAtivasLista = $get('ordens.php', $lUsu, ['aba' => 'ativas', 'cliente' => (string) $cI]);
+    afirmar('lista (Ativas): OC ATIVA do cliente inativo tem o sinal e NAO tem data de inativacao nem "PDF será apagado"', str_contains($pAtivasLista['corpo'], 'gestao-sinal--cliente-inativo') && !str_contains($pAtivasLista['corpo'], 'gestao-situacao__inativada') && !str_contains($pAtivasLista['corpo'], 'PDF será apagado'));
+    $pAtivoLista = $get('ordens.php', $lUsu, ['aba' => 'inativas', 'cliente' => (string) $cA]);
+    afirmar('lista (Inativas, cliente ATIVO): SEM sinal de cliente inativo, mas com a data de inativacao na situacao', !str_contains($pAtivoLista['corpo'], 'gestao-sinal--cliente-inativo') && !str_contains($pAtivoLista['corpo'], 'Cliente inativo') && str_contains($pAtivoLista['corpo'], 'gestao-situacao__inativada'));
+    afirmar('lista: larguras das colunas inalteradas (1000px) e ids do contrato preservados (th.col-situacao 100px; sem coluna nova)', substr_count($pCiLista['corpo'], '<th scope="col"') === 7 && str_contains($pCiLista['corpo'], '<th scope="col" class="col-situacao">Situação</th>') && preg_match('/\.gestao-tabela--ordens th\.col-situacao \{ width: 100px; \}/', (string) file_get_contents($raiz . '/public/gestao/assets/gestao.css')) === 1);
+    // ativar sem confirmar: aviso, NADA muda, sem auditoria
+    $nAuditCi = $nAudit();
+    $snapCi = $snapExt();
+    $rCi1 = $post('ordem-status.php', $lUsu, $form($oCI, 'ativar', 'INATIVA', ['retorno' => 'aba=inativas']));
+    $qCi1 = queryDe(locOrdens($rCi1));
+    afirmar('ativar OC de cliente INATIVO sem confirmar=1 => 302 ao detalhe com confirmar=ativar e msg=oc_confirmacao_necessaria; NADA alterado e SEM auditoria', $rCi1['status'] === 302 && str_starts_with(locOrdens($rCi1), '/gestao/ordem.php?') && $qCi1['id'] === (string) $oCI && ($qCi1['confirmar'] ?? '') === 'ativar' && $qCi1['msg'] === 'oc_confirmacao_necessaria' && $stOc($oCI)['status'] === 'INATIVA' && $stOc($oCI)['inativada_em'] === $inativadaCli && $nAudit() === $nAuditCi && $snapExt() === $snapCi);
+    foreach (['0', 'true', '', 'sim'] as $cv) {
+        $rcv = $post('ordem-status.php', $lUsu, $form($oCI, 'ativar', 'INATIVA', ['confirmar' => $cv]));
+        afirmar('cliente INATIVO: confirmar=' . json_encode($cv) . ' nao confirma (volta ao aviso) e nada muda', queryDe(locOrdens($rcv))['msg'] === 'oc_confirmacao_necessaria' && $stOc($oCI)['status'] === 'INATIVA' && $nAudit() === $nAuditCi);
+    }
+    $pCiConf = $get('ordem.php', $lUsu, ['id' => (string) $oCI, 'confirmar' => 'ativar', 'msg' => 'oc_confirmacao_necessaria']);
+    afirmar('detalhe com confirmar=ativar (cliente INATIVO): #ordem-confirmacao role=alert com o aviso + "Confirme para ativar mesmo assim.", botao "Ativar mesmo assim", Cancelar, confirmar=1 no formulario; o aviso permanente tambem aparece', $pCiConf['status'] === 200 && str_contains($pCiConf['corpo'], 'id="ordem-confirmacao" role="alert" data-acao="ativar"') && str_contains($pCiConf['corpo'], $aviso . ' Confirme para ativar mesmo assim.') && str_contains($pCiConf['corpo'], 'Ativar mesmo assim') && str_contains($pCiConf['corpo'], 'id="ordem-confirmacao-cancelar"') && str_contains($pCiConf['corpo'], 'name="confirmar" value="1"') && str_contains($pCiConf['corpo'], 'id="ordem-cliente-inativo"') && $stOc($oCI)['status'] === 'INATIVA');
+    afirmar('confirmar=inativar em OC de cliente inativo NAO exige nada extra (inativar nunca pede o aviso de cliente inativo): sem #ordem-confirmacao', !str_contains($get('ordem.php', $lUsu, ['id' => (string) $oCIAt, 'confirmar' => 'inativar'])['corpo'], 'id="ordem-confirmacao"'));
+    $rCi2 = $post('ordem-status.php', $lUsu, $form($oCI, 'ativar', 'INATIVA', ['confirmar' => '1', 'origem' => 'detalhe']));
+    $aCi = $ultima('OC_ATIVAR');
+    afirmar('segundo passo (confirmar=1): ativa (AVISO, nao bloqueio), inativada_em NULL, volta ao detalhe com msg=oc_ativada; auditoria OK com motivo_oc=confirmado_cliente_inativo (valor fixo, sem PII)', $rCi2['status'] === 302 && queryDe(locOrdens($rCi2))['msg'] === 'oc_ativada' && $stOc($oCI)['status'] === 'ATIVA' && $stOc($oCI)['inativada_em'] === null && ($aCi['resultado'] ?? '') === 'OK' && $detalheDe($aCi) === 'status_de=INATIVA;status_para=ATIVA;motivo_oc=confirmado_cliente_inativo' && (int) $aCi['alvo_id'] === $oCI && $nAudit() === $nAuditCi + 1 && !str_contains($detalheDe($aCi), 'OC-CLIINAT') && !str_contains($detalheDe($aCi), $cnpjI));
+    // cliente inativo E OC ja baixada: um unico motivo; "ja baixada" tem precedencia
+    $rCiBx0 = $post('ordem-status.php', $lUsu, $form($oCIBx, 'ativar', 'INATIVA'));
+    $pCiBx = $get('ordem.php', $lUsu, ['id' => (string) $oCIBx, 'confirmar' => 'ativar']);
+    afirmar('cliente INATIVO + OC ja baixada: um unico aviso com os dois textos ("Este cliente está inativo ... Esta ordem já foi usada em um check-in concluído. Confirme para ativar mesmo assim.")', queryDe(locOrdens($rCiBx0))['msg'] === 'oc_confirmacao_necessaria' && $stOc($oCIBx)['status'] === 'INATIVA' && str_contains($pCiBx['corpo'], $aviso . ' Esta ordem já foi usada em um check-in concluído. Confirme para ativar mesmo assim.'));
+    $post('ordem-status.php', $lUsu, $form($oCIBx, 'ativar', 'INATIVA', ['confirmar' => '1']));
+    afirmar('cliente INATIVO + OC ja baixada confirmada: ativa e o motivo_oc e confirmado_ja_baixada (precedencia)', $stOc($oCIBx)['status'] === 'ATIVA' && $detalheDe($ultima('OC_ATIVAR')) === 'status_de=INATIVA;status_para=ATIVA;motivo_oc=confirmado_ja_baixada');
+    // cliente ATIVO: comportamento inalterado (ativa direto, sem confirmacao e sem motivo_oc)
+    $nAuditAtivo = $nAudit();
+    $rAt = $post('ordem-status.php', $lUsu, $form($oAtivoTmp, 'ativar', 'INATIVA'));
+    afirmar('cliente ATIVO sem check-in concluido: ativar segue direto (oc_ativada), sem confirmacao e auditoria SEM motivo_oc', queryDe(locOrdens($rAt))['msg'] === 'oc_ativada' && $stOc($oAtivoTmp)['status'] === 'ATIVA' && $detalheDe($ultima('OC_ATIVAR')) === 'status_de=INATIVA;status_para=ATIVA' && $nAudit() === $nAuditAtivo + 1);
+    // inativar OC de cliente inativo: sem confirmacao extra
+    $rIni = $post('ordem-status.php', $lUsu, $form($oCIAt, 'inativar', 'ATIVA'));
+    afirmar('inativar OC de cliente INATIVO segue direto (o aviso so vale ao ATIVAR) e a auditoria nao leva motivo_oc', queryDe(locOrdens($rIni))['msg'] === 'oc_inativada' && $stOc($oCIAt)['status'] === 'INATIVA' && $detalheDe($ultima('OC_INATIVAR')) === 'status_de=ATIVA;status_para=INATIVA');
+    // limpeza: estas OCs/cliente existem so neste bloco (as contagens das abas seguem as da semeadura)
+    $ext->prepare('DELETE FROM tb_ordens_coleta WHERE id IN (:a, :b, :c, :d, :e)')->execute(['a' => $oCI, 'b' => $oCISem, 'c' => $oCIBx, 'd' => $oCIAt, 'e' => $oAtivoTmp]);
+    $ext->prepare('DELETE FROM tb_ordem_coleta_arquivos WHERE cnpj_cliente = :c')->execute(['c' => $cnpjI]);
+    $ext->prepare('DELETE FROM tb_clientes WHERE id = :i')->execute(['i' => $cI]);
+    $pdo->prepare('DELETE FROM tb_atendimento WHERE cliente_cnpj = :c')->execute(['c' => $cnpjI]);
+
     // ---- retorno hostil nunca vira URL
     foreach (['http://evil.example/x', '//evil.example', '/gestao/../etc', 'aba=inativas&numero=<script>alert(1)</script>&zzz=1', "aba=inativas\r\nLocation: http://evil.example", 'aba=baixas&mostrar=todas&pagina=3&msg=oc_inativada', str_repeat('a=1&', 400), '%0d%0aSet-Cookie:x=1', 'javascript:alert(1)'] as $rh) {
         $rr = $post('ordem-status.php', $lUsu, $form($oSem, 'ativar', 'ATIVA', ['retorno' => $rh]));
@@ -677,6 +746,9 @@ try {
     afirmar('baixa sem cliente (cnpj nulo) e baixa com OC inexistente: "Ordem não localizada" (com icone de alerta) e SEM link para abrir', str_contains($linhaBaixa($todasPendentes, $bSemCnpj), '<span>Ordem não localizada</span>') && str_contains($linhaBaixa($todasPendentes, $bSemCnpj), '#i-alerta') && !str_contains($linhaBaixa($todasPendentes, $bSemCnpj), 'btn-baixa-abrir-') && str_contains($linhaBaixa($todasPendentes, $bNaoExiste), 'Ordem não localizada') && !str_contains($linhaBaixa($todasPendentes, $bNaoExiste), 'btn-baixa-abrir-') && !str_contains($todasPendentes, 'OC não localizada'));
     afirmar('baixa ambigua (2 OCs com o mesmo cliente+numero): "Mais de uma ordem com este número" e SEM link', str_contains($linhaBaixa($todasPendentes, $bAmb), 'Mais de uma ordem com este número') && !str_contains($linhaBaixa($todasPendentes, $bAmb), 'btn-baixa-abrir-') && !str_contains($todasPendentes, 'OC ambígua'));
     afirmar('baixa com numero hostil: escapado e linka a OC certa', !str_contains($todasPendentes, '<script>alert(7)') && str_contains($linhaBaixa($todasPendentes, $bHostil), '&lt;script&gt;alert(7)&lt;/script&gt;OC') && str_contains($linhaBaixa($todasPendentes, $bHostil), 'ordem.php?id=' . $oX));
+    afirmar('ajuste 1: baixa pendente com OC NAO localizada (sem cliente / OC inexistente) ou AMBIGUA NAO renderiza o formulario nem o botao "Marcar como resolvida"', !str_contains($linhaBaixa($todasPendentes, $bSemCnpj), 'form-baixa-resolver-') && !str_contains($linhaBaixa($todasPendentes, $bSemCnpj), 'btn-baixa-resolver-') && !str_contains($linhaBaixa($todasPendentes, $bNaoExiste), 'form-baixa-resolver-') && !str_contains($linhaBaixa($todasPendentes, $bNaoExiste), 'btn-baixa-resolver-') && !str_contains($linhaBaixa($todasPendentes, $bAmb), 'form-baixa-resolver-') && !str_contains($linhaBaixa($todasPendentes, $bAmb), 'btn-baixa-resolver-') && !str_contains($linhaBaixa($todasPendentes, $bAmb), 'Marcar como resolvida') && str_contains($linhaBaixa($todasPendentes, $bAmb), 'id="baixa-oc-estado-' . $bAmb . '"') && str_contains($linhaBaixa($todasPendentes, $bSemCnpj), 'id="baixa-oc-estado-' . $bSemCnpj . '"'));
+    afirmar('ajuste 1: OC unica mantem o botao (INATIVA e tambem ATIVA: o servidor recusa com oc_baixa_recusada_oc_ativa); nenhuma linha sem "Abrir" tem formulario de resolver', str_contains($linhaBaixa($todasPendentes, $bAtiva), 'id="form-baixa-resolver-' . $bAtiva . '"') && str_contains($linhaBaixa($todasPendentes, $bHostil), 'id="btn-baixa-resolver-' . $bHostil . '"') && substr_count($todasPendentes, 'id="form-baixa-resolver-') === substr_count($todasPendentes, 'id="btn-baixa-abrir-'));
+    afirmar('ajuste 2: resolver baixa continua SEM confirmacao (um clique): nenhum data-confirmar no formulario/botao e o servidor resolve direto sem confirmar', !str_contains($todasPendentes, 'data-confirmar') && !str_contains($lResolve, 'confirmar'));
     $pBRes = $get('ordens.php', $lUsu, ['aba' => 'baixas', 'mostrar' => 'resolvidas']);
     afirmar('Mostrar=resolvidas: so a baixa resolvida, "Resolvida em dd/mm/aaaa hh:mm", data-resolvida=1 e SEM botao de resolver', idsBaixas($pBRes['corpo']) === [$bFeita] && str_contains($pBRes['corpo'], 'data-resolvida="1"') && str_contains($pBRes['corpo'], 'Resolvida em <time') && !str_contains($pBRes['corpo'], 'btn-baixa-resolver-') && str_contains($pBRes['corpo'], '<option value="resolvidas" selected>') && str_contains($pBRes['corpo'], 'Exibindo 1 a 1 de 1 baixa.'));
     $pBTodas = $get('ordens.php', $lUsu, ['aba' => 'baixas', 'mostrar' => 'todas']);

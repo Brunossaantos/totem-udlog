@@ -74,7 +74,7 @@ class AuditoriaDao
         'lotes' => 'int_grande',
         'status_de' => ['ATIVA', 'INATIVA'],
         'status_para' => ['ATIVA', 'INATIVA'],
-        'motivo_oc' => ['ja_no_estado', 'estado_mudou', 'oc_inexistente', 'externo_indisponivel', 'arquivo_ausente', 'confirmado_andamento', 'confirmado_ja_baixada', 'cliente_ausente', 'oc_ambigua', 'oc_ativa'],
+        'motivo_oc' => ['ja_no_estado', 'estado_mudou', 'oc_inexistente', 'externo_indisponivel', 'arquivo_ausente', 'confirmado_andamento', 'confirmado_ja_baixada', 'confirmado_cliente_inativo', 'cliente_ausente', 'oc_ambigua', 'oc_ativa'],
     ];
 
     public function __construct(private PDO $pdo)

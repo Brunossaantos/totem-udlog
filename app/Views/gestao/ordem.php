@@ -7,7 +7,8 @@
  * mesmo_numero_outros_clientes), $situacaoSlug (ativa|inativa), $situacaoRotulo, $idadeTexto,
  * $idadeAtencao (bool), $cnpjCliente, $cnpjTransportadora (já formatados), $confirmacao (null ou
  * acao, n, texto: segundo passo de inativar/ativar), $pdf (disponivel|ausente|apagado), $pdfTexto,
- * $pdfAviso, $retorno (query validada que volta nos formulários), $diasRetencaoPdf.
+ * $pdfAviso, $retorno (query validada que volta nos formulários), $diasRetencaoPdf,
+ * $clienteInativo (bool; tb_clientes.status = INATIVO) e $avisoClienteInativo (texto fixo).
  * Sem máscara (decisão do usuário): nome, CNH e placa em claro. Sem script nem style inline.
  */
 ?>
@@ -34,6 +35,9 @@ $ativa = $situacaoSlug === 'ativa';
 </dl>
 <?php if ((int) $ordem['mesmo_numero_outros_clientes'] > 0): ?>
 <p class="gestao-sinal gestao-sinal--outros-clientes" id="ordem-outros-clientes" data-outros-clientes="<?= (int) $ordem['mesmo_numero_outros_clientes'] ?>"><?= gestaoIcone('alerta') ?><span>Mesmo número em outros clientes. Esta ação vale só para esta ordem.</span></p>
+<?php endif; ?>
+<?php if ($clienteInativo): ?>
+<div class="gestao-estado gestao-estado--aviso" id="ordem-cliente-inativo" data-cliente-status="INATIVO"><?= gestaoIcone('alerta') ?><span><?= h($avisoClienteInativo) ?></span></div>
 <?php endif; ?>
 <?php if ($confirmacao !== null): ?>
 <div class="gestao-estado gestao-estado--aviso" id="ordem-confirmacao" role="alert" data-acao="<?= h($confirmacao['acao']) ?>"><?= gestaoIcone('alerta') ?><span><?= h($confirmacao['texto']) ?></span></div>

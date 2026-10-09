@@ -1627,7 +1627,7 @@ async function verificarTabelaOrdens(page, rot, w, h, opc) {
     const l = await page.evaluate(() => {
         const r = el => el.getBoundingClientRect();
         const linhas = Array.from(document.querySelectorAll('#ordens-tabela tbody tr'));
-        const out = { attrs: true, atencaoSoAtiva: true, acoes: [], atencao: [], normais: [], inativas: [], duasLinhas: true, sinais: [], semAtencaoComIcone: true, ids: [] };
+        const out = { situacao: [], attrs: true, atencaoSoAtiva: true, acoes: [], atencao: [], normais: [], inativas: [], duasLinhas: true, sinais: [], semAtencaoComIcone: true, ids: [] };
         for (const tr of linhas) {
             const id = tr.getAttribute('data-id-ordem'), st = tr.getAttribute('data-status'), idd = tr.getAttribute('data-idade');
             if (!/^\d+$/.test(id) || !['ativa', 'inativa'].includes(st) || !['atencao', 'normal'].includes(idd)) { out.attrs = false; }
@@ -1652,7 +1652,10 @@ async function verificarTabelaOrdens(page, rot, w, h, opc) {
             const sit = tr.querySelector('.col-situacao .gestao-situacao'), cssit = getComputedStyle(sit);
             const info = { txt: ident.textContent.trim(), svg: !!ident.querySelector('svg'), peso: getComputedStyle(ident).fontWeight, borda: getComputedStyle(ident).borderTopWidth + '|' + getComputedStyle(ident).borderTopStyle + '|' + getComputedStyle(ident).borderTopColor, barra: first.borderLeftWidth + '|' + first.borderLeftStyle + '|' + first.borderLeftColor, sit: [sit.textContent.trim(), cssit.color, cssit.fontWeight, cssit.fontStyle, !!sit.querySelector('svg')].join('|'), numEst: getComputedStyle(tr.querySelector('.col-numero')).fontStyle, sec: cr.querySelector('.gestao-celula-sec').textContent.trim(), srAtencao: (ident.querySelector('.gestao-sr') || { textContent: null }).textContent };
             if (idd === 'atencao') { out.atencao.push(info); } else if (st === 'ativa') { out.normais.push(info); } else { out.inativas.push(info); }
-            const sn = tr.querySelector('.gestao-sinal');
+            const sn = tr.querySelector('.gestao-sinal--outros-clientes');
+            const ci = tr.querySelector('.col-cliente .gestao-sinal--cliente-inativo'), ini = tr.querySelector('.col-situacao .gestao-situacao__inativada'), pda = tr.querySelector('.col-situacao .gestao-situacao__pdf-apagado');
+            const tdS = tr.querySelector('.col-situacao');
+            out.situacao.push({ st, pdf: tr.querySelector('.col-pdf').textContent.trim(), ini: ini && ini.textContent.trim(), iniTime: ini && !!ini.querySelector('time[datetime]'), pda: pda && pda.textContent.trim(), linhaPropria: [ini, pda].filter(Boolean).every(e => getComputedStyle(e).display === 'block' && r(e).top >= r(tr.querySelector('.col-situacao .gestao-situacao')).bottom - 1), dentro: tdS.scrollWidth <= tdS.clientWidth + 1, cli: ci && { txt: ci.querySelector('span[aria-hidden="true"]').textContent.trim(), sr: ci.querySelector('.gestao-sr').textContent.trim(), svg: !!ci.querySelector('svg'), borda: getComputedStyle(ci).borderTopStyle, dentro: r(ci).right <= r(tr.querySelector('.col-cliente')).right + 0.5 }, statusCli: tr.querySelector('.col-cliente').textContent.includes('DELTA CLIENTE INATIVO') });
             if (sn) { const cn = getComputedStyle(sn); const vis = sn.querySelector('span[aria-hidden="true"]'), srs = sn.querySelector('.gestao-sr'); out.sinais.push({ txt: vis && vis.textContent.trim(), sr: srs && srs.textContent.trim(), svg: !!sn.querySelector('svg'), borda: cn.borderTopStyle, dentro: r(sn).right <= r(tr.querySelector('.col-numero')).right + 0.5 }); }
         }
         return out;
@@ -1672,6 +1675,11 @@ async function verificarTabelaOrdens(page, rot, w, h, opc) {
     ok(opc.atencaoEsperada === undefined || l.atencao.length === opc.atencaoEsperada, rot + ': linhas com atencao = ' + l.atencao.length + (opc.atencaoEsperada !== undefined ? ' (esperado ' + opc.atencaoEsperada + ')' : ''));
     ok(l.sinais.every(s => s.svg && s.txt === 'Repetido em outro cliente' && s.sr === 'Mesmo número em outros clientes' && s.borda === 'dashed' && s.dentro), rot + ': sinal "Repetido em outro cliente" (texto completo so para leitor de tela) com icone + borda tracejada, dentro da celula (' + l.sinais.length + ')');
 
+    ok(l.situacao.filter(x => x.st === 'ativa').every(x => x.ini === null && x.pda === null), rot + ': ordens ATIVAS sem data de inativacao nem "PDF sera apagado" na coluna Situacao');
+    const sIna = l.situacao.filter(x => x.st === 'inativa');
+    ok(sIna.every(x => /^Inativada em \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(x.ini || '') && x.iniTime && x.linhaPropria && x.dentro), rot + ': ' + sIna.length + ' inativas com "Inativada em dd/mm/aaaa hh:mm" (<time>) em linha propria dentro da coluna Situacao, sem estourar');
+    ok(sIna.every(x => x.pdf === 'Disponível' ? /^PDF será apagado em \d{2}\/\d{2}\/\d{4}$/.test(x.pda || '') : x.pda === null), rot + ': "PDF sera apagado em dd/mm/aaaa" so nas inativas com PDF disponivel (' + sIna.map(x => x.pda).join(' | ') + ')');
+    ok(l.situacao.every(x => x.cli ? x.statusCli && x.cli.txt === 'Cliente inativo' && x.cli.sr === 'Cliente inativo: o totem não mostra esta ordem' && x.cli.svg && x.cli.borda === 'dashed' && x.cli.dentro : !x.statusCli), rot + ': sinal "Cliente inativo" (icone + texto + borda tracejada, dentro da coluna Cliente) SO nas ordens do cliente INATIVO (' + l.situacao.filter(x => x.cli).length + ')');
     // botao de acao visivel e clicavel SEM rolar a tabela na horizontal (1000x700 e 680): Abrir e Ativar/Inativar da 1a linha
     const cl = await page.evaluate(() => {
         const tr = document.querySelector('#ordens-tabela tbody tr'), wrap = document.querySelector('.gestao-tabela-wrap');
@@ -1718,13 +1726,16 @@ async function verificarTabelaBaixas(page, rot, w, todas) {
     ok(t.sit.pendente === 'Pendente|rgb(58, 58, 58)|700|normal|true', rot + ': "Pendente" com icone, #3A3A3A, 700 (' + t.sit.pendente + ')');
     if (todas) { ok(/^Resolvida em .*\|rgb\(58, 58, 58\)\|500\|normal\|true$/.test(t.sit.resolvida || ''), rot + ': "Resolvida em ..." com icone, #3A3A3A, 500 (' + t.sit.resolvida + ')'); }
     ok(t.ac.every(a => a.alt.every(h => h >= 44) && a.dentro && a.linha && a.tr >= 44 && a.tr <= 150), rot + ': botoes das baixas >= 44px, dentro da celula e na mesma linha');
-    ok(t.ac.every(a => (a.res === '0' ? a.form : !a.form) && (a.abrir || (a.estado === 'Mais de uma ordem com este número' || a.estado === 'Ordem não localizada'))), rot + ': cada baixa pendente com "Marcar como resolvida"; sem Abrir, texto "Ordem nao localizada"/"Mais de uma ordem com este numero"');
+    ok(t.ac.every(a => (a.res === '0' && a.abrir ? a.form : !a.form) && (a.abrir || (a.estado === 'Mais de uma ordem com este número' || a.estado === 'Ordem não localizada'))), rot + ': "Marcar como resolvida" SO na baixa pendente com OC localizada (Abrir); sem Abrir (nao localizada/ambigua) nao ha formulario nem botao de resolver');
+    ok(t.ac.some(a => a.estado === 'Ordem não localizada' && !a.form) && t.ac.some(a => a.estado === 'Mais de uma ordem com este número' && !a.form) && t.ac.some(a => a.abrir && a.form), rot + ': baixa "Ordem nao localizada" e baixa "Mais de uma ordem" SEM #form-baixa-resolver/#btn-baixa-resolver; baixa localizada COM os dois');
+    ok(await page.evaluate(() => Array.from(document.querySelectorAll('#baixas-tabela form[id^="form-baixa-resolver-"]')).every(f => !f.hasAttribute('data-confirmar') && !f.querySelector('[data-confirmar]'))), rot + ': resolver baixa continua SEM confirmacao (nenhum data-confirmar no formulario nem no botao)');
     ok(t.ac.filter(a => a.estadoVis).every(a => a.estadoVis.svg && a.estadoVis.peso === '600' && a.estadoVis.dentro), rot + ': estado da ordem na baixa com icone de alerta, peso 600 e dentro da celula');
     ok(t.ac.some(a => a.estado === 'Mais de uma ordem com este número') && t.ac.some(a => a.estado === 'Ordem não localizada') && t.ac.some(a => a.abrir), rot + ': os 3 estados da OC aparecem (localizada, ambigua, nao localizada)');
     if (w >= 1366) { ok(!t.rolagem, rot + ': a >= 1366px a tabela de baixas cabe sem rolagem horizontal'); }
     if (w < 1100) { ok(t.rolagem, rot + ': < 1100px a rolagem fica SO no wrap'); }
     const cl = await page.evaluate(() => {
-        const tr = document.querySelector('#baixas-tabela tbody tr'), wrap = document.querySelector('.gestao-tabela-wrap');
+        // 1a baixa COM botao (baixa de OC nao localizada/ambigua nao tem "Abrir" nem "Marcar como resolvida")
+        const tr = Array.from(document.querySelectorAll('#baixas-tabela tbody tr')).find(x => x.querySelector('.col-acoes .gestao-botao')), wrap = document.querySelector('.gestao-tabela-wrap');
         wrap.scrollLeft = 0; tr.scrollIntoView({ block: 'center' });
         return Array.from(tr.querySelectorAll('.col-acoes .gestao-botao')).map(b => { const r = b.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return r.left >= 0 && r.right <= innerWidth && (el === b || b.contains(el)); });
     });
@@ -1753,7 +1764,7 @@ async function detalheOrdem(page, srv, rot, w, id, exp, contadores) {
     await irPara(page, srv.base, '/gestao/ordem.php?id=' + id + (exp.conf ? '&confirmar=' + exp.conf : ''));
     await checagemGeral(page, rot, contadores);
     await semInlineOrdens(page, rot);
-    const faltam = await page.evaluate(lista => lista.filter(i => !document.getElementById(i)), IDS_ORDEM_DETALHE.concat(exp.status === 'ativa' ? ['btn-ordem-inativar'] : ['btn-ordem-ativar'], exp.pdf === 'disponivel' ? ['ordem-pdf-form', 'btn-ordem-pdf'] : ['ordem-pdf-texto'], exp.aviso ? ['ordem-pdf-aviso'] : [], exp.sinal ? ['ordem-outros-clientes'] : [], exp.conf ? ['ordem-confirmacao', 'ordem-confirmacao-cancelar'] : []));
+    const faltam = await page.evaluate(lista => lista.filter(i => !document.getElementById(i)), IDS_ORDEM_DETALHE.concat(exp.status === 'ativa' ? ['btn-ordem-inativar'] : ['btn-ordem-ativar'], exp.pdf === 'disponivel' ? ['ordem-pdf-form', 'btn-ordem-pdf'] : ['ordem-pdf-texto'], exp.aviso ? ['ordem-pdf-aviso'] : [], exp.sinal ? ['ordem-outros-clientes'] : [], exp.clienteInativo ? ['ordem-cliente-inativo'] : [], exp.conf ? ['ordem-confirmacao', 'ordem-confirmacao-cancelar'] : []));
     ok(faltam.length === 0, rot + ': ids do contrato presentes' + (faltam.length ? ' -> ' + faltam.join(',') : ''));
     const d = await page.evaluate(exp => {
         const r = el => el.getBoundingClientRect(), q = id => document.getElementById(id);
@@ -1775,6 +1786,8 @@ async function detalheOrdem(page, srv, rot, w, id, exp, contadores) {
             voltar: { h: Math.round(r(q('ordem-voltar')).height), href: q('ordem-voltar').getAttribute('href') },
             dl: Array.from(document.querySelectorAll('#ordem-detalhe dt')).map(x => x.textContent.trim()),
         };
+        const ac = q('ordem-cliente-inativo');
+        out.cliInativo = ac && { txt: ac.textContent.trim(), svg: !!ac.querySelector('svg'), borda: getComputedStyle(ac).borderTopWidth + '|' + getComputedStyle(ac).borderTopStyle + '|' + getComputedStyle(ac).borderTopColor, role: ac.getAttribute('role'), visivel: r(ac).width > 0 && r(ac).right <= innerWidth, classe: ac.classList.contains('gestao-estado--aviso') };
         const sn = q('ordem-outros-clientes');
         out.sinal = sn && { txt: sn.textContent.trim(), svg: !!sn.querySelector('svg'), borda: getComputedStyle(sn).borderTopStyle, tag: sn.tagName };
         const cf = q('ordem-confirmacao');
@@ -1799,11 +1812,14 @@ async function detalheOrdem(page, srv, rot, w, id, exp, contadores) {
     ok(d.voltar.h >= 44 && d.voltar.href.startsWith('/gestao/ordens.php?aba='), rot + ': "Voltar para a lista" >= 44px mantem a aba (' + d.voltar.href + ')');
     ok(JSON.stringify(d.dl).includes('Razão social') && JSON.stringify(d.dl).includes('Motorista') && JSON.stringify(d.dl).includes('CNH') && JSON.stringify(d.dl).includes('Placa'), rot + ': cartoes com Razao social, Motorista, CNH e Placa');
     ok((exp.textos || []).every(t => d.texto.includes(t)) && d.imgs === 0, rot + ': dados em claro (sem mascara) e nenhum <img> injetado (' + (exp.textos || []).length + ' textos)');
+    if (exp.clienteInativo) { ok(d.cliInativo && d.cliInativo.txt === 'Este cliente está inativo. O totem não vai mostrar esta ordem enquanto o cliente continuar inativo.' && d.cliInativo.svg && d.cliInativo.classe && d.cliInativo.borda === '3px|solid|rgb(58, 58, 58)' && d.cliInativo.role === null && d.cliInativo.visivel, rot + ': aviso permanente #ordem-cliente-inativo (gestao-estado--aviso, icone, borda 3px #3A3A3A, sem role=alert)'); }
+    else { ok(d.cliInativo === null, rot + ': sem aviso de cliente inativo (cliente ativo)'); }
     if (exp.sinal) { ok(d.sinal && d.sinal.svg && d.sinal.txt.startsWith('Mesmo número em outros clientes') && d.sinal.borda === 'dashed', rot + ': sinal "Mesmo numero em outros clientes" com icone + texto + borda tracejada'); }
     else { ok(d.sinal === null, rot + ': sem sinal de outros clientes'); }
     if (exp.conf) {
         ok(d.conf && d.conf.acao === exp.conf && d.conf.role === 'alert' && d.conf.svg && d.conf.borda === '3px|solid|rgb(58, 58, 58)' && d.conf.peso === '700' && d.conf.visivel && d.conf.hit && d.conf.confirmarHidden, rot + ': #ordem-confirmacao visivel (role=alert, icone, borda 3px #3A3A3A, 700) e confirmar=1 no formulario (' + (d.conf && d.conf.txt) + ')');
         ok(d.conf && d.conf.btn.startsWith((exp.conf === 'inativar' ? 'Inativar' : 'Ativar') + ' mesmo assim|') && (exp.conf === 'inativar' ? d.conf.btn.endsWith('rgb(58, 58, 58)|rgb(255, 255, 255)|3px') : d.conf.btn === 'Ativar mesmo assim|rgb(1, 121, 173)|rgb(255, 255, 255)|2px') && d.conf.cancelar >= 44 && d.conf.cancelarHref.startsWith('/gestao/ordem.php?id=' + id), rot + ': botao "mesmo assim" (' + d.conf.btn + ') e Cancelar >= 44px sem confirmar');
+        if (exp.textoConf) { ok(d.conf && d.conf.txt === exp.textoConf, rot + ': #ordem-confirmacao com o aviso de cliente inativo + "Confirme para ativar mesmo assim." (' + (d.conf && d.conf.txt) + ')'); }
         ok(d.conf && d.conf.cancelarAntes && d.conf.alertas === 1, rot + ': "Cancelar" vem ANTES do botao destrutivo/de confirmacao (DOM e visual) e #ordem-confirmacao e o unico role=alert (' + (d.conf && d.conf.alertas) + ')');
     } else {
         ok(d.conf === null && !d.confHidden && (exp.status === 'ativa' ? d.acao.cls.includes('--destrutivo') && d.acao.borda === '3px|solid|rgb(58, 58, 58)' && d.acao.svg : d.acao.borda.startsWith('2px|solid|rgb(1, 121, 173)')), rot + ': sem confirmacao; ' + (exp.status === 'ativa' ? 'Inativar destrutivo (borda 3px #3A3A3A + icone)' : 'Ativar secundario'));
@@ -1827,6 +1843,8 @@ const DET = { // casos do detalhe (id vem de info.ordens)
     dupA: { status: 'ativa', atencao: false, pdf: 'ausente', aviso: false, sinal: true, textos: ['LAY-DUP'] },
     conf: { status: 'ativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, conf: 'inativar', textos: ['LAY-CONF'] },
     confA: { status: 'inativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, conf: 'ativar', textos: ['LAY-CONFA'] },
+    cliInativo: { status: 'inativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, pdfTexto: 'Esta ordem não tem PDF anexado.', clienteInativo: true, textos: ['LAY-CLIINAT', 'DELTA CLIENTE INATIVO SA'] },
+    cliInativoConf: { status: 'inativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, conf: 'ativar', clienteInativo: true, textoConf: 'Este cliente está inativo. O totem não vai mostrar esta ordem enquanto o cliente continuar inativo. Confirme para ativar mesmo assim.', textos: ['LAY-CLIINAT'] },
     hostil: { status: 'ativa', atencao: false, pdf: 'ausente', aviso: false, sinal: false, textos: ['<img src=x onerror=window.__xss=33>', '"><script>window.__xss=34</script>', '<i>1</i>', '"><b>X</b>'] },
     longo: { status: 'ativa', atencao: true, pdf: 'disponivel', aviso: true, sinal: false, textos: ['N' + '1234567890'.repeat(4) + '123456789', 'MOTORISTAMOTORISTA', '12345678901234567890', 'ABCDEFGHIJ'] },
 };
@@ -1851,8 +1869,8 @@ async function cenarioOrdensViewport(browser, srv, w, h, contadores) {
     ok(await page.evaluate(() => Array.from(document.querySelectorAll('#ordens-tabela tbody tr')).every(tr => tr.getAttribute('data-idade') === 'atencao')), rot + ' 15d: todas as linhas data-idade=atencao');
     await page.screenshot({ path: path.join(CAPTURAS, 'ordens-15d-' + w + '.png') });
     // ---- Inativas
-    await listaOrdens(page, srv, rot + ' inativas', w, h, '?aba=inativas', { aba: 'inativas', idAba: 'aba-inativas', contador: /^Exibindo 1 a 6 de 6 ordens\.$/, descricao: 'Ordens de coleta inativas', pag: 1, paginas: 1, sortCriada: 'descending', atencaoEsperada: 0 }, contadores);
-    ok(await page.evaluate(() => document.querySelectorAll('#ordens-tabela tbody tr[data-status="inativa"]').length === 6 && !document.querySelector('#ordens-tabela tbody tr[data-status="ativa"]')), rot + ' inativas: 6 linhas, todas inativas');
+    await listaOrdens(page, srv, rot + ' inativas', w, h, '?aba=inativas', { aba: 'inativas', idAba: 'aba-inativas', contador: /^Exibindo 1 a 7 de 7 ordens\.$/, descricao: 'Ordens de coleta inativas', pag: 1, paginas: 1, sortCriada: 'descending', atencaoEsperada: 0 }, contadores);
+    ok(await page.evaluate(() => document.querySelectorAll('#ordens-tabela tbody tr[data-status="inativa"]').length === 7 && !document.querySelector('#ordens-tabela tbody tr[data-status="ativa"]')), rot + ' inativas: 7 linhas, todas inativas');
     await page.screenshot({ path: path.join(CAPTURAS, 'ordens-inativas-' + w + '.png') });
     // ---- Baixas pendentes (pagina 1 de 2) e todas
     await listaOrdens(page, srv, rot + ' baixas', w, h, '?aba=baixas', { aba: 'baixas', baixas: true, idAba: 'aba-baixas', contador: /^Exibindo 1 a 25 de 35 baixas\.$/, descricao: 'Check-ins aceitos pelo Talent', pag: 1, paginas: 2 }, contadores);
@@ -1936,7 +1954,7 @@ async function cenarioOrdensSemJs(browser, srv, contadores) {
     await nav(() => page.click('#btn-aplicar-filtros'));
     ok(await page.evaluate(() => document.querySelectorAll('#ordens-tabela tbody tr').length === 1 && document.getElementById('filtro-numero').value === 'LAY-2001'), rot + ': formulario GET filtra por numero sem JS');
     await nav(() => page.click('#btn-limpar-filtros'));
-    ok(await page.evaluate(() => document.getElementById('filtro-numero').value === '' && document.querySelectorAll('#ordens-tabela tbody tr').length === 6), rot + ': "Limpar filtros" volta a lista da aba');
+    ok(await page.evaluate(() => document.getElementById('filtro-numero').value === '' && document.querySelectorAll('#ordens-tabela tbody tr').length === 7), rot + ': "Limpar filtros" volta a lista da aba');
     await nav(() => page.click('#btn-ordem-abrir-' + O.inativa));
     ok(page.url().includes('/gestao/ordem.php?id=' + O.inativa) && await page.evaluate(() => !!document.getElementById('ordem-detalhe') && document.getElementById('ordem-voltar').getAttribute('href').includes('aba=inativas')), rot + ': "Abrir" leva ao detalhe e "Voltar" leva de volta a aba');
     await nav(() => page.click('#ordem-voltar'));
@@ -1956,6 +1974,13 @@ async function cenarioOrdensSemJs(browser, srv, contadores) {
     await irPara(page, srv.base, '/gestao/ordens.php?aba=ativas&numero=LAY-1003');
     await nav(() => page.click('#btn-ordem-inativar-' + O.ausente));
     ok(page.url().includes('/gestao/ordens.php') && await page.evaluate(() => !!document.getElementById('gestao-flash') && document.querySelectorAll('#ordens-tabela tbody tr').length === 0 && !!document.getElementById('ordens-vazio')), rot + ': Inativar na lista inativa e volta com o aviso (a ordem sai da aba Ativas)');
+    // ativar OC de cliente INATIVO: lista -> detalhe com aviso + confirmacao em dois passos -> "Ativar mesmo assim"
+    await irPara(page, srv.base, '/gestao/ordens.php?aba=inativas&numero=LAY-CLIINAT');
+    await nav(() => page.click('#btn-ordem-ativar-' + O.cliInativo));
+    const ci = await page.evaluate(() => { const c = document.getElementById('ordem-confirmacao'); return { url: location.pathname, conf: c && c.getAttribute('data-acao'), txt: c && c.textContent.trim(), aviso: !!document.getElementById('ordem-cliente-inativo'), status: document.getElementById('ordem-detalhe').getAttribute('data-status'), btn: document.getElementById('btn-ordem-ativar').textContent.trim() }; });
+    ok(ci.url === '/gestao/ordem.php' && ci.conf === 'ativar' && ci.txt.startsWith('Este cliente está inativo. O totem não vai mostrar esta ordem') && ci.aviso && ci.status === 'inativa' && ci.btn === 'Ativar mesmo assim', rot + ': Ativar na lista (cliente INATIVO) NAO ativa: leva ao detalhe com aviso + confirmacao (' + JSON.stringify(ci).slice(0, 200) + ')');
+    await nav(() => page.click('#btn-ordem-ativar'));
+    ok(await page.evaluate(() => document.getElementById('ordem-detalhe').getAttribute('data-status') === 'ativa' && !document.getElementById('ordem-confirmacao') && !!document.getElementById('ordem-cliente-inativo') && !!document.getElementById('gestao-flash')), rot + ': "Ativar mesmo assim" ativa (data-status=ativa) e o aviso permanente do cliente inativo continua no detalhe');
     // baixas: marcar como resolvida
     await irPara(page, srv.base, '/gestao/ordens.php?aba=baixas');
     const antes = await page.evaluate(() => document.querySelector('#aba-baixas .gestao-aba__contagem').textContent.trim());

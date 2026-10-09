@@ -169,6 +169,10 @@ try {
     $oDupB = ogOrdem($ext, $cB, 'LAY-DUP', 'ATIVA', $dias(2));
     $oConf = ogOrdem($ext, $cA, 'LAY-CONF', 'ATIVA', $dias(2));
     $oConfA = ogOrdem($ext, $cA, 'LAY-CONFA', 'INATIVA', $dias(6), $dias(1));
+    // cliente INATIVO (tb_clientes.status): aviso no detalhe, na confirmacao de ativar e na lista (aba Inativas)
+    $cnpjI = '88888888000188';
+    $cI = ogCliente($ext, $cnpjI, 'DELTA CLIENTE INATIVO SA', 'INATIVO');
+    $oCliInat = ogOrdem($ext, $cI, 'LAY-CLIINAT', 'INATIVA', $dias(4), $dias(1));
     $oHostil = ogOrdem($ext, $cX, $numHostil, 'ATIVA', $dias(1), null, ['placa_prevista' => '"><b>X</b>', 'motorista_nome_previsto' => '"><script>window.__xss=34</script>', 'cnh_prevista' => '<i>1</i>', 'transportadora_nome' => '<img src=x onerror=window.__xss=35>', 'transportadora_cnpj' => $cnpjT]);
     $oLongo = ogOrdem($ext, $cL, $numLongo, 'ATIVA', $dias(18), null, ['placa_prevista' => 'ABCDEFGHIJ', 'motorista_nome_previsto' => str_repeat('MOTORISTA', 14), 'cnh_prevista' => '12345678901234567890', 'transportadora_nome' => 'TRANSPORTADORA' . str_repeat('X', 120), 'transportadora_cnpj' => $cnpjT]);
     $gravarPdf($cnpjL, $numLongo);
@@ -214,7 +218,7 @@ try {
     $mkBaixa($cnpjL, $numLongo);
     $mkBaixa($cnpjA, 'LAY-2001', true);
     $mkBaixa($cnpjD, 'AMB-1');
-    $idsOrdens = ['ativa' => $oAt, 'ativa15' => $oAt15, 'ausente' => $oAus, 'inativa' => $oIn, 'apagado' => $oInApag, 'inativaSemPdf' => $oInSem, 'dupA' => $oDupA, 'dupB' => $oDupB, 'conf' => $oConf, 'confA' => $oConfA, 'hostil' => $oHostil, 'longo' => $oLongo, 'numLongo' => $numLongo];
+    $idsOrdens = ['ativa' => $oAt, 'ativa15' => $oAt15, 'ausente' => $oAus, 'inativa' => $oIn, 'apagado' => $oInApag, 'inativaSemPdf' => $oInSem, 'dupA' => $oDupA, 'dupB' => $oDupB, 'conf' => $oConf, 'confA' => $oConfA, 'cliInativo' => $oCliInat, 'cliInativoConf' => $oCliInat, 'hostil' => $oHostil, 'longo' => $oLongo, 'numLongo' => $numLongo];
 
     $env = array_merge(gtEnvPadrao(), ['GESTAO_PERMITIR_HTTP' => 'true', 'TOTEM_URL_BASE' => $urlBase]);
     putenv('QA_GESTAO_ENV_JSON=' . json_encode($env));

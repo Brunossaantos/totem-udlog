@@ -75,6 +75,7 @@ class OrdemColetaGestaoDao
         oc.cliente_id,
         c.razao_social,
         c.cnpj,
+        c.status AS cliente_status,
         oc.transportadora_nome,
         oc.transportadora_cnpj,
         oc.placa_prevista,
@@ -686,6 +687,7 @@ class OrdemColetaGestaoDao
     {
         $l['id'] = (int) $l['id'];
         $l['cliente_id'] = (int) $l['cliente_id'];
+        $l['cliente_status'] = (string) ($l['cliente_status'] ?? '');
         $l['tem_pdf'] = ((int) $l['tem_pdf']) === 1;
         $l['mesmo_numero_outros_clientes'] = (int) $l['mesmo_numero_outros_clientes'];
 

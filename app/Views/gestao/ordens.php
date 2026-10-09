@@ -128,7 +128,7 @@ $rotuloData = static function (mixed $valor): string {
 <?php else: ?>
 <span class="gestao-celula-sec gestao-oc-estado" id="baixa-oc-estado-<?= $idBaixa ?>"><?= gestaoIcone('alerta') ?><span><?= $b['oc_estado'] === 'ambigua' ? 'Mais de uma ordem com este número' : 'Ordem não localizada' ?></span></span>
 <?php endif; ?>
-<?php if (!$b['resolvida']): ?>
+<?php if (!$b['resolvida'] && $b['oc_estado'] === 'localizada'): ?>
 <form class="gestao-form-linha" id="form-baixa-resolver-<?= $idBaixa ?>" method="post" action="/gestao/ordem-baixa.php">
 <?= gestaoCsrfInput($ctx) ?>
 <input type="hidden" name="id_baixa" value="<?= $idBaixa ?>">
@@ -164,9 +164,9 @@ $rotuloData = static function (mixed $valor): string {
 <?php $idOrdem = (int) $o['id']; ?>
 <tr class="gestao-tabela__linha" data-id-ordem="<?= $idOrdem ?>" data-status="<?= h($o['situacao_slug']) ?>" data-idade="<?= $o['idade_atencao'] ? 'atencao' : 'normal' ?>">
 <td class="col-numero"><?= h($o['numero']) ?><?php if ((int) $o['mesmo_numero_outros_clientes'] > 0): ?> <span class="gestao-sinal gestao-sinal--outros-clientes" data-outros-clientes="<?= (int) $o['mesmo_numero_outros_clientes'] ?>"><?= gestaoIcone('alerta') ?><span aria-hidden="true">Repetido em outro cliente</span><span class="gestao-sr">Mesmo número em outros clientes</span></span><?php endif; ?></td>
-<td class="col-cliente"><span class="gestao-celula-principal"><?= h($o['razao_social']) ?></span> <span class="gestao-celula-sec"><?= h($o['cnpj_cliente_fmt']) ?></span></td>
+<td class="col-cliente"><span class="gestao-celula-principal"><?= h($o['razao_social']) ?></span> <span class="gestao-celula-sec"><?= h($o['cnpj_cliente_fmt']) ?></span><?php if ($o['cliente_inativo']): ?> <span class="gestao-sinal gestao-sinal--cliente-inativo" data-cliente-inativo="1"><?= gestaoIcone('alerta') ?><span aria-hidden="true">Cliente inativo</span><span class="gestao-sr">Cliente inativo: o totem não mostra esta ordem</span></span><?php endif; ?></td>
 <td class="col-transportadora"><?php if (($o['transportadora_nome'] ?? '') !== '' || ($o['transportadora_cnpj'] ?? '') !== ''): ?><span class="gestao-celula-principal"><?= h($o['transportadora_nome'] ?? '') ?></span> <span class="gestao-celula-sec"><?= h($o['cnpj_transportadora_fmt']) ?></span><?php else: ?><span class="gestao-celula-sec">Não informada</span><?php endif; ?></td>
-<td class="col-situacao"><span class="gestao-situacao gestao-situacao--<?= h($o['situacao_slug']) ?>"><?= gestaoIcone($o['situacao_slug'] === 'ativa' ? 'ok' : 'inativo') ?><span><?= h($o['situacao_rotulo']) ?></span></span></td>
+<td class="col-situacao"><span class="gestao-situacao gestao-situacao--<?= h($o['situacao_slug']) ?>"><?= gestaoIcone($o['situacao_slug'] === 'ativa' ? 'ok' : 'inativo') ?><span><?= h($o['situacao_rotulo']) ?></span></span><?php if ($o['situacao_slug'] === 'inativa' && ($o['inativada_em'] ?? null) !== null): ?> <span class="gestao-celula-sec gestao-situacao__inativada">Inativada em <?= gestaoData($o['inativada_em']) ?></span><?php endif; ?><?php if ($o['pdf_apagado_em'] !== null): ?> <span class="gestao-celula-sec gestao-situacao__pdf-apagado">PDF será apagado em <?= h($o['pdf_apagado_em']) ?></span><?php endif; ?></td>
 <td class="col-criada"><span class="gestao-celula-principal gestao-idade<?= $o['idade_atencao'] ? ' gestao-idade--atencao' : '' ?>"><?= $o['idade_atencao'] ? gestaoIcone('alerta') . '<span class="gestao-sr">Atenção: ativa há mais de 15 dias. </span>' : '' ?><span><?= h($o['idade_texto']) ?></span></span> <span class="gestao-celula-sec"><?= gestaoData($o['criado_em'] ?? null) ?></span></td>
 <td class="col-pdf"><?= $o['tem_pdf'] ? 'Disponível' : 'Não disponível' ?></td>
 <td class="col-acoes">

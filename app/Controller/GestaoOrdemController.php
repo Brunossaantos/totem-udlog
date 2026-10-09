@@ -47,6 +47,11 @@ final class GestaoOrdemController
 
     public const DIAS_RETENCAO_PDF = 15;
 
+    /** Valor de `tb_clientes.status` de cliente inativo (o totem nao mostra as ordens dele). */
+    public const CLIENTE_INATIVO = 'INATIVO';
+
+    public const AVISO_CLIENTE_INATIVO = 'Este cliente está inativo. O totem não vai mostrar esta ordem enquanto o cliente continuar inativo.';
+
     /** Motivos fixos de integridade do PDF (valores de `motivo` no catalogo do LogSistema). */
     public const MOTIVOS_INTEGRIDADE_PDF = [
         'caminho_invalido', 'tamanho_invalido', 'nao_e_pdf', 'sha256_divergente', 'leitura_falhou', 'prefixo_cnpj_divergente',
@@ -254,6 +259,7 @@ final class GestaoOrdemController
         // acao ainda faz sentido para o estado atual e ainda ha o que confirmar.
         $confirmacao = null;
         $acaoPedida = GestaoContexto::query('confirmar');
+        $clienteInativo = $oc['cliente_status'] === self::CLIENTE_INATIVO;
         if (($acaoPedida === 'inativar' && $oc['status'] === 'ATIVA') || ($acaoPedida === 'ativar' && $oc['status'] === 'INATIVA')) {
             try {
                 $n = $acaoPedida === 'inativar'
@@ -263,13 +269,22 @@ final class GestaoOrdemController
                 $this->registrarFalhaExterno($e);
                 $n = 0;
             }
-            if ($n > 0) {
+            $avisoCliente = $acaoPedida === 'ativar' && $clienteInativo;
+            if ($n > 0 || $avisoCliente) {
+                $partes = [];
+                if ($avisoCliente) {
+                    $partes[] = self::AVISO_CLIENTE_INATIVO;
+                }
+                if ($n > 0) {
+                    $partes[] = $acaoPedida === 'inativar'
+                        ? 'Há ' . $n . ' ' . ($n === 1 ? 'atendimento' : 'atendimentos') . ' em andamento com esta ordem.'
+                        : 'Esta ordem já foi usada em um check-in concluído.';
+                }
+                $partes[] = 'Confirme para ' . ($acaoPedida === 'inativar' ? 'inativar' : 'ativar') . ' mesmo assim.';
                 $confirmacao = [
                     'acao' => $acaoPedida,
                     'n' => $n,
-                    'texto' => $acaoPedida === 'inativar'
-                        ? 'Há ' . $n . ' ' . ($n === 1 ? 'atendimento' : 'atendimentos') . ' em andamento com esta ordem. Confirme para inativar mesmo assim.'
-                        : 'Esta ordem já foi usada em um check-in concluído. Confirme para ativar mesmo assim.',
+                    'texto' => implode(' ', $partes),
                 ];
             }
         }
@@ -307,6 +322,8 @@ final class GestaoOrdemController
                 'cnpjCliente' => self::formatarCnpj((string) $oc['cnpj']),
                 'cnpjTransportadora' => self::formatarCnpj((string) ($oc['transportadora_cnpj'] ?? '')),
                 'confirmacao' => $confirmacao,
+                'clienteInativo' => $clienteInativo,
+                'avisoClienteInativo' => self::AVISO_CLIENTE_INATIVO,
                 'pdf' => $pdf,
                 'pdfTexto' => $pdfTexto,
                 'pdfAviso' => $pdfAviso,
@@ -375,12 +392,15 @@ final class GestaoOrdemController
             $this->registrarFalhaExterno($e);
             $this->externoIndisponivel();
         }
+        // cliente inativo: AVISO (nao bloqueio) so ao ativar; o totem nao mostra a ordem
+        $clienteInativo = !$inativar && $oc['cliente_status'] === self::CLIENTE_INATIVO;
         $detalheFinal = $base;
-        if ($n > 0) {
+        if ($n > 0 || $clienteInativo) {
             if (!$confirmou) {
                 GestaoHttp::redirecionar(self::CAMINHO_ORDEM . '?' . $this->queryDetalhe($id, $f, ['confirmar' => $acao, 'msg' => 'oc_confirmacao_necessaria']));
             }
-            $detalheFinal['motivo_oc'] = $inativar ? 'confirmado_andamento' : 'confirmado_ja_baixada';
+            // um unico motivo fixo: "ja baixada" (se ha check-in concluido) tem precedencia
+            $detalheFinal['motivo_oc'] = $inativar ? 'confirmado_andamento' : ($n > 0 ? 'confirmado_ja_baixada' : 'confirmado_cliente_inativo');
         }
 
         // (e) auditoria PENDENTE ANTES de qualquer UPDATE externo
@@ -867,6 +887,12 @@ final class GestaoOrdemController
             $l['cnpj_cliente_fmt'] = self::formatarCnpj((string) $l['cnpj']);
             $l['cnpj_transportadora_fmt'] = self::formatarCnpj((string) ($l['transportadora_cnpj'] ?? ''));
             $l['href_abrir'] = self::CAMINHO_ORDEM . '?id=' . (int) $l['id'] . '&' . $retorno;
+            $l['cliente_inativo'] = $l['cliente_status'] === self::CLIENTE_INATIVO;
+            // aba Inativas: dia em que o PDF (ainda existente) sera apagado
+            $inativadaEm = $l['status'] === 'INATIVA' ? $this->data($l['inativada_em'] ?? null) : null;
+            $l['pdf_apagado_em'] = $l['tem_pdf'] && $inativadaEm !== null
+                ? $inativadaEm->modify('+' . self::DIAS_RETENCAO_PDF . ' days')->format('d/m/Y')
+                : null;
             $saida[] = $l;
         }
 

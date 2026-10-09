@@ -245,7 +245,7 @@ try {
 
     // colunas e ausencia de mascara
     $pri = $dao->listar(['cliente_id' => $cA, 'numero' => 'PAG-0001'], 'ativas', 1);
-    $esperadas = ['id', 'numero', 'cliente_id', 'razao_social', 'cnpj', 'transportadora_nome', 'transportadora_cnpj', 'placa_prevista', 'motorista_nome_previsto', 'cnh_prevista', 'status', 'criado_em', 'inativada_em', 'tem_pdf', 'mesmo_numero_outros_clientes'];
+    $esperadas = ['id', 'numero', 'cliente_id', 'razao_social', 'cnpj', 'cliente_status', 'transportadora_nome', 'transportadora_cnpj', 'placa_prevista', 'motorista_nome_previsto', 'cnh_prevista', 'status', 'criado_em', 'inativada_em', 'tem_pdf', 'mesmo_numero_outros_clientes'];
     $cols = $pri[0] ?? [];
     $k1 = array_keys($cols);
     sort($k1);
@@ -641,9 +641,9 @@ try {
     $esperadasChaves = ['origem', 'motivo', 'perfil_de', 'perfil_para', 'ativo_para', 'sessoes_revogadas', 'empresa', 'logs_apagados', 'auditoria_apagados', 'lotes', 'status_de', 'status_para', 'motivo_oc'];
     afirmar('DETALHE_CAMPOS: conjunto EXATO de chaves (so status_de/status_para/motivo_oc novos) e nenhuma chave de dado pessoal',
         count(array_diff($chaves, $esperadasChaves)) === 0 && count(array_diff($esperadasChaves, $chaves)) === 0 && !preg_grep('/numero|cnpj|nome|placa|cnh|cpf|motorista|cliente/i', $chaves));
-    afirmar('status_de/status_para = {ATIVA, INATIVA}; motivo_oc = 10 valores fechados',
+    afirmar('status_de/status_para = {ATIVA, INATIVA}; motivo_oc = 11 valores fechados (inclui confirmado_cliente_inativo)',
         AuditoriaDao::DETALHE_CAMPOS['status_de'] === ['ATIVA', 'INATIVA'] && AuditoriaDao::DETALHE_CAMPOS['status_para'] === ['ATIVA', 'INATIVA']
-        && AuditoriaDao::DETALHE_CAMPOS['motivo_oc'] === ['ja_no_estado', 'estado_mudou', 'oc_inexistente', 'externo_indisponivel', 'arquivo_ausente', 'confirmado_andamento', 'confirmado_ja_baixada', 'cliente_ausente', 'oc_ambigua', 'oc_ativa']);
+        && AuditoriaDao::DETALHE_CAMPOS['motivo_oc'] === ['ja_no_estado', 'estado_mudou', 'oc_inexistente', 'externo_indisponivel', 'arquivo_ausente', 'confirmado_andamento', 'confirmado_ja_baixada', 'confirmado_cliente_inativo', 'cliente_ausente', 'oc_ambigua', 'oc_ativa']);
     $motivosRn = array_values((new ReflectionClass(OrdemColetaBaixaRn::class))->getConstants());
     $motivosRn = array_values(array_filter($motivosRn, static fn ($v) => is_string($v) && in_array($v, ['cliente_ausente', 'oc_inexistente', 'oc_ambigua', 'oc_ativa', 'externo_indisponivel'], true)));
     $aceitos = true;
@@ -655,6 +655,23 @@ try {
         }
     }
     afirmar('A1: os 5 motivos de recusa da OrdemColetaBaixaRn (constantes MOTIVO_*) sao aceitos por montarDetalhe', count($motivosRn) === 5 && $aceitos);
+    afirmar('motivo_oc confirmado_cliente_inativo: aceito por montarDetalhe (valor fixo, sem PII); variacoes continuam rejeitadas', AuditoriaDao::montarDetalhe(['status_de' => 'INATIVA', 'status_para' => 'ATIVA', 'motivo_oc' => 'confirmado_cliente_inativo']) === 'status_de=INATIVA;status_para=ATIVA;motivo_oc=confirmado_cliente_inativo' && lancou(static fn () => AuditoriaDao::montarDetalhe(['motivo_oc' => 'confirmado_cliente_inativo '])) !== null && lancou(static fn () => AuditoriaDao::montarDetalhe(['motivo_oc' => 'CONFIRMADO_CLIENTE_INATIVO'])) !== null);
+    // cliente_status (JOIN ja existente, sem consulta extra): buscarPorId e listar trazem o status de tb_clientes
+    $cStI = ogCliente($ext, '98989898000198', 'STATUS INATIVO SA', 'INATIVO');
+    $ocStI = ogOrdem($ext, $cStI, 'ST-INAT-1', 'ATIVA');
+    $ocStI2 = ogOrdem($ext, $cStI, 'ST-INAT-2', 'INATIVA', '2026-05-01 08:00:00', '2026-05-02 09:00:00');
+    $ocStA = ogOrdem($ext, $cA, 'ST-ATIVO-1', 'ATIVA');
+    $lstI = $dao->listar(['cliente_id' => $cStI], 'ativas', 1);
+    $lstI2 = $dao->listar(['cliente_id' => $cStI], 'inativas', 1);
+    $lstA = $dao->listar(['numero' => 'ST-ATIVO-1'], 'ativas', 1);
+    afirmar('cliente_status: buscarPorId e listar (ativas/inativas) trazem INATIVO do cliente inativo e ATIVO do ativo (string, so esses dois valores)',
+        ($dao->buscarPorId($ocStI)['cliente_status'] ?? null) === 'INATIVO' && ($dao->buscarPorId($ocStI2)['cliente_status'] ?? null) === 'INATIVO' && ($dao->buscarPorId($ocStA)['cliente_status'] ?? null) === 'ATIVO'
+        && array_column($lstI, 'cliente_status') === ['INATIVO'] && array_column($lstI2, 'cliente_status') === ['INATIVO'] && array_column($lstA, 'cliente_status') === ['ATIVO']);
+    afirmar('cliente_status: mudar tb_clientes.status para ATIVO reflete na OC; ativarPorId/inativarPorId nao dependem do status do cliente (so a tela avisa)',
+        $ext->exec("UPDATE tb_clientes SET status = 'ATIVO' WHERE id = $cStI") === 1 && $dao->buscarPorId($ocStI)['cliente_status'] === 'ATIVO' && $ext->exec("UPDATE tb_clientes SET status = 'INATIVO' WHERE id = $cStI") === 1
+        && $dao->ativarPorId($ocStI2) === OrdemColetaGestaoDao::R_EFETIVADO && $dao->buscarPorId($ocStI2)['status'] === 'ATIVA' && $dao->buscarPorId($ocStI2)['cliente_status'] === 'INATIVO');
+    $ext->exec("DELETE FROM tb_ordens_coleta WHERE id IN ($ocStI, $ocStI2, $ocStA)");
+    $ext->exec("DELETE FROM tb_clientes WHERE id = $cStI");
     afirmar('A1: valor fora do conjunto continua rejeitado por montarDetalhe', lancou(static fn () => AuditoriaDao::montarDetalhe(['motivo_oc' => 'oc_qualquer'])) !== null && lancou(static fn () => AuditoriaDao::montarDetalhe(['motivo_oc' => 'OC_ATIVA'])) !== null);
     $idA1 = $aud->registrar(null, 'OC_INATIVAR', 'ordem_coleta', $dupA, 'OK', ['status_de' => 'ATIVA', 'status_para' => 'INATIVA']);
     $idA2 = $aud->registrar(null, 'OC_ATIVAR', 'ordem_coleta', $dupA, 'OK', ['status_de' => 'INATIVA', 'status_para' => 'ATIVA', 'motivo_oc' => 'confirmado_ja_baixada']);
