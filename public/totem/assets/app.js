@@ -688,7 +688,7 @@ function selecionarTipo(tipo) {
 
 function telaPlacaExpedicao() {
     return `<div class="titulo">Digite a placa do veículo</div>
-        <input class="campo-texto kb-input" id="inputPlaca" placeholder="AAA-0A00">
+        <input class="campo-texto kb-input" id="inputPlaca" autocomplete="off" placeholder="AAA-0A00">
         <button class="btn-primario" style="max-width:320px;margin:0 auto" onclick="consultarPlacaExpedicao()">Consultar</button>`;
 }
 async function consultarPlacaExpedicao() {
@@ -737,7 +737,7 @@ async function escolherOrdem(ordem) {
 }
 
 function campo(rotulo, id, valor) {
-    return `<div class="campo"><label>${rotulo}</label><input class="kb-input" id="${id}" value="${escapeHtml(valor)}"></div>`;
+    return `<div class="campo"><label>${rotulo}</label><input class="kb-input" id="${id}" autocomplete="off" value="${escapeHtml(valor)}"></div>`;
 }
 
 const UF_LISTA = [
@@ -1643,7 +1643,7 @@ function linhaConfirma(rotulo, id, valor, obrigatorio, multilinha, largo) {
     return `<div class="conf-campo${largo ? ' conf-campo-largo' : ''}"><label class="conf-rotulo" for="${id}">${rotulo}${marca}</label>${ctl}</div>`;
 }
 function linhaConfirmaLeitura(rotulo, id, valor, multilinha, largo) {
-    const comum = `class="conf-valor conf-leitura" id="${id}" readonly tabindex="-1" aria-readonly="true"`;
+    const comum = `class="conf-valor conf-leitura" id="${id}" autocomplete="off" readonly tabindex="-1" aria-readonly="true"`;
     const ctl = multilinha
         ? `<textarea ${comum} rows="1">${escapeHtml(valor)}</textarea>`
         : `<input ${comum} value="${escapeHtml(valor)}">`;
@@ -1923,7 +1923,7 @@ function voltarDaCorrecaoAjudante() {
 
 function telaRecPlacaQtd() {
     return `<div class="titulo">Digite a placa do veículo</div>
-        <input class="campo-texto kb-input" id="inputPlacaRec" placeholder="AAA-0A00">
+        <input class="campo-texto kb-input" id="inputPlacaRec" autocomplete="off" placeholder="AAA-0A00">
         <div class="subtitulo">Quantas notas fiscais você possui?</div>
         <div class="grupo-botoes">
             <button class="btn-primario" onclick="iniciarRecebimento(false)">5 ou menos</button>
@@ -3378,7 +3378,7 @@ function abrirModalNumeroNotaManual(uid, valorInicial, mensagemErro) {
     abrirModal(`
         ${cabecalhoModalNota(uid)}
         <div class="nota-modal-instrucao">Digite o número da nota (só os números).</div>
-        <input class="campo-texto" id="inputNumeroNota" inputmode="numeric" readonly value="${escapeHtml(valorInicial || '')}" placeholder="Número da nota">
+        <input class="campo-texto" id="inputNumeroNota" autocomplete="off" inputmode="numeric" readonly value="${escapeHtml(valorInicial || '')}" placeholder="Número da nota">
         <div class="status-scanner erro" id="numeroNotaErro" style="${mensagemErro ? '' : 'display:none'}">${escapeHtml(mensagemErro || '')}</div>
         <div class="teclado-numerico-nota" id="tecladoNumericoNota"></div>
         <button type="button" class="btn-voltar-modal-nota btn-voltar-modal-nota-larga" id="btnVoltarModalNota" aria-label="Voltar para a lista de notas">Voltar</button>
@@ -3652,7 +3652,7 @@ let clienteSelecionado = null;
 function telaCliente() {
     clienteSelecionado = null;
     return `<div class="subtitulo cliente-aviso">Não conseguimos identificar o cliente. Digite o nome ou CNPJ.</div>
-        <input class="kb-input cliente-campo" id="inputCliente" placeholder="Digite para buscar" aria-label="Nome ou CNPJ do cliente">
+        <input class="kb-input cliente-campo" id="inputCliente" autocomplete="off" placeholder="Digite para buscar" aria-label="Nome ou CNPJ do cliente">
         <div class="lista-sugestoes" id="listaSugestoes"></div>
         <button class="btn-primario cliente-avancar" style="max-width:320px;margin:0 auto" onclick="confirmarCliente()">Avançar</button>`;
 }
