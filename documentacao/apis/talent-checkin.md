@@ -17,7 +17,7 @@ A seção "REFINAMENTO 2" de `docs/manual_talent.md` (valores em minúsculas) es
 - **URL**: `POST https://talent.exemplo.invalid/Portaria/Checkin` (placeholder). A base vem de `TALENT_API_URL` (sem barra final; o cliente acrescenta `/Portaria/Checkin`). **[C]**
 - **Autenticação**: `Authorization: Bearer <TALENT_API_KEY>` (token fornecido pelo Talent; nunca logado). `Content-Type: application/json; charset=utf-8`. **[C]**
 - **Chamador**: só o servidor PHP, a partir de `TalentRn::processarCheckin`. O navegador não fala com o Talent.
-- **Chamada real**: só em produção e com autorização; os testes usam servidor falso (`_router_talent_mock.php`). Dois check-ins reais estão documentados no state/manual. **[A]**
+- **Chamada real**: só em produção e com autorização; os testes usam servidor falso (`_router_talent_mock.php`). Dois check-ins reais estão documentados no manual. **[A]**
 
 ## Payload
 
@@ -49,7 +49,7 @@ Exemplo fictício (Expedição, com ajudante):
 | `doctos` | Expedição: um `{"tipo":"ORDEM_COLETA","nrDocto":<ordem>}`; Recebimento: um `{"tipo":"NOTA_FISCAL","nrDocto":<número>}` por nota (nota sem número = falha de montagem) |
 | `anexos[]` | `{anexoBase64, descricao}`: um PDF por nota (`Nota Fiscal 01`, `02`...; gerado da foto JPEG) e, só na Expedição, o PDF da OC (`Ordem de Coleta`) |
 
-- **Anexos em base64 puro**, sem prefixo `data:...;base64,`. O manual deixa o prefixo como pendência; o state registra que o formato puro funcionou no Talent (registro de teste 38018, leitura de QR ok). **[A]** **[P]** (manual)
+- **Anexos em base64 puro**, sem prefixo `data:...;base64,`. O manual deixa o prefixo como pendência; o formato puro funcionou no Talent (registro de teste 38018, leitura de QR ok). **[A]** **[P]** (manual)
 - Anexo da OC (`AnexoOrdemColetaLeitor::buscar`, por CNPJ e número): **qualquer falha segue sem anexo** e só grava uma linha de log (`anexo_ordem_coleta_omitido id_atendimento=<n> motivo=<codigo>`); o check-in nunca falha por isso. Origem do PDF: [n8n-anexo-ordem-coleta.md](n8n-anexo-ordem-coleta.md). Nota cuja foto não existe em disco é pulada. **[C]**
 - `montarAnexosGzip` existe em `TalentRn` e **nunca é chamado** (o formato ativo é `anexos`). **[C]**
 - O manual lista campos opcionais (`reboque`, `paletes`, `obs` etc.) que o projeto **não envia**. **[C]**
@@ -101,7 +101,7 @@ Decisão do usuário (2026-10-11), implementada e ainda não commitada: se o Tal
 - **Resposta (`finalizar`):** HTTP **422**, `codigo` `TALENT_SEM_REGISTRO`, `dados.acao='guiche_portaria'`, `dados.tentar_novamente=false`; sem `senha`, `protocolo` nem `mensagem_api`. Detalhes em [totem-api-interna.md](totem-api-interna.md).
 - **Efeitos:** `LogSistema` `talent_indeterminado` com `categoria_erro=resposta_ilegivel`; `error_log` sanitizado `checkin_talent_sem_registro_cancelado`; fotos das notas vão à quarentena (como em `cancelar`); na Expedição a OC **não** é baixada (continua ATIVA); `gerar-etiqueta` não é alcançado (a tela do guichê não imprime).
 - **Segunda chamada de `finalizar`:** 400 `Atendimento nao esta em andamento`, sem novo POST ao Talent.
-- **Corrida do CAS:** se outro agente alterou o atendimento (por exemplo, ajuste do ajudante em andamento) e o CAS perde, o motorista recebe o mesmo 422; as fotos não são quarentenadas; o log é gravado.
+- **Corrida do CAS:** se outro processo alterou o atendimento (por exemplo, ajuste do ajudante em andamento) e o CAS perde, o motorista recebe o mesmo 422; as fotos não são quarentenadas; o log é gravado.
 - **Atenção operacional:** o Talent pode ter registrado o check-in sem devolver a senha. O `ENVIO_INDETERMINADO` de um atendimento cancelado por este ramo só se distingue de timeout seguido de `cancelar` pelo `tb_log_sistema` (`categoria_erro=resposta_ilegivel`); a portaria localiza o caso por esse log (não há campo próprio). **[C]** [T: teste_talent_sem_registro, teste_talent_client_parsing]
 
 ### Respostas ao front (`finalizar`)
@@ -113,7 +113,7 @@ Decisão do usuário (2026-10-11), implementada e ainda não commitada: se o Tal
 
 - `Util\MensagemApi::extrairDoCorpo` lê o corpo de erro do Talent (HTTP de erro com corpo), remove caracteres de controle e invisíveis (inclui U+00AD, U+061C, U+180E, U+2060-2064), normaliza espaços e limita a **300 caracteres**.
 - Vai ao front em `dados.mensagem_api` **só** no HTTP 202 e é exibida com `textContent`. **Nunca é logada nem persistida.** Rede, timeout e corpo vazio: sem `dados`. O formato do corpo de erro do Talent é **[P]**. **[C]** [T: teste_talent_mensagem_api_finalizar, teste_mensagem_api_e_flag_reimpressao]
-- Critério de exibir "Corrigir dados do ajudante": o front procura a palavra "ajudante" no texto normalizado da `mensagem_api` (critério por texto, frágil, do state). **[C]**
+- Critério de exibir "Corrigir dados do ajudante": o front procura a palavra "ajudante" no texto normalizado da `mensagem_api` (critério por texto, frágil). **[C]**
 
 ## Portão `TALENT_CHECKIN_ATIVO` (fail-closed)
 
@@ -134,4 +134,4 @@ Talent fora do ar, lento ou com erro: o motorista vê a mensagem de falha e é o
 
 - Corpo de erro do Talent, prefixo base64 dos anexos, timeout recomendado e idempotência do lado do Talent além do 409: **[P]** (pendências do próprio `docs/manual_talent.md`).
 - Semântica de `nrDocto` para `NOTA_FISCAL` (número curto x chave de 44 dígitos): o manual a deixa como pendência. **[P]**
-- "Nr. Pager": **resolvida** (state P65, 2026-10-06). O Talent desligou a exigência desse campo; o projeto não envia `pager`. **[A]**
+- "Nr. Pager": **resolvida** (P65, 2026-10-06). O Talent desligou a exigência desse campo; o projeto não envia `pager`. **[A]**

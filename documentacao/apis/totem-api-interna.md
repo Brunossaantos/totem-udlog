@@ -141,7 +141,7 @@ Check-in no Talent. Detalhes do payload e do cliente HTTP: [talent-checkin.md](t
 { "sucesso": false, "erro": "Nao foi possivel concluir seu check-in. Dirija-se ao guiche da portaria.", "codigo": "TALENT_SEM_REGISTRO", "dados": { "acao": "guiche_portaria", "tentar_novamente": false } }
 ```
 
-- `TALENT_SEM_REGISTRO`: o `TalentClient` considera `nrRegAcesso` utilizável só se for texto com `trim() !== ''` (`"0"`, `"00123"` e `"AB 12"` valem; valor aninhado não). Nesse caso `TalentRn` chama `AtendimentoDao::cancelarPorRespostaSemRegistroTalent` (CAS por `talent_tentativa_id` + `talent_checkin_status='ENVIANDO'` + `status != 'concluido'`), grava `ENVIO_INDETERMINADO` e passa `status` a `cancelado` só se estava `em_andamento` (não sobrescreve `bloqueado` nem `concluido`). O controller registra `LogSistema` `talent_indeterminado` com `categoria_erro=resposta_ilegivel` e `error_log` sanitizado `checkin_talent_sem_registro_cancelado`, e move as fotos das notas para a quarentena (como `cancelar`). Na Expedição a OC **não** é baixada (continua ATIVA). Uma segunda chamada de `finalizar` responde 400 `Atendimento nao esta em andamento`, sem novo POST ao Talent. Se o CAS perder uma corrida (por exemplo, ajuste do ajudante em andamento por outro agente), o motorista recebe o mesmo 422, mas as fotos não são quarentenadas; o log é gravado. O Talent pode ter registrado o check-in sem devolver a senha: a portaria localiza o caso pelo `tb_log_sistema`. **[C]** [T: teste_talent_sem_registro, teste_talent_client_parsing]
+- `TALENT_SEM_REGISTRO`: o `TalentClient` considera `nrRegAcesso` utilizável só se for texto com `trim() !== ''` (`"0"`, `"00123"` e `"AB 12"` valem; valor aninhado não). Nesse caso `TalentRn` chama `AtendimentoDao::cancelarPorRespostaSemRegistroTalent` (CAS por `talent_tentativa_id` + `talent_checkin_status='ENVIANDO'` + `status != 'concluido'`), grava `ENVIO_INDETERMINADO` e passa `status` a `cancelado` só se estava `em_andamento` (não sobrescreve `bloqueado` nem `concluido`). O controller registra `LogSistema` `talent_indeterminado` com `categoria_erro=resposta_ilegivel` e `error_log` sanitizado `checkin_talent_sem_registro_cancelado`, e move as fotos das notas para a quarentena (como `cancelar`). Na Expedição a OC **não** é baixada (continua ATIVA). Uma segunda chamada de `finalizar` responde 400 `Atendimento nao esta em andamento`, sem novo POST ao Talent. Se o CAS perder uma corrida (por exemplo, ajuste do ajudante em andamento por outro processo), o motorista recebe o mesmo 422, mas as fotos não são quarentenadas; o log é gravado. O Talent pode ter registrado o check-in sem devolver a senha: a portaria localiza o caso pelo `tb_log_sistema`. **[C]** [T: teste_talent_sem_registro, teste_talent_client_parsing]
 
 - Exemplo 202 (fictício):
 
@@ -149,7 +149,7 @@ Check-in no Talent. Detalhes do payload e do cliente HTTP: [talent-checkin.md](t
 { "sucesso": false, "erro": "Nao foi possivel concluir o check-in. Chame o atendimento.", "dados": { "mensagem_api": "Mensagem fictícia devolvida pelo Talent." } }
 ```
 
-- Idempotência: `JA_ENVIADO` devolve a senha gravada, sem nova chamada ao Talent. Após `ENVIADO` na Expedição, tenta baixar a OC; falha da baixa grava pendência em `tb_ordem_coleta_pendente_baixa` e log, **nunca falha o check-in**. **[C]** [T: teste_talent_idempotencia, teste_concorrencia_finalizar_checkin, teste_talent_idor_finalizar, teste_talent_mensagem_api_finalizar, teste_e2e_recebimento_expedicao_mock]. Nota do state: `teste_talent_idor_finalizar` e `teste_concorrencia_finalizar_checkin` falham quando `TALENT_CHECKIN_ATIVO` é `true` (o `.env` de dev tem `true`; com `false` passam), pois esperam 503 `TALENT_CHECKIN_DESATIVADO`. **[A]**
+- Idempotência: `JA_ENVIADO` devolve a senha gravada, sem nova chamada ao Talent. Após `ENVIADO` na Expedição, tenta baixar a OC; falha da baixa grava pendência em `tb_ordem_coleta_pendente_baixa` e log, **nunca falha o check-in**. **[C]** [T: teste_talent_idempotencia, teste_concorrencia_finalizar_checkin, teste_talent_idor_finalizar, teste_talent_mensagem_api_finalizar, teste_e2e_recebimento_expedicao_mock]. Nota: `teste_talent_idor_finalizar` e `teste_concorrencia_finalizar_checkin` falham quando `TALENT_CHECKIN_ATIVO` é `true` (o `.env` de dev tem `true`; com `false` passam), pois esperam 503 `TALENT_CHECKIN_DESATIVADO`. **[A]**
 - Fail-closed: `TALENT_CHECKIN_ATIVO` diferente do literal `true` impede qualquer chamada ao Talent. Em produção está `true` (confirmado pelo responsável do projeto em 2026-10-10).
 
 ### `cancelar`
@@ -202,7 +202,7 @@ Exemplo de `processar` (fictício, imagem truncada):
 { "id_atendimento": 1001, "imagem": "/9j/4AAQSkZJRg...", "uid": "uid-ficticio-0001", "ordem": 1 }
 ```
 
-Testes: [T: _caso_nota_processar, _caso_nota_definir_numero, _caso_nota_pdo_falha, teste_concorrencia_numero_nota_duplicado, teste_rate_limit_identificar_cliente_pdo, teste_numero_nota_validacao_tamanho]. `teste_hardening_exclusao` tem a falha E17 pré-existente (state). **[A]**
+Testes: [T: _caso_nota_processar, _caso_nota_definir_numero, _caso_nota_pdo_falha, teste_concorrencia_numero_nota_duplicado, teste_rate_limit_identificar_cliente_pdo, teste_numero_nota_validacao_tamanho]. `teste_hardening_exclusao` tem a falha E17 pré-existente. **[A]**
 
 ## 5. `cliente.php`
 
@@ -210,12 +210,12 @@ Testes: [T: _caso_nota_processar, _caso_nota_definir_numero, _caso_nota_pdo_falh
 |---|---|---|---|
 | `buscar` | `GET` no front (não validado) | query `termo` | 200 `{"clientes":[...]}` |
 
-- `termo` com menos de 3 bytes: 200 `{"clientes":[]}` sem consultar o banco. Senão `ClienteDao::buscarPorTermo` (prepared statement com `LIKE`, **sem escape** de `%` e `_`; registrado no state).
+- `termo` com menos de 3 bytes: 200 `{"clientes":[]}` sem consultar o banco. Senão `ClienteDao::buscarPorTermo` (prepared statement com `LIKE`, **sem escape** de `%` e `_`).
 - Outra ação: 404 `Acao invalida`.
 - A consulta é `SELECT * FROM tb_cliente WHERE ativo = 1 AND (nome LIKE :termo OR cnpj LIKE :termo) ORDER BY nome LIMIT 8`: devolve **todas as colunas** de `tb_cliente` (ver [banco-dados.md](../banco-dados.md)), no máximo 8 clientes ativos. **[C]**
 - Exemplo: `GET /api/cliente.php?acao=buscar&termo=exe` retorna `{"sucesso":true,"dados":{"clientes":[{"id_cliente":1,"nome":"CLIENTE EXEMPLO LTDA","cnpj":"00000000000191", "...":"demais colunas"}]}}` (ilustrativo).
-- Testes `teste_hardening_cliente` e `teste_identificar_cliente` usam o banco de dev e não foram rodados na F6 (state). **[A]**
-- O `catch` do front em `buscarClientes` engole erros 401/rede (observação do state).
+- Testes `teste_hardening_cliente` e `teste_identificar_cliente` usam o banco de dev e não foram rodados na F6. **[A]**
+- O `catch` do front em `buscarClientes` engole erros 401/rede.
 
 ## 6. Resumo de idempotência, CAS, locks e fail-closed
 

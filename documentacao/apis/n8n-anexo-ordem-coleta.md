@@ -81,7 +81,7 @@ Erros 4xx e 5xx são registrados no log central (`n8n_anexo_recusado` e `n8n_ane
 ## Rate limit de falhas de autenticação
 
 - 10 falhas por IP em janela de 900 s -> 429 + `Retry-After: 900`. **[C]**
-- O IP é `REMOTE_ADDR`. Atrás de proxy ele pode ser o do proxy: em produção **[P]** (observação P57 do state). O `X-Forwarded-Proto` é aceito para decidir HTTPS.
+- O IP é `REMOTE_ADDR`. Atrás de proxy ele pode ser o do proxy: em produção **[P]** (observação P57). O `X-Forwarded-Proto` é aceito para decidir HTTPS.
 - Contador em arquivo `STORAGE_PATH/ordens_coleta_ratelimit/<sha256(ip)[0:40]>.json` (permissão 0640, `flock`); limpeza aleatória de arquivos vencidos (1 a cada ~50 falhas, até 500 itens). Falha ao gravar o contador só gera `error_log` (**não** bloqueia a requisição). **Sem `STORAGE_PATH` não há rate limit.** **[C]**
 - Só falhas contam; requisições autenticadas não consomem o limite.
 
@@ -105,4 +105,4 @@ Chave ausente ou HTTP sem permissão = recusa; banco externo ou disco com falha 
 
 ## Testes
 
-[T: teste_oc_anexo_http (59), teste_oc_anexo_lacunas (59), teste_oc_anexo_logica (183), _caso_oc_anexo_receber], números do state, não reexecutados aqui. **[A]**
+[T: teste_oc_anexo_http (59), teste_oc_anexo_lacunas (59), teste_oc_anexo_logica (183), _caso_oc_anexo_receber], números históricos, não reexecutados aqui. **[A]**

@@ -71,7 +71,7 @@ Sob `GET_LOCK` de totens (10 s) e transação: confere que o ator ainda é admin
 
 ## Integrações
 
-Nenhuma externa. O quiosque no mini PC precisa ter a URL nova no `iniciar-totem.bat` e ser reiniciado após regerar; foi feito assim para o RECEPCAO-01 em 2026-10-08. `[AMBIENTE-TERCEIRO: relato do state]`
+Nenhuma externa. O quiosque no mini PC precisa ter a URL nova no `iniciar-totem.bat` e ser reiniciado após regerar; foi feito assim para o RECEPCAO-01 em 2026-10-08. `[AMBIENTE-TERCEIRO: relato do responsável]`
 
 ## Conclusão
 
@@ -94,9 +94,9 @@ Criação: totem ativo e URL exibida para copiar. Regerar: URL nova exibida e a 
 Registradas sem correção:
 
 - O token do totem não é rotacionado em nenhuma operação do sistema; quem já abriu a URL antiga mantém acesso à API até a desativação (risco aceito). `[CÓDIGO]`
-- O rate limit de falhas é por IP: quiosques atrás do mesmo IP público podem receber 429 se um deles ficar recarregando uma URL antiga (risco registrado no state). `[PENDENTE DE CONFIRMAÇÃO]` (comportamento em produção atrás do Cloudflare)
-- O state de 2026-10-06 diz que a URL do RECEPCAO-01 ficaria fixa; a entrada de 2026-10-08 registra que foi regerada e o `.bat` atualizado. Vale a mais recente.
-- `no-store` na página do totem: a confirmar no quiosque (state). `[PENDENTE DE CONFIRMAÇÃO]`
-- Texto da linha de ajuda da URL (`#totem-url-ajuda`) escrito pelo frontend sem confirmação do usuário (state). `maxlength` 24 pode cortar entrada longa em silêncio (state).
+- O rate limit de falhas é por IP: quiosques atrás do mesmo IP público podem receber 429 se um deles ficar recarregando uma URL antiga (risco registrado). `[PENDENTE DE CONFIRMAÇÃO]` (comportamento em produção atrás do Cloudflare)
+- O registro de 2026-10-06 diz que a URL do RECEPCAO-01 ficaria fixa; a entrada de 2026-10-08 registra que foi regerada e o `.bat` atualizado. Vale a mais recente.
+- `no-store` na página do totem: a confirmar no quiosque. `[PENDENTE DE CONFIRMAÇÃO]`
+- Texto da linha de ajuda da URL (`#totem-url-ajuda`) escrito pelo frontend sem confirmação do usuário. `maxlength` 24 pode cortar entrada longa em silêncio.
 - Regerar mantém o prefixo `NOME-EMPRESA` mesmo se a empresa for renomeada. `[CÓDIGO]`
 - Testes: `[TESTE: teste_gestao_totens]`, `[TESTE: teste_gestao_qa_totens]`, `[TESTE: teste_gestao_totem_f0]` (este com falhas conhecidas por dívida de teste: guarda do prepend e fim de linha CRLF; não reexecutado).

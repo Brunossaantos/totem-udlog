@@ -72,7 +72,7 @@ Dois perfis (`UsuarioGestaoRn::PERFIS`). Cada página declara o perfil mínimo e
 ### Senha
 
 - Política: no mínimo 12 caracteres, no máximo 72 bytes, pelo menos 5 caracteres distintos, não pode ser só espaços, igual ao login, igual à senha atual nem constar numa lista de senhas comuns. `[CÓDIGO: SenhaPolitica::validar]`
-- Hash Argon2id (m=19456, t=2, p=1) com reserva em bcrypt custo 12 quando o PHP não tem Argon2id; rehash automático no login se os parâmetros mudarem. `[CÓDIGO: SenhaPolitica]` Argon2id disponível em produção: relato do state em 2026-10-08. `[AMBIENTE-TERCEIRO]`
+- Hash Argon2id (m=19456, t=2, p=1) com reserva em bcrypt custo 12 quando o PHP não tem Argon2id; rehash automático no login se os parâmetros mudarem. `[CÓDIGO: SenhaPolitica]` Argon2id disponível em produção: relato do responsável em 2026-10-08. `[AMBIENTE-TERCEIRO]`
 - Login e conta inexistente/inativa/bloqueada executam uma verificação de hash "dummy" para igualar o tempo de resposta. `[CÓDIGO: SenhaPolitica::verificarDummy]`
 
 ### Bloqueio de login
@@ -80,7 +80,7 @@ Dois perfis (`UsuarioGestaoRn::PERFIS`). Cada página declara o perfil mínimo e
 - **Por conta:** 5 senhas erradas seguidas bloqueiam a conta por 15 minutos (`LIMITE_FALHAS_CONTA=5`, `BLOQUEIO_CONTA_MIN=15`); o contador zera ao bloquear e no login correto. Conta bloqueada não é verificada: responde a mesma mensagem genérica. `[CÓDIGO: UsuarioGestaoDao::registrarFalhaSenha]`
 - **Por IP:** 10 falhas por janela de 900 s (`LIMITE_FALHAS_IP`, `JANELA_IP_SEGUNDOS`), contadas em `tb_gestao_login_tentativa` por hash do "balde" do IP com o sal; ao atingir o limite o login responde 429. O IP vem de `IpCliente::obter` (usa `CF-Connecting-IP` somente se `REMOTE_ADDR` estiver em faixa Cloudflare oficial). `[CÓDIGO: AuthGestao::loginInterno, util/IpCliente.php]`
 - Toda falha grava `LOGIN_FALHA` (resultado `SEM_EFEITO`, motivo `credenciais`, `conta_inativa`, `conta_bloqueada` ou `ip_limitado`). `[CÓDIGO]`
-- Quem desbloqueia: o admin (ação Desbloquear). `criar-admin.php --forcar` não desbloqueia nem recria a conta: apenas cria outro admin com login novo (login existente é recusado). O bloqueio é, por desenho, um DoS recuperável (registrado no state). `[CÓDIGO]` `[AMBIENTE-TERCEIRO: decisão relatada no state]`
+- Quem desbloqueia: o admin (ação Desbloquear). `criar-admin.php --forcar` não desbloqueia nem recria a conta: apenas cria outro admin com login novo (login existente é recusado). O bloqueio é, por desenho, um DoS recuperável (registrado). `[CÓDIGO]` `[AMBIENTE-TERCEIRO: decisão relatada pelo responsável]`
 
 ### Operações de usuário (só `admin`)
 
@@ -137,14 +137,14 @@ Ações deste fluxo: `LOGIN_OK`, `LOGIN_FALHA`, `LOGOUT`, `SENHA_TROCADA`, `SENH
 
 Registradas sem correção:
 
-- **IP do ator gravado**: `tb_gestao_auditoria.ip` guarda o IP do ator em binário (`VARBINARY(16)`), não hash; o que é livre de dado pessoal é o `detalhe`. O state descreve a auditoria como "sem PII". `[CÓDIGO: AuditoriaDao::inserir]`
+- **IP do ator gravado**: `tb_gestao_auditoria.ip` guarda o IP do ator em binário (`VARBINARY(16)`), não hash; o que é livre de dado pessoal é o `detalhe`. Documentos anteriores descrevem a auditoria como "sem PII". `[CÓDIGO: AuditoriaDao::inserir]`
 - **Senha temporária sem expiração**: vale até ser trocada; a única proteção é `deve_trocar_senha`. `[CÓDIGO]`
 - **Token do formulário de login sem estado**: HMAC de timestamp com o sal, reutilizável por até 7200 s; mitigado por CSRF/`Origin` e pelo limite por IP. `[CÓDIGO: AuthGestao::tokenLoginValido]`
-- **Limites de login não atômicos entre processos (B2)**: a contagem do IP (`contar`) e o incremento (`incrementar`) são operações separadas; processos simultâneos podem ultrapassar o limite. O bloqueio por conta usa um único `UPDATE`. `[CÓDIGO]` (registro B2 do state)
-- Mensagens de login `sessao_expirada` e `saiu` existem mas o aviso ao redirecionar para o login ainda não é exibido (state). `[CÓDIGO: MENSAGENS_LOGIN]`
-- `AuthServidor::requisicaoHttps` confia em `X-Forwarded-Proto` (P57 do state). `[PENDENTE DE CONFIRMAÇÃO]`
+- **Limites de login não atômicos entre processos (B2)**: a contagem do IP (`contar`) e o incremento (`incrementar`) são operações separadas; processos simultâneos podem ultrapassar o limite. O bloqueio por conta usa um único `UPDATE`. `[CÓDIGO]` (registro B2)
+- Mensagens de login `sessao_expirada` e `saiu` existem mas o aviso ao redirecionar para o login ainda não é exibido. `[CÓDIGO: MENSAGENS_LOGIN]`
+- `AuthServidor::requisicaoHttps` confia em `X-Forwarded-Proto` (P57). `[PENDENTE DE CONFIRMAÇÃO]`
 - Cookie `Secure`, Argon2id e `REMOTE_ADDR` por trás do Cloudflare só se verificam em produção. `[AMBIENTE-TERCEIRO]`
-- 2FA, recuperação de senha por e-mail e bloqueio por IP além do login: não planejados (state).
-- `criar-admin.php` imprime erros acentuados que o terminal Windows pode exibir mal (state).
+- 2FA, recuperação de senha por e-mail e bloqueio por IP além do login: não planejados.
+- `criar-admin.php` imprime erros acentuados que o terminal Windows pode exibir mal.
 - Itens descartados pelo usuário em 2026-10-09 e que não existem: F5 (atendimentos do dia, travados, anexos órfãos), painel, status das integrações, saúde dos crons, fotos de notas do Recebimento.
 - Testes que cobrem este fluxo: `[TESTE: teste_gestao_unidade]`, `[TESTE: teste_gestao_http]`, `[TESTE: teste_gestao_correcoes]`, `[TESTE: teste_gestao_qa_independente]`, `[TESTE: teste_gestao_cli_admin]`; `teste_gestao_totem_f0` tem falhas conhecidas por dívida de teste (não é deste fluxo). Não reexecutados.

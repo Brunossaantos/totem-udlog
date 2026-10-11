@@ -43,7 +43,7 @@ Toda mutação: valida a entrada, toma um `GET_LOCK` nomeado (10 s), abre transa
 ### Clientes (`ClienteGestaoRn`)
 
 - **Nome**: `NomeCadastro::normalizar` (UTF-8, 2 a 150 caracteres, sem caracteres de controle, invisíveis nem marcas de direção). Rejeita nome que, normalizado, fique vazio (por exemplo só símbolos ou só "LTDA/ME/SA") ou com mais de 150 caracteres. `[CÓDIGO]`
-- **Normalização da razão social**: ao criar e ao mudar o nome, `razao_social_normalizada` é recalculada com `RazaoSocialMatcher::normalizar`: maiúsculas, remoção de acentos (determinística, sem depender de locale ou `iconv`), qualquer caractere fora de `A-Z0-9` e espaço vira espaço, remoção de sufixos societários, espaços colapsados. Exemplo do state: "Café Ação Ltda" e "CAFÉ AÇÃO" viram `CAFE ACAO`. Recusa nome cuja razão normalizada seja igual à de **outro** cliente (a comparação considera todos os clientes, ativos e inativos). `[CÓDIGO: RazaoSocialMatcher::normalizar, ClienteGestaoDao::existeRazaoNormalizada]`
+- **Normalização da razão social**: ao criar e ao mudar o nome, `razao_social_normalizada` é recalculada com `RazaoSocialMatcher::normalizar`: maiúsculas, remoção de acentos (determinística, sem depender de locale ou `iconv`), qualquer caractere fora de `A-Z0-9` e espaço vira espaço, remoção de sufixos societários, espaços colapsados. Exemplo: "Café Ação Ltda" e "CAFÉ AÇÃO" viram `CAFE ACAO`. Recusa nome cuja razão normalizada seja igual à de **outro** cliente (a comparação considera todos os clientes, ativos e inativos). `[CÓDIGO: RazaoSocialMatcher::normalizar, ClienteGestaoDao::existeRazaoNormalizada]`
 - **CNPJ**: 14 dígitos com dígito verificador válido; único entre clientes; **imutável** depois de criado (a edição só recebe o nome). O CNPJ da **UDLOG** (as duas filiais constantes em `CnpjValidador`) é **bloqueado** como cliente: "Este CNPJ é da UDLOG e não pode ser cadastrado como cliente". `[CÓDIGO: CnpjValidador::ehUdlog]`
 - **Ativar/inativar e excluir são ações separadas.** Excluir é **físico**. Inativar com atendimento `em_andamento` daquele CNPJ exige confirmação (`andamento_confirmado`); excluir **sempre** exige confirmação (com aviso extra se há atendimento em andamento). `[CÓDIGO: definirAtivoSobLock, excluirSobLock]`
 - **Simulação de ambiguidade do OCR**: criar ativo, renomear cliente ativo (se a razão normalizada mudou) ou ativar cliente inativo roda `ambiguidadeOcr`. Ela reaplica `RazaoSocialMatcher::melhorCandidato` à lista de clientes ativos antes e depois da mudança e conta os clientes que **deixariam de ser identificados sem ambiguidade** (ou o próprio cliente que nasce ambíguo). Se a contagem for maior que zero, a operação exige confirmação em dois passos: para criar/editar o formulário reabre com o aviso (até 5 nomes afetados) e um botão de confirmar; para ativar a lista reabre em `?confirmar=ativar`. Confirmada, a auditoria leva `motivo_cad=confirmado_ambiguidade_ocr`. A simulação é **pulada** quando há mais de 500 clientes ativos (`SIMULACAO_MAX_CLIENTES`), e uma falha na simulação é ignorada (log fixo) e tratada como "sem ambiguidade". `[CÓDIGO: ClienteGestaoRn::ambiguidadeOcr]` `[TESTE: teste_gestao_cadastros]`
@@ -63,13 +63,13 @@ Toda mutação: valida a entrada, toma um `GET_LOCK` nomeado (10 s), abre transa
 
 ## Mudanças de estado
 
-- `tb_cliente`: INSERT; `nome` e `razao_social_normalizada`; `ativo`; DELETE físico. (`tb_cliente` não tem coluna de data de atualização, segundo o state.) `[CÓDIGO: ClienteGestaoDao]`
+- `tb_cliente`: INSERT; `nome` e `razao_social_normalizada`; `ativo`; DELETE físico. (`tb_cliente` não tem coluna de data de atualização.) `[CÓDIGO: ClienteGestaoDao]`
 - `tb_empresa`: INSERT; `nome`; `ativo`; DELETE.
 - `tb_gestao_auditoria`: uma linha por operação. `[CÓDIGO]`
 
 ## Integrações
 
-Nenhuma externa. O cadastro alimenta o OCR/autocomplete do Recebimento ([fluxo 03](03-recebimento.md)) e a identificação de empresa/armazém do envio ao Talent. O recálculo em lote da razão normalizada dos clientes antigos foi **descartado** pelo usuário. `[CÓDIGO]` `[AMBIENTE-TERCEIRO: decisão relatada no state]`
+Nenhuma externa. O cadastro alimenta o OCR/autocomplete do Recebimento ([fluxo 03](03-recebimento.md)) e a identificação de empresa/armazém do envio ao Talent. O recálculo em lote da razão normalizada dos clientes antigos foi **descartado** pelo usuário. `[CÓDIGO]` `[AMBIENTE-TERCEIRO: decisão relatada pelo responsável]`
 
 ## Conclusão
 
@@ -91,11 +91,11 @@ Operação concluída com COMMIT e auditoria `OK`; a tela volta à lista com a m
 
 Registradas sem correção:
 
-- **P40**: os 8 clientes do seed com razão acentuada (mojibake de origem não explicada) não foram recalculados; o recálculo da razão normalizada em produção (ids 11, 33 e 35 divergentes no último dry-run) foi descartado pelo usuário. Clientes novos já gravam a razão com a normalização atual. `[AMBIENTE-TERCEIRO: relato do state]`
-- Locale/`iconv` do PHP de produção: a normalização atual não depende deles; o state confirma `mbstring`/`iconv`/`intl` presentes e PHP 8.3 em produção. Determinismo em versões 8.1 a 8.3 não foi provado (só 8.0.30 no dev, segundo o state); letras fora do mapa fixo (ex.: vietnamita pré-composto) viram espaço. `[PENDENTE DE CONFIRMAÇÃO]`
-- Ações POST voltam à lista sem filtros e página; "Voltar e editar o nome" abre o formulário em branco (state).
-- `NomeCadastro` aceita alguns invisíveis raros (U+17B4/5, U+180B-D, U+FE00/E, U+E0100), inofensivos (state).
-- Custo da simulação de ambiguidade: cerca de 0,46 s com 200 clientes ativos e 2,9 s com 500 (medido pelo state); acima de 500 a simulação é pulada.
-- `ClienteDao::buscarPorTermo` usa `LIKE` sem escape de curingas (anterior à F6; state).
+- **P40**: os 8 clientes do seed com razão acentuada (mojibake de origem não explicada) não foram recalculados; o recálculo da razão normalizada em produção (ids 11, 33 e 35 divergentes no último dry-run) foi descartado pelo usuário. Clientes novos já gravam a razão com a normalização atual. `[AMBIENTE-TERCEIRO: relato do responsável]`
+- Locale/`iconv` do PHP de produção: a normalização atual não depende deles; foram confirmados `mbstring`/`iconv`/`intl` e PHP 8.3 em produção. Determinismo em versões 8.1 a 8.3 não foi provado (só 8.0.30 no dev); letras fora do mapa fixo (ex.: vietnamita pré-composto) viram espaço. `[PENDENTE DE CONFIRMAÇÃO]`
+- Ações POST voltam à lista sem filtros e página; "Voltar e editar o nome" abre o formulário em branco.
+- `NomeCadastro` aceita alguns invisíveis raros (U+17B4/5, U+180B-D, U+FE00/E, U+E0100), inofensivos.
+- Custo da simulação de ambiguidade: cerca de 0,46 s com 200 clientes ativos e 2,9 s com 500 (medido); acima de 500 a simulação é pulada.
+- `ClienteDao::buscarPorTermo` usa `LIKE` sem escape de curingas (anterior à F6).
 - Não há F5 (atendimentos do dia, travados, anexos órfãos), painel, status das integrações, saúde dos crons nem fotos de notas: descartados pelo usuário. A tela de clientes não toca o banco externo (`tb_clientes` do banco de coletas).
 - Testes: `[TESTE: teste_gestao_cadastros]`, `[TESTE: teste_gestao_qa_cadastros]`; não reexecutados.

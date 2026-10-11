@@ -2,15 +2,13 @@
 
 Registro das mudanças do totem-udlog, no espírito do [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), adaptado a este projeto.
 
-**Adaptação:** o projeto não tem tags nem versões numeradas (`git tag` vazio; 90 commits em `main`, de 2026-09-04 a 2026-10-09). Por isso as entradas são organizadas por **marcos**, com a data e o hash reais dos commits, e não por versão. Os marcos foram agrupados a partir do histórico do Git e do `ia_development_state.md`; os nomes dos marcos (M1 a M11) são apenas rótulos de leitura.
+**Adaptação:** o projeto não tem tags nem versões numeradas (`git tag` vazio; 90 commits em `main`, de 2026-09-04 a 2026-10-09). Por isso as entradas são organizadas por **marcos**, com a data e o hash reais dos commits, e não por versão. Os marcos foram agrupados a partir do histórico do Git ; os nomes dos marcos (M1 a M11) são apenas rótulos de leitura.
 
 Categorias usadas: Adicionado, Alterado, Corrigido, Removido, Documentação.
 
-Os handoffs das demandas ficam em `docs/handoffs/`, pasta ignorada pelo Git; só o handoff `docs/handoffs/2026-09-30-hardening-revisao-notas-e-cliente.md` está versionado e é linkado no marco M6.
-
 ## [Não publicado]
 
-Rodada de documentação completa do projeto e a mudança de comportamento do check-in no Talent descrita abaixo (decisão do usuário em 2026-10-11; implementada, revisada e ainda não commitada):
+Documentação completa do projeto e a mudança de comportamento do check-in no Talent descrita abaixo (decisão do usuário em 2026-10-11; implementada, revisada e ainda não commitada):
 
 ### Adicionado
 - Tela `guiche_portaria` em `public/totem/assets/impressao.js` (Expedição e Recebimento): "Não foi possível concluir seu check-in. / Dirija-se ao guichê da portaria.", um único botão "Voltar ao início", sem retry, ajudante nem impressão; a inatividade de 180 s volta ao início sem aviso.
@@ -22,10 +20,9 @@ Rodada de documentação completa do projeto e a mudança de comportamento do ch
 - **Talent 2xx sem `nrRegAcesso` cancela o atendimento e orienta o guichê.** Antes, a resposta 2xx sem número utilizável gravava `ENVIADO`/`concluido` com senha nula. Agora `TalentClient` lança `resposta_ilegivel`, `TalentRn` cancela o atendimento (`ENVIO_INDETERMINADO` + `cancelado`, sem sobrescrever `bloqueado`/`concluido`) e `finalizar` responde 422 `TALENT_SEM_REGISTRO` (`dados.acao=guiche_portaria`, sem senha). As fotos das notas vão à quarentena e, na Expedição, a OC não é baixada. Arquivos de código: `app/Rn/TalentClient.php`, `app/Rn/TalentRn.php`, `app/Dao/AtendimentoDao.php`, `app/Controller/AtendimentoController.php`, `public/totem/assets/app.js`, `public/totem/assets/impressao.js`.
 - **`CONCLUIR_EXIGE_NUMERO_NOTA`:** decisão do usuário em 2026-10-11 de ativar em produção (valor no servidor a confirmar); padrão do código e do `.env.example` segue `false`. Documentada a diferença entre ligada (422 `NOTAS_SEM_NUMERO` na digitalização) e desligada (só o `finalizar` recusa número vazio).
 - `servico-impressao-local/README.md` atualizado.
-- `ia_development_state.md` atualizado (entrada de 2026-10-11, pendências P69 e nova pendência de baixa severidade: a portaria só identifica o caso pelo `tb_log_sistema`).
 - `.env.example` revisado contra todas as leituras de variáveis em `app/`, `util/`, `public/`, `cron/`, `tools/` e `servico-impressao-local/`: organizado em OBRIGATÓRIAS e OPCIONAIS, com comentários curtos e valores fictícios (hosts `exemplo.invalid`, `TALENT_CHECKIN_ATIVO=false`, chaves vazias, `GESTAO_HASH_SALT` vazio).
 - `README.md` reescrito.
-- Rodada corretiva (2026-10-10) da documentação: registrados como confirmados pelo responsável do projeto os 5 crons em execução, PHP web 8.3, `TALENT_CHECKIN_ATIVO=true` em produção, instalação de dependências por `composer install --no-dev --optimize-autoloader` e `display_errors=Off`; removida a pendência de contrato da vio.api.br (só o comportamento comprovado por código e testes é documentado); validação de método HTTP nas APIs do totem e política de retenção de atendimentos, fotos e aceites LGPD passam a decisão de produto "não será tratado"; contagem de telas do front corrigida para 26; dump do banco externo atualizado (somente estrutura, 2026-10-10).
+- Correção da documentação (2026-10-10): registrados como confirmados pelo responsável do projeto os 5 crons em execução, PHP web 8.3, `TALENT_CHECKIN_ATIVO=true` em produção, instalação de dependências por `composer install --no-dev --optimize-autoloader` e `display_errors=Off`; removida a pendência de contrato da vio.api.br (só o comportamento comprovado por código e testes é documentado); validação de método HTTP nas APIs do totem e política de retenção de atendimentos, fotos e aceites LGPD passam a decisão de produto "não será tratado"; contagem de telas do front corrigida para 26; dump do banco externo atualizado (somente estrutura, 2026-10-10).
 
 ### Removido
 - Do `.env.example`, variáveis sem consumidor no código: `DOCUMENTO_QR_HMAC_KEY`, `VIO_API_BR_CACHE_TTL_DIAS`, `VIO_API_BR_CACHE_HMAC_KEY_V1`, `VIO_API_BR_CACHE_HMAC_VERSION`, `IMPRESSORAS_PERMITIDAS` e `IMPRESSAO_TIMEOUT_MS` (as duas últimas pertencem ao `config.json` do serviço de impressão).
@@ -64,7 +61,7 @@ Fim da Gestão Totem; repositório higienizado.
 
 ### Documentação
 - `f60ebc2` (2026-10-09) — estado: deploy da F4 e verificação do usuário.
-- `3be1665` (2026-10-09) — estado: demanda da gestão fechada.
+- `3be1665` (2026-10-09) — fechamento da etapa da gestão.
 
 ## M9. Gestão Totem: fundação e totens (2026-10-06 a 2026-10-08)
 
@@ -111,10 +108,10 @@ Fim da Gestão Totem; repositório higienizado.
 - `97ae7c9` (2026-09-30) — assets versionados no `index` para evitar cache antigo do navegador.
 
 ### Removido
-- `2ec9093` (2026-09-30) — integração com o Trello; arquivos de IA e `docs/` deixam de ser versionados.
+- `2ec9093` (2026-09-30) — integração com o Trello; arquivos de apoio local e `docs/` deixam de ser versionados.
 
 ### Documentação
-- `fb13a2f` (2026-10-01) — fecha o hardening da revisão e a identificação do cliente. Handoff: [`docs/handoffs/2026-09-30-hardening-revisao-notas-e-cliente.md`](docs/handoffs/2026-09-30-hardening-revisao-notas-e-cliente.md).
+- `fb13a2f` (2026-10-01) — fecha o hardening da revisão e a identificação do cliente.
 
 ## M5. vio.api.br e CNH digital (2026-09-26 a 2026-09-28)
 
@@ -131,7 +128,7 @@ Fim da Gestão Totem; repositório higienizado.
 - `bd26c91` (2026-09-28) — tamanho dos botões.
 
 ### Documentação
-- `5f96bfa`, `5a61c34`, `9306b1c` — fechamento das demandas deste marco.
+- `5f96bfa`, `5a61c34`, `9306b1c` — ajustes finais deste marco.
 
 ## M4. LGPD (2026-09-25)
 
@@ -156,7 +153,7 @@ Fim da Gestão Totem; repositório higienizado.
 - `997139c`, `761c0ff`, `4c8665f` (2026-09-20) — VIO: validação e sanitização sem credenciais, faixa de exercício do CRLV (QR e fluxo manual).
 
 ### Documentação
-- `735390a`, `7b54de8`, `e56cd05`, `a19f4e1`, `0dcf06c`, `ac7fc1b` — fechamento das demandas deste marco.
+- `735390a`, `7b54de8`, `e56cd05`, `a19f4e1`, `0dcf06c`, `ac7fc1b` — ajustes finais deste marco.
 
 ## M2. Impressão (serviço local) e Talent (2026-09-14 a 2026-09-16)
 
@@ -172,7 +169,7 @@ Fim da Gestão Totem; repositório higienizado.
 - `5332a86` (2026-09-15) — validação do conflito HTTP 409 do Talent e encerramento da limpeza.
 
 ### Documentação
-- `a26dba8` (2026-09-14, integração de workflow com o Trello, removida em `2ec9093`), `0859a49`, `9285147`, `d5aa514`, `a5bb08a`, `fc970a5`, `f7bbbdd`, `93dc551`, `a8a0454`, `6510634`, `effab4b`, `8ddf399`, `e4d53ea`, `1f4d3d5` — fechamento de handoffs e saneamento da lista de pendências.
+- `a26dba8` (2026-09-14, integração de workflow com o Trello, removida em `2ec9093`), `0859a49`, `9285147`, `d5aa514`, `a5bb08a`, `fc970a5`, `f7bbbdd`, `93dc551`, `a8a0454`, `6510634`, `effab4b`, `8ddf399`, `e4d53ea`, `1f4d3d5` — atualização de documentos internos e saneamento da lista de pendências.
 
 ## M1. Fundação: scanner, clientes, VIO/Talent e ordem de coleta (2026-09-04 a 2026-09-11)
 
@@ -183,8 +180,8 @@ Fim da Gestão Totem; repositório higienizado.
 - `bdc8d91` (2026-09-11) — consulta real de ordem de coleta por placa (Expedição).
 
 ### Documentação
-- `ae7f162` (2026-09-04), `a6d668a` (2026-09-11) — fechamento de handoffs.
+- `ae7f162` (2026-09-04), `a6d668a` (2026-09-11) — atualização de documentos internos.
 
 ## Deploys registrados
 
-Não são versões. Servidor de produção, segundo `ia_development_state.md`: `6a3f353` em 2026-10-05; `fab53ab` em 2026-10-08 (Gestão F0 a F2); até `9d44513` em 2026-10-09 (estado) e `4188fee` (checklist de deploy). O ponto final de deploy não está reconciliado entre as duas fontes.
+Não são versões. Servidor de produção: `6a3f353` em 2026-10-05; `fab53ab` em 2026-10-08 (Gestão F0 a F2); até `9d44513` em 2026-10-09 (estado) e `4188fee` (checklist de deploy). O ponto final de deploy não está reconciliado.

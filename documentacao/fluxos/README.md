@@ -1,6 +1,6 @@
 # Fluxos do totem-udlog
 
-Documentação dos fluxos reais do sistema, conferida contra o código (HEAD `4188fee`). O código vence qualquer outro documento. Nenhum teste foi reexecutado para escrever esta documentação: marcas `[TESTE: nome]` indicam que existe teste cujo escopo cobre a regra, e que o resultado "passa" só é conhecido pelo `ia_development_state.md`.
+Documentação dos fluxos reais do sistema, conferida contra o código (HEAD `4188fee`). O código vence qualquer outro documento. Nenhum teste foi reexecutado para escrever esta documentação: marcas `[TESTE: nome]` indicam que existe teste cujo escopo cobre a regra, e que o resultado "passa" só é conhecido por registro histórico.
 
 ## Legenda de confiança
 
@@ -93,13 +93,13 @@ Etapas do backend (`etapa_atual`) e status `[CÓDIGO]`: `placa`, `dados_encontra
 
 ## Divergências e pendências transversais (registradas, sem correção)
 
-- **26 telas**: o front tem 26 casos em `renderTela` e nenhuma tela `rec_cnh` (`rec_cnh` existe só como etapa de backend). A referência do state a "27 estados" foi corrigida para 26.
-- **Rotação de 270 graus**: o state diz que a rotação é só na cópia do OCR; no código atual a rotação é aplicada no canvas de captura e o mesmo JPEG serve à prévia, ao upload e ao OCR (fluxo 04).
-- **Papel emitente/destinatário** do CNPJ: decisão registrada no state, NÃO implementada (fluxo 04).
+- **26 telas**: o front tem 26 casos em `renderTela` e nenhuma tela `rec_cnh` (`rec_cnh` existe só como etapa de backend). A referência anterior a "27 estados" foi corrigida para 26.
+- **Rotação de 270 graus**: um registro anterior dizia que a rotação é só na cópia do OCR; no código atual a rotação é aplicada no canvas de captura e o mesmo JPEG serve à prévia, ao upload e ao OCR (fluxo 04).
+- **Papel emitente/destinatário** do CNPJ: decisão registrada, NÃO implementada (fluxo 04).
 - **`finalizar` não exige cliente no Recebimento**: só a tela de confirmação exige (fluxos 03 e 07).
 - **Talent `ENVIO_INDETERMINADO`** (timeout/falha de rede) sem saída e `cancelar` durante o envio sem proteção (fluxos 07 e 09). O caso "Talent 2xx sem `nrRegAcesso`" foi **resolvido** em 2026-10-11 (atendimento cancelado e tela do guichê da portaria; fluxos 07, 08 e 09).
 - **Retenção** (decisão de produto em 2026-10-10: não será tratado): comportamento atual, nenhuma rotina remove `tb_lgpd_aceite` nem as fotos de notas de atendimentos concluídos (fluxos 01, 04 e 09).
 - **`CONCLUIR_EXIGE_NUMERO_NOTA`** tem padrão `false` em `.env.example`; decisão do usuário em 2026-10-11 de ativar em produção, valor no servidor a confirmar (fluxo 04).
 - **Edições em `exp_dados`** não são persistidas (fluxo 02).
 - **Sem limite de re-escaneio no backend** (P52; fluxo 05).
-- O state, linha 3, ainda descreve migrations e "retenção hoje SEM poda" como pendentes; migrations foram removidas e `cron/limpar-logs-gestao.php` existe. Fora do escopo dos fluxos do motorista.
+- Registros anteriores ainda descrevem migrations e "retenção hoje SEM poda" como pendentes; migrations foram removidas e `cron/limpar-logs-gestao.php` existe. Fora do escopo dos fluxos do motorista.

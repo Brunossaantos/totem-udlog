@@ -1,6 +1,6 @@
 # Plano de testes do totem-udlog
 
-Base: HEAD `4188fee`, 2026-10-09; cenários da demanda "Talent 2xx sem `nrRegAcesso`" acrescentados em 2026-10-11 (alterações ainda não commitadas). Este documento descreve **como testar**. Ele **não registra nenhum resultado desta rodada**: nenhum teste foi executado ao escrevê-lo. Contagens de verificações citadas ficam só na seção 5 ("Resultados históricos"), sempre com data/entrada de origem, e **nunca valem como aprovação atual**.
+Base: HEAD `4188fee`, 2026-10-09; cenários do ajuste "Talent 2xx sem `nrRegAcesso`" acrescentados em 2026-10-11 (alterações ainda não commitadas). Este documento descreve **como testar**. Ele **não registra nenhum resultado desta rodada**: nenhum teste foi executado ao escrevê-lo. Contagens de verificações citadas ficam só na seção 5 ("Resultados históricos"), sempre com data/entrada de origem, e **nunca valem como aprovação atual**.
 
 Documentos relacionados: [fluxos](fluxos/README.md), [APIs](apis/README.md), [banco de dados](banco-dados.md), [regras de negócio](regras-negocio.md), [implantação](implantacao.md).
 
@@ -9,7 +9,7 @@ Documentos relacionados: [fluxos](fluxos/README.md), [APIs](apis/README.md), [ba
 | Marca | Significado |
 |---|---|
 | **[CÓDIGO]** | Confirmado lendo arquivos de teste/infra do repositório. |
-| **[ESTADO]** | Vem do `ia_development_state.md` (relato histórico), não verificado nesta rodada. |
+| **[HISTÓRICO]** | Vem de registro histórico, não verificado nesta rodada. |
 | **[PENDENTE DE CONFIRMAÇÃO]** | Sem evidência suficiente; nada foi presumido. |
 
 Tipos de cenário: **AUTO** (script CLI), **AUTO-FRONT** (Node + Chrome headless), **MANUAL**, **FÍSICO** (equipamento real).
@@ -24,7 +24,7 @@ Quando documentos divergem, o código vence.
 
 1. **Nunca usar o banco de desenvolvimento `udlog_totem`** nem o **banco externo real de gestão de coletas**. Testes automatizados devem rodar só em banco descartável `qa_*`.
 2. **Nunca chamar Talent, vio.api.br, n8n ou impressora real** em teste automatizado. Eles são substituídos por mocks/falsos locais (mock `php -S` em 127.0.0.1, transporte em memória, `execFile` mockado). **[CÓDIGO]**
-3. Teste real contra terceiro (VIO, Talent) só com autorização prévia explícita do responsável; não repetir sem nova autorização. **[ESTADO]**
+3. Teste real contra terceiro (VIO, Talent) só com autorização prévia explícita do responsável; não repetir sem nova autorização. **[HISTÓRICO]**
 4. Não existe PHPUnit nem `phpunit.xml` e não foi encontrado CI: os testes são **scripts CLI** que imprimem OK/FALHA por verificação e terminam com código de saída (0 = sem falha). **[CÓDIGO]**
 
 ### 1.2 Pré-requisitos
@@ -48,7 +48,7 @@ Quando documentos divergem, o código vence.
 | `tests/manual/hardening_helpers.php` | `hdCriarAmbiente`: banco `qa_` + storage temporário; aborta se o banco não tiver prefixo `qa_`. |
 | `tests/manual/teste_prepend_qa_guarda_externo.php` | Prova que os 3 prepends forçam `GESTAO_COLETAS_DB_NAME` para QA ou abortam com exit 3 (sem banco/rede). |
 
-Banco QA é removido no `finally`/shutdown. Em caso de abort podem sobrar bancos `qa_*` (o state registra resíduos em P23/P53). **[ESTADO]**
+Banco QA é removido no `finally`/shutdown. Em caso de abort podem sobrar bancos `qa_*` (há registro de resíduos em P23/P53). **[HISTÓRICO]**
 
 Verificação prévia sugerida do ambiente (sem tocar dados): rodar `teste_prepend_qa_guarda_externo.php` e conferir que nenhum nome de banco que não comece com `qa_` aparece nas mensagens.
 
@@ -66,7 +66,7 @@ Verificação prévia sugerida do ambiente (sem tocar dados): rodar `teste_prepe
 ### 1.5 Flag `TALENT_CHECKIN_ATIVO`
 
 - O check-in no Talent é fail-closed: com a flag diferente de `true`, a finalização responde **503 `TALENT_CHECKIN_DESATIVADO`** sem chamar o Talent. O `.env.example` traz `TALENT_CHECKIN_ATIVO=false`. **[CÓDIGO]**
-- Três suítes **exigem a flag não-true** no ambiente que elas carregam: `teste_concorrencia_finalizar_checkin`, `teste_talent_idor_finalizar`, `teste_talent_trava_doctos_pendente`. Com a flag em `true` elas falham (ver D5). **[ESTADO]**
+- Três suítes **exigem a flag não-true** no ambiente que elas carregam: `teste_concorrencia_finalizar_checkin`, `teste_talent_idor_finalizar`, `teste_talent_trava_doctos_pendente`. Com a flag em `true` elas falham (ver D5). **[HISTÓRICO]**
 - As suítes com mock de Talent (`teste_talent_mensagem_api_finalizar`, `teste_e2e_recebimento_expedicao_mock`, `teste_talent_idempotencia`, etc.) ativam a flag **apenas no subprocesso**, apontando para o mock local; confirmar no cabeçalho de cada uma antes de rodar. **[PENDENTE DE CONFIRMAÇÃO]** (o mecanismo exato por suíte não foi lido).
 - Nunca definir a flag como `true` com credenciais reais de Talent num ambiente de teste.
 
@@ -85,8 +85,8 @@ Verificação prévia sugerida do ambiente (sem tocar dados): rodar `teste_prepe
 - Saída esperada: linhas OK por verificação; qualquer linha FALHA ou exit code diferente de 0 reprova a suíte.
 - **Exit 3** = prepend fail-closed recusou o ambiente (banco QA ausente/nome inválido). Não é falha de produto: corrija o ambiente, nunca contorne a guarda.
 - Suítes com "arquivo auxiliar ausente" (ver D6/D9) falham por infra, não por regra de negócio.
-- `teste_oc_anexo_lacunas.php` pode sair com rc 0 mesmo com falhas (P58): ler as linhas FALHA, não só o código. **[ESTADO]**
-- `teste_status_processamento.php` é flaky por timing (P23): repetir uma vez antes de reportar. **[ESTADO]**
+- `teste_oc_anexo_lacunas.php` pode sair com rc 0 mesmo com falhas (P58): ler as linhas FALHA, não só o código. **[HISTÓRICO]**
+- `teste_status_processamento.php` é flaky por timing (P23): repetir uma vez antes de reportar. **[HISTÓRICO]**
 - Registrar para cada suíte: data, HEAD, ambiente, contagem OK/FALHA. Só isso vira evidência.
 
 ---
@@ -200,7 +200,7 @@ Os locks usam `GET_LOCK` (ex.: `DocumentoController` com chave por atendimento e
 
 | ID | Objetivo / risco coberto | Comando | Esperado | Ambiente |
 |---|---|---|---|---|
-| A-SEG-01 | IDOR em `salvarEtapa` (confirmação/cliente/ajudante) | `php tests/manual/teste_idor_salvar_etapa_manual.php` | RE-A, **só com banco QA forçado** [ESTADO]; confirmar ambiente antes | ver estado |
+| A-SEG-01 | IDOR em `salvarEtapa` (confirmação/cliente/ajudante) | `php tests/manual/teste_idor_salvar_etapa_manual.php` | RE-A, **só com banco QA forçado** [HISTÓRICO]; confirmar ambiente antes | ver histórico |
 | A-SEG-02 | IDOR da rota de impressão | `php tests/manual/teste_impressao_idor.php` | RE-A | não classificado |
 | A-SEG-03 | IDOR de `finalizar` (503 com flag desligada) | `php tests/manual/teste_talent_idor_finalizar.php` | RE-A só com flag não-true; fora do dev (D5/D7) | DEV (`.env`) |
 | A-SEG-04 | Comparação de token em tempo constante (serviço de impressão) | `node tests/manual/_teste_auth_token_timing.js` | RE-A | ZERO (config temporária) |
@@ -255,7 +255,7 @@ Lacuna (ver seção 6): não há teste automatizado de rota HTTP, CORS ou 409 `s
 - **Dados fictícios (DF-B):** motorista, CPF, placa, CNPJ, número de nota e OC de teste criados para a rodada. QR/CNH/CRLV de teste: apenas documentos fictícios/sintéticos; **não usar documentos reais de terceiros**.
 - **Proibido sem autorização prévia do responsável:** imprimir etiqueta real, chamar Talent real, POST real ao vio.api.br, qualquer POST em produção. Os cenários "sem POST real" só observam (GET/páginas).
 - Registrar evidência por cenário: data, HEAD/versão, responsável, resultado (passou/falhou/não executado), observações. Sem registro, o cenário continua **pendente**.
-- O estado de cada item citado vem do `ia_development_state.md` (histórico, seção 5), não de execução nesta rodada.
+- O estado de cada item citado vem de registro histórico (seção 5), não de execução nesta rodada.
 
 ---
 
@@ -263,7 +263,7 @@ Lacuna (ver seção 6): não há teste automatizado de rota HTTP, CORS ou 409 `s
 
 ### B-IMP-01 Impressão real de uma etiqueta no mini PC
 - **Objetivo / risco:** confirmar que o serviço local imprime no equipamento do totem; os testes automatizados não tocam hardware.
-- **Pré-condições:** serviço de impressão instalado e ativo no mini PC; impressora térmica configurada ([implantação](implantacao.md)); origem do totem em `origensPermitidas`; **autorização prévia do responsável**. **[ESTADO]** a impressão foi validada fisicamente em 2026-10-06, mas o README do serviço ainda a trata como pendente (divergência, seção 6).
+- **Pré-condições:** serviço de impressão instalado e ativo no mini PC; impressora térmica configurada ([implantação](implantacao.md)); origem do totem em `origensPermitidas`; **autorização prévia do responsável**. **[HISTÓRICO]** a impressão foi validada fisicamente em 2026-10-06, mas o README do serviço ainda a trata como pendente (divergência, seção 6).
 - **Dados:** etiqueta de TESTE (`npm run teste:impressao` do serviço) ou atendimento fictício.
 - **Passos:** (1) sem flag, `npm run teste:impressao` faz só `GET /saude` e `/impressoras` (não imprime); (2) com autorização, `npm run teste:impressao -- --imprimir`.
 - **Esperado:** `/saude` e `/impressoras` respondem; etiqueta de TESTE legível; o token nunca aparece na saída.
@@ -274,7 +274,7 @@ Lacuna (ver seção 6): não há teste automatizado de rota HTTP, CORS ou 409 `s
 - **Pré-condições:** B-IMP-01 aprovado nesta rodada; impressora sem papel (ou tampa aberta); autorização.
 - **Dados:** atendimento fictício que chegue à impressão.
 - **Passos:** retirar o papel; disparar a impressão pelo totem; observar a resposta do serviço e a mensagem no front; recolocar papel e reimprimir.
-- **Esperado:** 409 `sem_papel`; alerta no front com opção de reimpressão; nenhum job preso na fila depois de recolocar o papel. **[ESTADO]** em 2026-10-06 o 409 foi validado só com o job removido; falta o teste com falta de papel real.
+- **Esperado:** 409 `sem_papel`; alerta no front com opção de reimpressão; nenhum job preso na fila depois de recolocar o papel. **[HISTÓRICO]** em 2026-10-06 o 409 foi validado só com o job removido; falta o teste com falta de papel real.
 - **Tipo:** FÍSICO. **Dependência:** impressora real.
 
 ### B-IMP-03 Duas etiquetas em sequência, motorista e ajudante (P47, aberta)
@@ -301,7 +301,7 @@ Lacuna (ver seção 6): não há teste automatizado de rota HTTP, CORS ou 409 `s
 
 ### B-OCR-01 OCR no mini PC (P33, aberta)
 - **Objetivo / risco:** medir tempo, precisão e cancelamento do OCR client-side no hardware real.
-- **Pré-condições:** mini PC do totem; nota fiscal fictícia/de teste. **Passos:** fotografar a nota, aguardar o OCR, cancelar no meio, repetir. **Esperado:** tempo aceitável (limite **PENDENTE DE CONFIRMAÇÃO**, não definido); cancelamento libera a tela; 409 `OCR_EM_ANDAMENTO` tratado. Linha de base de produção de 2026-09-30 está no log do state. **Tipo:** FÍSICO.
+- **Pré-condições:** mini PC do totem; nota fiscal fictícia/de teste. **Passos:** fotografar a nota, aguardar o OCR, cancelar no meio, repetir. **Esperado:** tempo aceitável (limite **PENDENTE DE CONFIRMAÇÃO**, não definido); cancelamento libera a tela; 409 `OCR_EM_ANDAMENTO` tratado. Linha de base de produção de 2026-09-30 está registrada. **Tipo:** FÍSICO.
 
 ### B-CAM-01 Câmera e permissão no Chrome kiosk (P36, aberta)
 - **Objetivo / risco:** saber se a permissão de câmera persiste após reinício do Chrome kiosk e do mini PC. **Passos:** conceder a permissão; reiniciar o Chrome kiosk e o mini PC; abrir a captura. **Esperado:** sem prompt, ou comportamento documentado. **Tipo:** FÍSICO.
@@ -310,7 +310,7 @@ Lacuna (ver seção 6): não há teste automatizado de rota HTTP, CORS ou 409 `s
 - **Objetivo / risco:** tela em branco/travamento com câmera desconectada ou permissão negada. **Passos:** desconectar a câmera ou negar a permissão e entrar na captura. **Esperado:** mensagem clara e caminho alternativo. **Tipo:** FÍSICO.
 
 ### B-TEC-01 Teclado virtual
-- **Objetivo / risco:** digitar placa, nome e cliente (autocomplete) no teclado virtual em tela touch; teclado cobrindo campos. **Esperado:** autocomplete funciona, campos visíveis. **[ESTADO]** confirmado fisicamente pelo usuário em 2026-10-08 (histórico; repetir se a tela mudar). **Tipo:** FÍSICO. Automatizado relacionado: A-GES-11.
+- **Objetivo / risco:** digitar placa, nome e cliente (autocomplete) no teclado virtual em tela touch; teclado cobrindo campos. **Esperado:** autocomplete funciona, campos visíveis. **[HISTÓRICO]** confirmado fisicamente pelo usuário em 2026-10-08 (histórico; repetir se a tela mudar). **Tipo:** FÍSICO. Automatizado relacionado: A-GES-11.
 
 ### B-INA-01 Inatividade, cancelamento e recarga da página (sem retomada)
 - **Objetivo / risco:** timeout de inatividade, abandono e comportamento após F5 no meio do atendimento (não existe retomada: P38).
@@ -350,18 +350,18 @@ Lacuna (ver seção 6): não há teste automatizado de rota HTTP, CORS ou 409 `s
 - **Objetivo / risco:** percorrer as telas com usuário de cada perfil em ambiente de teste: criar/regerar URL de totem (token nunca exibido), consultar logs com filtros, abrir PDF de OC, CRUD de cliente/empresa, conferir a retenção. **Esperado:** RBAC respeitado; ações auditadas. **Tipo:** MANUAL. Automatizados: seção 2.9.
 
 ### B-SEG-01 Verificações só possíveis em produção
-- **Objetivo / risco:** Argon2id disponível, cookie `Secure`, Cloudflare e `REMOTE_ADDR` correto, `no-store` do quiosque. **[ESTADO]** listadas como verificáveis só em produção. **Tipo:** MANUAL. **Dependência:** Hostgator, Cloudflare.
+- **Objetivo / risco:** Argon2id disponível, cookie `Secure`, Cloudflare e `REMOTE_ADDR` correto, `no-store` do quiosque. **[HISTÓRICO]** listadas como verificáveis só em produção. **Tipo:** MANUAL. **Dependência:** Hostgator, Cloudflare.
 
 ### B-REAL-01 Testes reais de terceiros (somente com nova autorização)
-- VIO real (1 CNH digital, 1 POST) e Talent real já foram executados com autorização em 2026 (state). **Não repetir sem nova autorização.** Não fazem parte deste plano.
+- VIO real (1 CNH digital, 1 POST) e Talent real já foram executados com autorização em 2026. **Não repetir sem nova autorização.** Não fazem parte deste plano.
 
 ---
 
 ## 5. Resultados históricos (NÃO são aprovação atual)
 
-Todas as contagens abaixo vêm do `ia_development_state.md`, foram registradas por agentes em datas passadas e **nenhuma foi reexecutada nesta rodada**. Antes de citar como "aprovado", é preciso evidência desta rodada.
+Todas as contagens abaixo são registros históricos de datas passadas e **nenhuma foi reexecutada nesta rodada**. Antes de citar como "aprovado", é preciso evidência desta rodada.
 
-| Suíte | Contagem histórica | Origem no state |
+| Suíte | Contagem histórica | Origem |
 |---|---|---|
 | Gestão: cadastros / qa_cadastros | 534 / 99 | bateria de 2026-10-09 |
 | Gestão: totens / qa_totens | 272 / 215 | bateria de 2026-10-09 (valor pós-higienização) |
@@ -374,8 +374,8 @@ Todas as contagens abaixo vêm do `ia_development_state.md`, foram registradas p
 | `teste_gestao_qa_independente` | 286 | bateria de 2026-10-09 |
 | `gestao_layout.js` | 5682 (F6) e 4037 (F4) | bateria de 2026-10-09 |
 | `vio_captura_layout.js` | 1745 | bateria de 2026-10-09 |
-| `vio_captura_layout.js` (com a tela `guiche_portaria`) | 1847 (102 novas) | entrada de 2026-10-11 do state (relato do QA da demanda; histórico) |
-| `teste_talent_sem_registro` | 142 | execução de 2026-10-11 após os ajustes de CAS e de cobertura (relato do implementador e reexecução do orquestrador; histórico, não é aprovação futura) |
+| `vio_captura_layout.js` (com a tela `guiche_portaria`) | 1847 (102 novas) | entrada de 2026-10-11 (relato do QA; histórico) |
+| `teste_talent_sem_registro` | 142 | execução de 2026-10-11 após os ajustes de CAS e de cobertura (relato do implementador e reexecução; histórico, não é aprovação futura) |
 | e2e mock / QR integração / sem_fila / salvar_etapa_cliente | 38 / 50 / 49 / 18 | bateria de 2026-10-09 |
 | OC anexo: lógica / http / lacunas | 183 / 59 / 59 | bateria de 2026-10-09 |
 | `autocomplete_off` | 14 | bateria de 2026-10-09 |
@@ -385,9 +385,9 @@ Todas as contagens abaixo vêm do `ia_development_state.md`, foram registradas p
 
 Observações:
 - Os valores pós-higienização (272, 215, 233, 89, 116, 74, 3, 49, 183) vêm de entradas que registram só a mudança de contagem, **não** uma nova execução completa.
-- Para a regressão pós-`d783768`/`9d44513`, o state cita apenas vio_layout 1745, e2e 38, QR 50, sem_fila 53 e qa_independente 286.
+- Para a regressão pós-`d783768`/`9d44513`, só há registro de vio_layout 1745, e2e 38, QR 50, sem_fila 53 e qa_independente 286.
 - Não há registro de bateria completa após o HEAD `4188fee`.
-- As duas linhas de 2026-10-11 (1847 e 93) são o relato das revisões de QA, segurança e UX da demanda "Talent 2xx sem `nrRegAcesso`", sobre alterações ainda não commitadas; **não foram reexecutadas ao escrever este documento** e não valem como aprovação atual. O `teste_talent_client_parsing` foi atualizado na mesma demanda; não há contagem registrada para ele neste documento.
+- As duas linhas de 2026-10-11 (1847 e 93) são o relato das revisões de QA, segurança e UX do ajuste "Talent 2xx sem `nrRegAcesso`", sobre alterações ainda não commitadas; **não foram reexecutadas ao escrever este documento** e não valem como aprovação atual. O `teste_talent_client_parsing` foi atualizado na mesma alteração; não há contagem registrada para ele neste documento.
 
 ---
 
@@ -401,10 +401,10 @@ Observações:
 | D4 | `QA_HEAD_TREE` obrigatória para a prova byte a byte do quiosque em `teste_gestao_qa_independente`, com fim de linha igual ao da árvore de trabalho. | Sem ela, cobertura ausente. |
 | D5 | Três suítes exigem `TALENT_CHECKIN_ATIVO` não-true e carregam o `.env` (esperam 503 `TALENT_CHECKIN_DESATIVADO`). Com a flag em `true` falham. | A-CON-04, A-INT-08, A-SEG-03. |
 | D6 | `teste_lgpd_aceite_backend_seguranca` depende de `tests/manual/_fixtures_lgpd.php`, que nunca foi versionado e não existe no disco. | A-VAL-12 não roda; aceite LGPD sem cobertura automatizada de backend. |
-| D7 | Testes que usam o banco dev `udlog_totem` (via `.env`/sem bootstrap QA): `teste_identificar_cliente`, `teste_preparacao_producao_checkin` (não limpa o atendimento por desenho; resíduos P64), `teste_fluxo_recebimento_documentos`, `teste_talent_idor_finalizar`, `teste_talent_trava_doctos_pendente`, `teste_concorrencia_finalizar_checkin`; `teste_rate_limit_identificar_cliente_pdo` não classificado; o state também cita `teste_hardening_cliente`. Incidente registrado em 2026-10-09: teste legado rodado por engano contra o dev alterou dados. | **Não rodar** sem isolar. `teste_preparacao_producao_checkin` fora deste plano (toca o totem real). |
-| D8 | Possivelmente obsoletos e cabeçalhos que contradizem o código: `_caso_upload_documento.php`, `_caso_validar_qr.php`, `teste_fluxo_recebimento_documentos.php` (`DocumentoController::upload` e `validarQr` não existem mais em `app/`); `teste_avancar_etapa_expedicao.php` com cabeçalho de 2026-09-09; `teste_lock_obter_lock_documento` e `teste_sanitizacao_logs_documento_nota` dizem "banco de desenvolvimento real" mas o código usa `qa_db_bootstrap`; `teste_hardening_cliente` (state diz dev, cabeçalho diz QA); `teste_consulta_ordem_coleta` (cabeçalho diz só QA, mas mantém fixture externa; P24 registrou 12/17 por fixture). Não verificado em execução. | Ambiente e validade dessas suítes ficam **PENDENTE DE CONFIRMAÇÃO**. |
+| D7 | Testes que usam o banco dev `udlog_totem` (via `.env`/sem bootstrap QA): `teste_identificar_cliente`, `teste_preparacao_producao_checkin` (não limpa o atendimento por desenho; resíduos P64), `teste_fluxo_recebimento_documentos`, `teste_talent_idor_finalizar`, `teste_talent_trava_doctos_pendente`, `teste_concorrencia_finalizar_checkin`; `teste_rate_limit_identificar_cliente_pdo` não classificado; também há registro de `teste_hardening_cliente`. Incidente registrado em 2026-10-09: teste legado rodado por engano contra o dev alterou dados. | **Não rodar** sem isolar. `teste_preparacao_producao_checkin` fora deste plano (toca o totem real). |
+| D8 | Possivelmente obsoletos e cabeçalhos que contradizem o código: `_caso_upload_documento.php`, `_caso_validar_qr.php`, `teste_fluxo_recebimento_documentos.php` (`DocumentoController::upload` e `validarQr` não existem mais em `app/`); `teste_avancar_etapa_expedicao.php` com cabeçalho de 2026-09-09; `teste_lock_obter_lock_documento` e `teste_sanitizacao_logs_documento_nota` dizem "banco de desenvolvimento real" mas o código usa `qa_db_bootstrap`; `teste_hardening_cliente` (registro diz dev, cabeçalho diz QA); `teste_consulta_ordem_coleta` (cabeçalho diz só QA, mas mantém fixture externa; P24 registrou 12/17 por fixture). Não verificado em execução. | Ambiente e validade dessas suítes ficam **PENDENTE DE CONFIRMAÇÃO**. |
 | D9 | **Exceção de 2026-10-11:** `tests/manual/_caso_finalizar_talent_sem_registro.php` (usado por `teste_talent_sem_registro`) também é ignorado pelo `.gitignore` (`tests/manual/_*.php`) e só entra no repositório por `git add -f` (junto de `teste_talent_sem_registro.php`); sem isso, em clone limpo o A-INT-15 fica sem o subprocesso. **16 arquivos `tests/manual/_*.php` fora do Git** pelo `.gitignore` (existem só no disco local): `_caso_bloquear_excesso`, `_caso_cancelar`, `_caso_concluir_digitalizacao_cas_direto`, `_caso_documento_qr_vio_falso`, `_caso_finalizar_talent_mock`, `_caso_identificar_cliente_rate_limit`, `_caso_iniciar_processamento_falha_durante_validacao`, `_caso_iniciar_processamento_pdo_lock_falha`, `_caso_iniciar_processamento_qr_invalido`, `_caso_iniciar_processamento_vio_indisponivel`, `_caso_nota_pdo_falha`, `_caso_oc_anexo_receber`, `_caso_pdo_boundary_e_lock`, `_caso_salvar_etapa_http` (`.php`), `_poison_pdo.php`, `_qa02_independente.php`. | Em clone limpo, e2e mock, `talent_mensagem_api_finalizar`, `oc_anexo_*`, `pdo_falha_processamento_documentos`, `integridade_conclusao_atendimento` e `rate_limit_identificar_cliente_pdo` ficam sem o subprocesso. Inferido de cabeçalhos e do `.gitignore`. |
 | D10 | Serviço de impressão **sem teste de rota HTTP, CORS ou 409 `sem_papel` ponta a ponta**; `npm test` cobre só `printSettings`, fila do spooler, nome base e listador. | Cobertura só pelos manuais B-IMP-01/02. |
 | D11 | **Testes físicos pendentes:** P47 (falta de papel real, duas etiquetas, QR com o Netum), P32 (Netum como videoinput, roteiro de 20 itens), P33 (OCR no mini PC), P36 (permissão de câmera no Chrome kiosk), P54 (medidas finais do papel). | B-IMP-02/03/04, B-QR-01, B-OCR-01, B-CAM-01. |
 | D12 | Outras: P24 (`consulta_ordem_coleta` 12/17 por fixture), P58 (`oc_anexo_lacunas` rc 0 com falhas), P23 (`status_processamento` flaky), P59 (`link()` validado só em Windows/NTFS), `leitura_falhou` do PDF sem caso dinâmico, risco residual aceito de JPEG truncado com EOI forjado, resíduos de bancos `qa_*` antigos, sem PHPUnit e sem CI. | Ler as saídas completas; registrar resíduos. |
-| D13 | Divergência de impressão: o state afirma validação física no mini PC de produção (2026-10-06); o README do serviço ainda diz que a validação e a ativação de `origensPermitidas` de produção estão pendentes. | Tratar B-IMP-01 como não confirmado até nova evidência. |
+| D13 | Divergência de impressão: o registro do projeto afirma validação física no mini PC de produção (2026-10-06); o README do serviço ainda diz que a validação e a ativação de `origensPermitidas` de produção estão pendentes. | Tratar B-IMP-01 como não confirmado até nova evidência. |

@@ -37,7 +37,7 @@ Nenhuma. O motorista só se beneficia: o PDF segue no check-in sem ação dele.
 
 ### Retenção
 
-`cron/limpar-anexos-ordem-coleta.php` (lote 200, 15 dias; agenda 03:55 segundo o state): apaga arquivo e linha quando a OC correspondente está INATIVA com `inativada_em` de 15 dias ou mais, ou, sem OC correspondente, 15 dias após `criado_em` do anexo (órfão). OC ATIVA nunca perde o arquivo. `[CÓDIGO]` `[TESTE: teste_oc_anexo_logica, teste_oc_anexo_http, teste_oc_anexo_lacunas (sai com rc 0 mesmo com falhas, P58), teste_prepend_qa_guarda_externo]`
+`cron/limpar-anexos-ordem-coleta.php` (lote 200, 15 dias; agenda 03:55): apaga arquivo e linha quando a OC correspondente está INATIVA com `inativada_em` de 15 dias ou mais, ou, sem OC correspondente, 15 dias após `criado_em` do anexo (órfão). OC ATIVA nunca perde o arquivo. `[CÓDIGO]` `[TESTE: teste_oc_anexo_logica, teste_oc_anexo_http, teste_oc_anexo_lacunas (sai com rc 0 mesmo com falhas, P58), teste_prepend_qa_guarda_externo]`
 
 ## Endpoints envolvidos
 
@@ -67,5 +67,5 @@ Não aplicável a este endpoint. O cancelamento do atendimento ([09](09-cancelam
 
 ## Pendências
 
-- P56 a P63 do state; P57 (confiança em `X-Forwarded-Proto`); P58 (teste com rc 0 apesar de falhas); P63 (workflow n8n inativo, URL e credencial a configurar).
+- P56 a P63; P57 (confiança em `X-Forwarded-Proto`); P58 (teste com rc 0 apesar de falhas); P63 (workflow n8n inativo, URL e credencial a configurar).
 - O anexo só chega se o n8n enviar antes do `finalizar`; não há reenvio do anexo para um check-in já feito. `[CÓDIGO]`

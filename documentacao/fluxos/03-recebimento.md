@@ -77,8 +77,8 @@ Ver [09](09-cancelamento-e-abandono.md). Cancelar ou abandonar move as fotos das
 
 ## Pendências conhecidas
 
-- **`finalizar` não exige cliente no Recebimento**: o state (02/10) diz que o `finalizar` exigiria também o cliente; no código só a confirmação (`camposObrigatoriosAusentes`) exige `cliente_nome`. O CNPJ do depositante é validado ao montar o payload do Talent (falha vira `ERRO_REPROCESSAVEL`/`erro_montagem_payload`). `[CÓDIGO]`
+- **`finalizar` não exige cliente no Recebimento**: um registro de 02/10 dizia que o `finalizar` exigiria também o cliente; no código só a confirmação (`camposObrigatoriosAusentes`) exige `cliente_nome`. O CNPJ do depositante é validado ao montar o payload do Talent (falha vira `ERRO_REPROCESSAVEL`/`erro_montagem_payload`). `[CÓDIGO]`
 - `CONCLUIR_EXIGE_NUMERO_NOTA`: padrão `false`; decisão do usuário em 2026-10-11 de ativar em produção (valor no servidor a confirmar): ver fluxo 04.
 - Papel emitente/destinatário não implementado: ver fluxo 04.
-- Demanda `captura-notas-sem-interrupcao` (P01 a P16): implementações 2 e 3 não iniciadas; testes físicos pendentes. `[PENDENTE DE CONFIRMAÇÃO]`
+- Captura de notas sem interrupção (P01 a P16): implementações 2 e 3 não iniciadas; testes físicos pendentes. `[PENDENTE DE CONFIRMAÇÃO]`
 - Chave de acesso da nota é sempre nula no payload (P26).

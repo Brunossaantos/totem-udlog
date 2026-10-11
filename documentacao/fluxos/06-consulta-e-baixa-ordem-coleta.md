@@ -80,7 +80,7 @@ Banco externo fora na consulta: 502, motorista tenta de novo ou cancela. Falha n
 
 ## Pendências
 
-- P22/P24/P25/P48/P49 do state (Expedição): fixture do banco externo e campos do payload.
+- P22/P24/P25/P48/P49 (Expedição): fixture do banco externo e campos do payload.
 - Edições de `exp_dados` não persistidas (observação, sem correção).
 - Atendimento órfão em `placa` quando a consulta retorna 0 OC ou falha.
 - Documentação do fornecedor (`docs/db_gestao_coletas.md`) desatualizada/vazia quanto às ordens por placa; a estrutura do banco está no dump.

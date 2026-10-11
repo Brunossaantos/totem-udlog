@@ -79,7 +79,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 > **REGRA OBRIGATORIA — manuseio do token (nunca opcional):**
 > - **Nunca** colar um comando ja preenchido com o valor real do token em
->   chat (inclusive conversas com IA/assistentes), terminal compartilhado,
+>   chat, terminal compartilhado,
 >   ticket ou qualquer lugar que fique registrado.
 > - **Nunca** colocar o token em URL/querystring.
 > - **Nunca** passar o token como argumento de linha de comando visivel
@@ -152,9 +152,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
      virtual/interativa** nesta lista — ex.: `Microsoft Print to PDF`,
      `Microsoft XPS Document Writer`, `Fax`, `Envio para o OneNote` — esse
      tipo de impressora pode abrir dialogo/travar o processo esperando
-     interacao humana, o que trava a tela do totem (achado critico do
-     `/02-testes` de 2026-09-14, ver
-     `docs/handoffs/2026-09-11-impressao-etiqueta-teste.md`).
+     interacao humana, o que trava a tela do totem (achado critico dos
+     testes de 2026-09-14).
      Passo a passo para autorizar um novo modelo de impressora fisica no
      futuro:
      1. Confirmar o nome exato do driver instalado em
@@ -403,7 +402,7 @@ precisar ser encerrado (para a tarefa, preferir `Stop-ScheduledTask -TaskName
 - **NUNCA usar `taskkill /IM node.exe`** (nem qualquer variante por nome
   de processo). Isso mataria **todo** processo `node.exe` em execucao na
   maquina, incluindo outros servicos Node sem nenhuma relacao com este
-  (ja aconteceu um incidente real nesta mesma demanda, corrigido na
+  (ja aconteceu um incidente real nesta mesma etapa, corrigido na
   hora).
 - **Sempre encerrar pelo PID especifico** deste processo:
   1. Identificar o PID — ou pelo numero que o console mostra ao rodar

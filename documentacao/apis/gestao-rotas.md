@@ -2,7 +2,7 @@
 
 Painel web da UDLOG (HTML renderizado no servidor, sem API JSON). Cada arquivo de `public/gestao/` é uma rota. Esta página documenta **método, perfil, CSRF, PRG e ações POST**; o comportamento funcional está nos fluxos [11 - acesso e usuários](../fluxos/11-gestao-acesso-e-usuarios.md), [12 - totens](../fluxos/12-gestao-totens.md), [13 - logs e auditoria](../fluxos/13-gestao-logs-auditoria.md), [14 - ordens de coleta](../fluxos/14-gestao-ordens-coleta.md) e [15 - clientes e empresas](../fluxos/15-gestao-clientes-empresas.md). Convenções gerais: [README.md](README.md). Banco: [banco-dados.md](../banco-dados.md). Regras: [regras-negocio.md](../regras-negocio.md). Legenda: **[C]** código, **[T: nome]** teste, **[A]** ambiente, **[P]** pendente.
 
-A Gestão **não usa o token do totem**. Autenticação por sessão em tabela (cookie opaco; só o sha256 vai ao banco), 30 min de inatividade e 12 h absolutas (padrão; `GESTAO_SESSION_ABSOLUTE_MIN` ajusta o teto absoluto), perfis `admin` e `usuario`. **[C]** / state
+A Gestão **não usa o token do totem**. Autenticação por sessão em tabela (cookie opaco; só o sha256 vai ao banco), 30 min de inatividade e 12 h absolutas (padrão; `GESTAO_SESSION_ABSOLUTE_MIN` ajusta o teto absoluto), perfis `admin` e `usuario`. **[C]**
 
 ## Pipeline comum (`GestaoContexto::iniciar`)
 
@@ -58,7 +58,7 @@ Todas com CSRF e `Origin` válida. Sucesso redireciona com `?msg=<codigo>`. Alvo
 
 ### Login e conta
 
-- **`login.php` POST**: campos `login` (formato `primeiro.segundo`), `senha`, `token_login`. O `token_login` é **sem estado** (reutilizável por até 2 h segundo o state; mitigado por `Origin` e limite por IP). Respostas (renderizam o formulário, sem PRG): **400** token de login expirado; **401** credencial inválida (mensagem genérica); **429** + `Retry-After` (limite de 10 falhas por IP em 900 s e bloqueio de conta de 15 min após 5 falhas); **500**. Sucesso = redireciona. **[C]**
+- **`login.php` POST**: campos `login` (formato `primeiro.segundo`), `senha`, `token_login`. O `token_login` é **sem estado** (reutilizável por até 2 h; mitigado por `Origin` e limite por IP). Respostas (renderizam o formulário, sem PRG): **400** token de login expirado; **401** credencial inválida (mensagem genérica); **429** + `Retry-After` (limite de 10 falhas por IP em 900 s e bloqueio de conta de 15 min após 5 falhas); **500**. Sucesso = redireciona. **[C]**
 - **`logout.php`**: sem campos além do CSRF. Redireciona ao login (com ou sem sessão).
 - **`conta.php` POST**: `senha_atual`, `senha_nova`, `senha_confirmacao`. Sucesso: nova sessão e redirecionamento; 422 renderiza o formulário; conta bloqueada ou sem permissão: limpa o cookie e vai ao login. Senhas novas encerram as outras sessões (`senha_trocada`).
 
@@ -93,7 +93,7 @@ Todas com CSRF e `Origin` válida. Sucesso redireciona com `?msg=<codigo>`. Alvo
 
 ## Auditoria
 
-Escritas na Gestão (usuários, totens, empresas, clientes, OCs) registram auditoria append-only sem dados pessoais (`AuditoriaDao`; o único DELETE é a retenção de 90 dias, `AuditoriaRetencaoDao`). **[C]** (state: 25 ações). Ver [13](../fluxos/13-gestao-logs-auditoria.md).
+Escritas na Gestão (usuários, totens, empresas, clientes, OCs) registram auditoria append-only sem dados pessoais (`AuditoriaDao`; o único DELETE é a retenção de 90 dias, `AuditoriaRetencaoDao`). **[C]** (25 ações). Ver [13](../fluxos/13-gestao-logs-auditoria.md).
 
 ## Rate limits e fail-closed
 
@@ -105,8 +105,8 @@ Escritas na Gestão (usuários, totens, empresas, clientes, OCs) registram audit
 | Configuração ausente (`GESTAO_HASH_SALT`, `TOTEM_URL_BASE`) | 503 |
 | Sessão inválida | redireciona ao login ou 401 |
 
-Os limites de login por conta e por IP não são atômicos entre processos (pendência B2 do state). **[A]**
+Os limites de login por conta e por IP não são atômicos entre processos (pendência B2). **[A]**
 
 ## Testes
 
-[T: teste_gestao_http, teste_gestao_unidade, teste_gestao_qa_independente, teste_gestao_qa_correcoes, teste_gestao_logs, teste_gestao_qa_logs_tela, teste_gestao_oc_dao, teste_gestao_cli_admin]. Contagens no `ia_development_state.md`; não reexecutados aqui. `teste_gestao_totem_f0` e `teste_gestao_logs` têm falhas conhecidas por fim de linha (CRLF) e guarda de prepend, registradas no state. **[A]**
+[T: teste_gestao_http, teste_gestao_unidade, teste_gestao_qa_independente, teste_gestao_qa_correcoes, teste_gestao_logs, teste_gestao_qa_logs_tela, teste_gestao_oc_dao, teste_gestao_cli_admin]. Contagens históricas; não reexecutados aqui. `teste_gestao_totem_f0` e `teste_gestao_logs` têm falhas conhecidas por fim de linha (CRLF) e guarda de prepend, conhecidas. **[A]**

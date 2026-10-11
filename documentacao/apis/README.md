@@ -11,7 +11,7 @@ A mesma de [banco-dados.md](../banco-dados.md), com a correspondência pedida pa
 | Marca | Significado | Categoria |
 |---|---|---|
 | **[C]** | Confirmado lendo o código (arquivo e função citados). | IMPLEMENTADO PELO PROJETO |
-| **[T: nome]** | Existe teste em `tests/manual/` ou no serviço de impressão que cobre a regra. Não reexecutado aqui; o "passa" vem do `ia_development_state.md`. | IMPLEMENTADO PELO PROJETO |
+| **[T: nome]** | Existe teste em `tests/manual/` ou no serviço de impressão que cobre a regra. Não reexecutado aqui; o "passa" vem de registro histórico. | IMPLEMENTADO PELO PROJETO |
 | **[A]** | Depende de ambiente ou terceiro (Hostgator, Talent, vio.api.br, n8n, mini PC, banco externo real). Só vale como relato registrado. Quando o relato vem de documento do fornecedor em `docs/`, a linha diz "INFORMADO PELO FORNECEDOR". | INFORMADO PELO FORNECEDOR (quando houver documento) |
 | **[P]** | PENDENTE DE CONFIRMAÇÃO. Não verificado; nada foi presumido. | NÃO CONFIRMADO |
 
@@ -46,7 +46,7 @@ Integrações que **não** estão ativas (não documentadas como API):
 
 - Não existe API HTTP de ordens de coleta: o totem lê e escreve o banco externo direto (ver [banco-gestao-coletas.md](banco-gestao-coletas.md)). **[C]**
 - `App\Rn\ClienteApiClient` é **código morto**: nenhum `new ClienteApiClient` em `app/`, `public/`, `cron/` ou `util/`. O cadastro usado é `tb_cliente` local. **[C]**
-- Serpro: não há integração no código ativo. **[P]** (citado na demanda; nada encontrado nas rotas e clientes lidos)
+- Serpro: não há integração no código ativo. **[P]** (nada encontrado nas rotas e clientes lidos)
 
 ## Convenções gerais das APIs do totem (`public/api/*.php`)
 
@@ -103,7 +103,7 @@ Integrações que **não** estão ativas (não documentadas como API):
 | `documento.php?acao=status-processamento` | mais de 20 chamadas por (atendimento, tipo) em 5 s | 429 + `Retry-After` |
 | `nota.php?acao=identificar-cliente` | mais de 30 por totem em 60 s | 429 + `Retry-After`; falha da dependência do limite = 503 (fail-closed) |
 | `ordem-coleta-anexo.php` | 10 falhas de autenticação por IP em 900 s | 429 `MUITAS_TENTATIVAS` + `Retry-After: 900` |
-| Login da gestão e página do totem (`public/totem/index.php`) | ver [gestao-rotas.md](gestao-rotas.md) e o state | fora das APIs |
+| Login da gestão e página do totem (`public/totem/index.php`) | ver [gestao-rotas.md](gestao-rotas.md) | fora das APIs |
 
 **Não existe rate limit de falhas de token nas APIs do totem.** O que existe é throttle da *escrita do log* `totem_nao_autorizado` (1 por categoria a cada 60 s), que não bloqueia ninguém. **[C]**
 

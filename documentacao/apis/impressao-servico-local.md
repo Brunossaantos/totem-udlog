@@ -67,11 +67,11 @@ sequenceDiagram
 
 - Sem parâmetros. 200 `{"url":"http://127.0.0.1:4747","token":"TOKEN_FICTICIO_DO_SERVICO","frontend_timeout_ms":35000}`, com `Cache-Control: no-store`. Valores vêm de `IMPRESSAO_LOCAL_URL`, `IMPRESSAO_LOCAL_TOKEN`, `IMPRESSAO_FRONTEND_TIMEOUT_MS` (numérico maior que 0).
 - Erro: **503** `Servico local de impressao nao configurado` (variável ausente/inválida; registra `impressao_config_falhou`).
-- **Fato de desenho**: esta ação entrega o **token do serviço local ao navegador** do totem (aceito pelo usuário, state de 2026-10-06). **[C]** [A]
+- **Fato de desenho**: esta ação entrega o **token do serviço local ao navegador** do totem (aceito pelo usuário em 2026-10-06). **[C]** [A]
 
 ## 2. `public/api/impressao-teste.php` (diagnóstico)
 
-Rota de diagnóstico, mantida por decisão do usuário (state, higienização de 2026-10-09). Auth: **token do totem** (mesma regra). Não toca `tb_atendimento`. Usada por `public/totem/assets/diagnostico-impressao.js`. **[C]**
+Rota de diagnóstico, mantida por decisão do usuário (higienização de 2026-10-09). Auth: **token do totem** (mesma regra). Não toca `tb_atendimento`. Usada por `public/totem/assets/diagnostico-impressao.js`. **[C]**
 
 | Ação | Corpo | Resposta / erros |
 |---|---|---|
@@ -101,7 +101,7 @@ Diretório `servico-impressao-local/`. Escuta **somente em `127.0.0.1`** (host f
 | `semPapelTimeoutMs` | opcional, 3000 a 60000, padrão 10000 |
 | `idempotencia` | `{ttlMs, maxEntries}` (exemplo: 600000 e 500) |
 
-A origem de produção do quiosque e o nome do driver/porta em produção são relato do usuário no state (origem `https://<dominio-do-totem>`, TM-T88VII, `Receipt6`/`TMUSB001`); o `config.json` real não foi lido. **[A]** **[P]**
+A origem de produção do quiosque e o nome do driver/porta em produção são relato do usuário (origem `https://<dominio-do-totem>`, TM-T88VII, `Receipt6`/`TMUSB001`); o `config.json` real não foi lido. **[A]** **[P]**
 
 ### 3.2 Autenticação e CORS
 
@@ -153,12 +153,12 @@ Erros não tratados (inclusive JSON malformado ou corpo acima de 32 MB no `expre
 - **Timeout do front** (`IMPRESSAO_FRONTEND_TIMEOUT_MS`, entregue por `configuracao-servico-local`; o front usa 35000 ms só como reserva se o valor não for um número positivo): `AbortController` no `fetch` de `/imprimir`. Aborto ou falha de rede = estado **indeterminado** na tela, nunca sucesso. **[C]**
 - **Sem retry automático** em nenhuma camada. "Tentar novamente" é sempre clique do usuário e **gera uma etiqueta nova** (`gerar-etiqueta` com `reimpressao=1`, novo `identificador`, novo job). Resultado **indeterminado não é repetido** com o mesmo identificador: a resposta repete `indeterminado` até o registro expirar. **[C]**
 - **Idempotência em memória** (`IdempotenciaStore`, TTL e `maxEntries` da configuração): perde-se ao reiniciar o serviço. **[C]**
-- **Falta de papel** (`deteccaoSemPapel`): depois de imprimir, observa a fila (PowerShell `Get-PrintJob`, consulta a cada 500 ms, janela de visão de 3 s). Se o job (identificado pelo nome base do arquivo temporário) continuar na fila após `semPapelTimeoutMs`, remove só esse job e responde **409 `sem_papel`** **sem** marcar o identificador como impresso (o mesmo identificador pode ser reenviado). Falha ao consultar a fila mantém `impresso`. Validado fisicamente em produção apenas por relato do usuário no state (EPSON TM-T88VII `Receipt6`/`TMUSB001`). **[C]** **[A]**
+- **Falta de papel** (`deteccaoSemPapel`): depois de imprimir, observa a fila (PowerShell `Get-PrintJob`, consulta a cada 500 ms, janela de visão de 3 s). Se o job (identificado pelo nome base do arquivo temporário) continuar na fila após `semPapelTimeoutMs`, remove só esse job e responde **409 `sem_papel`** **sem** marcar o identificador como impresso (o mesmo identificador pode ser reenviado). Falha ao consultar a fila mantém `impresso`. Validado fisicamente em produção apenas por relato do usuário (EPSON TM-T88VII `Receipt6`/`TMUSB001`). **[C]** **[A]**
 - Front, ao receber `sem_papel`: tela própria com "Tentar novamente" (só reimpressão, sem limite de tentativas); com ajudante, imprime em seguida a etiqueta do ajudante e só então conclui; a nova tentativa reimprime só a etiqueta pendente. **[C]**
 
 ### 3.6 Testes e limites do que está provado
 
-- `npm test` em `servico-impressao-local/` cobre listagem de impressoras, `printSettings`, `verificarFila` e `verificarFila` por caminho (33/33 segundo o state; não reexecutado aqui). **[T]**
+- `npm test` em `servico-impressao-local/` cobre listagem de impressoras, `printSettings`, `verificarFila` e `verificarFila` por caminho (33/33 em registro histórico; não reexecutado aqui). **[T]**
 - **Não existe teste de rota HTTP, CORS, autenticação ou 409 ponta a ponta** no repositório. **[P]**
 - `GET /saude` não exige token (só alcançável em `127.0.0.1`).
 

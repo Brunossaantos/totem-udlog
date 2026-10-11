@@ -76,4 +76,4 @@ A estrutura do banco externo **não vem de migration** no repositório: as migra
 
 ## Testes
 
-[T: teste_consulta_ordem_coleta (12/17 por fixture, P24), teste_ordem_coleta_pendente_baixa, teste_gestao_oc_dao, _caso_selecionar_ordem, _caso_iniciar_expedicao]. Usam bancos `qa_` descartáveis; nunca devem apontar ao banco real (incidente registrado no state em 2026-10-09, sem efeito em produção). Não reexecutados aqui. **[A]**
+[T: teste_consulta_ordem_coleta (12/17 por fixture, P24), teste_ordem_coleta_pendente_baixa, teste_gestao_oc_dao, _caso_selecionar_ordem, _caso_iniciar_expedicao]. Usam bancos `qa_` descartáveis; nunca devem apontar ao banco real (incidente de 2026-10-09, sem efeito em produção). Não reexecutados aqui. **[A]**

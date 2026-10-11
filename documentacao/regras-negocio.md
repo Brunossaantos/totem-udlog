@@ -11,11 +11,11 @@ Mesma legenda do [banco-dados.md](banco-dados.md).
 | Marca | Significado |
 |---|---|
 | **[C]** | Confirmado lendo o código. |
-| **[T: nome]** | Existe teste em `tests/manual/` que cobre a regra. O teste não foi reexecutado ao escrever este documento; o "passa" vem do `ia_development_state.md`. |
+| **[T: nome]** | Existe teste em `tests/manual/` que cobre a regra. O teste não foi reexecutado ao escrever este documento; o "passa" vem de registro histórico. |
 | **[A]** | Depende de ambiente ou terceiro (Hostgator, banco externo real, n8n, Talent, vio.api.br, mini PC). Só vale como relato registrado no estado. |
 | **[P]** | PENDENTE DE CONFIRMAÇÃO. Não verificado; nada foi presumido. |
 
-Quando o código e o `ia_development_state.md` divergem, o código vence (ver a seção final).
+Quando o código e registros anteriores divergem, o código vence (ver a seção final).
 
 ---
 
@@ -391,7 +391,7 @@ Fluxos: [acesso e usuários](fluxos/11-gestao-acesso-e-usuarios.md), [totens](fl
 
 ## Divergências e pendências
 
-### Divergências entre o `ia_development_state.md` e o código (o código vence)
+### Divergências entre registros anteriores e o código (o código vence)
 
 1. Linha 3 do estado ainda lista F2 a F6 como pendentes e diz que as migrations 020/021 não foram aplicadas; entradas posteriores (08 e 09/10) registram F2 a F4 e F6 reduzida em produção e as migrations foram removidas do repositório. O cron de retenção de 90 dias já existe (`cron/limpar-logs-gestao.php`), ao contrário de "hoje SEM poda".
 2. Estado: "dados pessoais mascarados, só admin revela" foi superado na F4 ("sem máscara"); o código não tem máscara nem "revelar" (só máscara de formato de CNPJ).

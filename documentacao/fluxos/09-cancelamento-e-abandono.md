@@ -63,7 +63,7 @@ flowchart TD
 - Por atendimento, em transação com `FOR UPDATE` e nova checagem: move as fotos das notas para quarentena e marca `status=cancelado`; em falha, restaura as fotos. `[CÓDIGO]` `[TESTE: teste_hardening_r4_abandono]`
 - **Não atua** em `ENVIANDO`, `ENVIADO` e `ENVIO_INDETERMINADO`. Atendimentos em `ENVIO_INDETERMINADO` por timeout/falha de rede ficam `em_andamento` para sempre (o caso "2xx sem número de registro" já nasce `cancelado`). `[CÓDIGO]`
 - CLI-only; grava `LogSistema cron_resumo`/`cron_falhou`; `exit(1)` em falha.
-- Agendas registradas no state (produção, fuso -03): abandono 03:15; quarentena 03:30; anexos de OC 03:55; rate limit do OCR a cada hora cheia. Agendamento real no cPanel: `[AMBIENTE-TERCEIRO]`.
+- Agendas registradas (produção, fuso -03): abandono 03:15; quarentena 03:30; anexos de OC 03:55; rate limit do OCR a cada hora cheia. Agendamento real no cPanel: `[AMBIENTE-TERCEIRO]`.
 
 ## Endpoints envolvidos
 

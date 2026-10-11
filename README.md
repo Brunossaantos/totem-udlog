@@ -320,4 +320,4 @@ Somente situações que constam na documentação e no código.
 - [`CHANGELOG.md`](CHANGELOG.md): histórico por marcos.
 - [`.env.example`](.env.example): modelo de configuração.
 
-**Nota ao leitor.** `CLAUDE.md`, `.claude/`, `docs/` (exceto um handoff versionado) e `ia_development_state_bkp.md` são arquivos de trabalho de desenvolvimento assistido por IA, listados no `.gitignore`: não vêm em um clone. O `ia_development_state.md` (resumido) consta no `.gitignore`, mas está versionado e vem no clone. Nada neste README ou na instalação depende deles. Onde a documentação cita o estado do projeto, trata-se de um relato histórico que só vale com a data informada.
+**Nota ao leitor.** `docs/` é material de apoio local, listado no `.gitignore`, fora do repositório: não vem em um clone. Nada neste README ou na instalação depende dele. Onde a documentação traz relatos de situações anteriores, trata-se de registro histórico que só vale com a data informada.

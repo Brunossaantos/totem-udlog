@@ -12,13 +12,13 @@ Consultar as ordens de coleta (OCs) do banco externo, ativar ou inativar manualm
 
 `usuario` e `admin` têm o mesmo acesso a todas as telas desta área. Home do `usuario` após o login: `/gestao/ordens.php`. `[CÓDIGO: public/gestao/ordens.php e demais, perfil mínimo `usuario`]`
 
-Por decisão do usuário (F4) **não há máscara** de dado pessoal (motorista, CNH, placa aparecem em claro), **não há limite por usuário** e não existe "revelar"; isso substituiu a decisão anterior de mascarar. `[AMBIENTE-TERCEIRO: decisão relatada no state]` `[CÓDIGO: ausência de máscara em GestaoOrdemController]`
+Por decisão do usuário (F4) **não há máscara** de dado pessoal (motorista, CNH, placa aparecem em claro), **não há limite por usuário** e não existe "revelar"; isso substituiu a decisão anterior de mascarar. `[AMBIENTE-TERCEIRO: decisão relatada pelo responsável]` `[CÓDIGO: ausência de máscara em GestaoOrdemController]`
 
 ## Pré-condições
 
 - Sessão ([fluxo 11](11-gestao-acesso-e-usuarios.md)).
 - Banco externo de coletas acessível (OCs em `tb_ordens_coleta`, acesso direto por PDO; a Gestão usa as colunas `status` e `inativada_em`). Indisponível: lista com HTTP 503 e ação com 503, com `LogSistema banco_coletas_indisponivel`. `[CÓDIGO: OrdemColetaGestaoDao, GestaoOrdemController::registrarFalhaExterno]`
-- Índices `idx_oc_status_criado` e `idx_oc_status_inativada` no banco externo: a migration externa 004 foi aplicada em produção em 2026-10-09 segundo o state; o repositório não contém mais a migration, e os índices constam do dump local `docs/<CONTA_CPANEL>_db_gestao_coletas.sql` (fora do Git; 2026-10-10). `[AMBIENTE-TERCEIRO]`
+- Índices `idx_oc_status_criado` e `idx_oc_status_inativada` no banco externo: a migration externa 004 foi aplicada em produção em 2026-10-09; o repositório não contém mais a migration, e os índices constam do dump local `docs/<CONTA_CPANEL>_db_gestao_coletas.sql` (fora do Git; 2026-10-10). `[AMBIENTE-TERCEIRO]`
 
 ## Etapas na tela
 
@@ -45,7 +45,7 @@ Mostra a OC pelo `id` da tabela externa (não pelo número), a situação, a ida
 
 ### Resolver baixa pendente
 
-Botão "Marcar como resolvida" na aba Baixas, **um clique, sem confirmação** (decisão do usuário). Fica oculto quando a OC não é localizada ou é ambígua; com OC única o botão aparece, mas o servidor recusa se a OC estiver ATIVA. `[CÓDIGO: resolverBaixa]` (a ocultação do botão está na view, descrita no state; não relida linha a linha)
+Botão "Marcar como resolvida" na aba Baixas, **um clique, sem confirmação** (decisão do usuário). Fica oculto quando a OC não é localizada ou é ambígua; com OC única o botão aparece, mas o servidor recusa se a OC estiver ATIVA. `[CÓDIGO: resolverBaixa]` (a ocultação do botão está na view, descrita na view; não relida linha a linha)
 
 ### PDF
 
@@ -59,7 +59,7 @@ Botão abre o PDF por **POST** (`ordem-pdf.php`), como download `oc-<id>.pdf`. A
 2. Calcula a necessidade de confirmação (acima) e, se confirmado, grava o motivo na auditoria: `confirmado_andamento`, `confirmado_ja_baixada` ou `confirmado_cliente_inativo` (com cliente inativo **e** OC já baixada, vale `confirmado_ja_baixada` por precedência). `[CÓDIGO]`
 3. **Abre a auditoria `OC_INATIVAR`/`OC_ATIVAR` (PENDENTE) antes do UPDATE**, fora de transação; se não conseguir abrir, a ação é recusada (503) sem alterar. `[CÓDIGO]`
 4. Executa o UPDATE **por `id` com compare-and-set na situação**: `... SET status='INATIVA', inativada_em=NOW() WHERE id=:id AND status='ATIVA'` (inativar) e `... SET status='ATIVA', inativada_em=NULL WHERE id=:id AND status='INATIVA'` (ativar). O resultado (efetivado, já no estado, inexistente, estado mudou) fecha a auditoria como `OK` ou `SEM_EFEITO`; erro do banco externo fecha como `ERRO` com `motivo_oc=externo_indisponivel`. `[CÓDIGO: OrdemColetaGestaoDao::inativarPorId/ativarPorId]` `[TESTE: teste_gestao_oc_dao]` `[TESTE: teste_gestao_ordens]`
-5. Uma OC ativa volta a ser consultável pelo totem; uma inativa deixa de ser (fluxo [06](06-consulta-e-baixa-ordem-coleta.md)). O totem baixa a OC por **cliente + número** (CNPJ gravado no atendimento), não só pelo número. `[CÓDIGO: state F4a]`
+5. Uma OC ativa volta a ser consultável pelo totem; uma inativa deixa de ser (fluxo [06](06-consulta-e-baixa-ordem-coleta.md)). O totem baixa a OC por **cliente + número** (CNPJ gravado no atendimento), não só pelo número. `[CÓDIGO: F4a]`
 
 ### Baixa pendente
 
@@ -88,7 +88,7 @@ Auditoria `OC_BAIXA_RESOLVER` (alvo `oc_baixa`) aberta antes; recusas fecham `SE
 
 - Banco externo `tb_ordens_coleta`: `status` (ATIVA/INATIVA) e `inativada_em`. A Gestão é uma das duas origens dessa mudança (a outra é a baixa pelo totem). `[CÓDIGO]`
 - Banco do totem: `tb_ordem_coleta_pendente_baixa.resolvido_em`; `tb_gestao_auditoria`.
-- O PDF não é alterado; o cron `limpar-anexos-ordem-coleta.php` o apaga 15 dias após a inativação. `[CÓDIGO: state 2026-10-05]`
+- O PDF não é alterado; o cron `limpar-anexos-ordem-coleta.php` o apaga 15 dias após a inativação. `[CÓDIGO: 2026-10-05]`
 
 ## Integrações
 
@@ -113,12 +113,12 @@ Ativar/inativar: mensagem de sucesso e auditoria `OK`. Resolver baixa: baixa mar
 
 Registradas sem correção:
 
-- **S6**: uma exceção depois do COMMIT do UPDATE externo fecha a auditoria como `ERRO` mesmo que o estado já tenha mudado (state). `[PENDENTE DE CONFIRMAÇÃO]`
+- **S6**: uma exceção depois do COMMIT do UPDATE externo fecha a auditoria como `ERRO` mesmo que o estado já tenha mudado. `[PENDENTE DE CONFIRMAÇÃO]`
 - **OCs sem máscara**: decisão posterior à de mascarar; todos os perfis veem os dados em claro (ver Perfis). `[CÓDIGO]`
-- `tb_atendimento` só tem `idx_status`, sem índice composto por OC (state; sem migration).
-- `leitura_falhou` do PDF não tem caso de teste dinâmico (state).
+- `tb_atendimento` só tem `idx_status`, sem índice composto por OC (sem migration).
+- `leitura_falhou` do PDF não tem caso de teste dinâmico.
 - Ativar OC de cliente inativo não tem efeito no totem enquanto o cliente continuar inativo (por isso o aviso e a confirmação). `[CÓDIGO: AVISO_CLIENTE_INATIVO]`
-- Observações anteriores do state fora do escopo por decisão do usuário: n8n 406 anônimo e LiteSpeed sem `fastcgi_finish_request`.
-- Incidente registrado no state: um teste legado foi rodado por engano contra o banco de desenvolvimento; sem efeito em produção; guardas de prepend de QA passaram a forçar também `GESTAO_COLETAS_DB_NAME`.
+- Observações anteriores fora do escopo por decisão do usuário: n8n 406 anônimo e LiteSpeed sem `fastcgi_finish_request`.
+- Incidente registrado: um teste legado foi rodado por engano contra o banco de desenvolvimento; sem efeito em produção; guardas de prepend de QA passaram a forçar também `GESTAO_COLETAS_DB_NAME`.
 - Itens descartados pelo usuário e inexistentes: F5 (atendimentos do dia, travados, anexos órfãos), painel, status das integrações, saúde dos crons, fotos de notas do Recebimento.
 - Testes: `[TESTE: teste_gestao_ordens]`, `[TESTE: teste_gestao_qa_ordens]`, `[TESTE: teste_gestao_oc_dao]`; não reexecutados.

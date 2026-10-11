@@ -9,18 +9,18 @@ Documentos relacionados: [regras-negócio](regras-negocio.md), [APIs](apis/READM
 | Marca | Significado |
 |---|---|
 | **[C]** | Confirmado lendo o código ou o `sql/schema.sql` nesta documentação. |
-| **[T: nome]** | Existe teste em `tests/manual/` que cobre a regra. O teste não foi reexecutado ao escrever este documento; o "passa" vem do `ia_development_state.md`. |
-| **[A]** | Depende de ambiente ou terceiro (Hostgator, banco externo real, n8n, Talent). Só vale como relato registrado no `ia_development_state.md`. |
+| **[T: nome]** | Existe teste em `tests/manual/` que cobre a regra. O teste não foi reexecutado ao escrever este documento; o "passa" vem de registro histórico. |
+| **[A]** | Depende de ambiente ou terceiro (Hostgator, banco externo real, n8n, Talent). Só vale como relato registrado. |
 | **[P]** | PENDENTE DE CONFIRMAÇÃO. Não verificado; nada foi presumido. |
 
-Quando o código e o `ia_development_state.md` divergem, o código vence (ver "Divergências").
+Quando o código e registros anteriores divergem, o código vence (ver "Divergências").
 
 ---
 
 ## 1. Como o banco do totem é criado hoje
 
 - A única fonte da estrutura é `sql/schema.sql` (18 tabelas). **[C]**
-- As migrations 001-023 do banco do totem e as externas 001-004 foram **removidas do repositório** na higienização de 2026-10-09. Não existe mais histórico de migrations. **[C]** (state)
+- As migrations 001-023 do banco do totem e as externas 001-004 foram **removidas do repositório** na higienização de 2026-10-09. Não existe mais histórico de migrations. **[C]**
 - O schema foi provado idêntico a "schema antigo + migrations 014-023" e equivalente à estrutura de produção (MySQL 5.7.44), com uma diferença cosmética em `tb_totem` (ver "Divergências"). **[A]**
 - Para mudar o banco no futuro, cria-se uma **nova migration** (o repositório não tem pasta de migrations; a nova precisa ser criada junto com a atualização do `sql/schema.sql`).
 - O cabeçalho do `schema.sql` manda aplicar "só este arquivo numa instalação nova". Comentários internos que citam `sql/migrations/00x_*.sql` são só histórico. **[C]**
@@ -145,8 +145,8 @@ Aceite temporário do Aviso de Privacidade, emitido antes de existir atendimento
 - Índices: UNIQUE `token_hash`; `idx_lgpd_aceite_totem_status (id_totem, status)`; `idx_lgpd_aceite_status_expira (status, expira_em)`.
 - Transição: `PENDENTE_USO` -> `USADO` por UPDATE condicional (CAS) que exige `status=PENDENTE_USO`, `expira_em>NOW()`, mesmo totem e mesma versão/hash do termo.
 - Acesso: E/L `AceiteLgpdDao`. `tb_atendimento.id_aceite_lgpd` aponta para `id_aceite` só logicamente (sem FK).
-- Retenção: **nenhum DELETE ou cron**; tokens expirados também não são limpos. O state diz que a retenção "acompanha o atendimento, sem prazo próprio".
-- Teste: [T: teste_lgpd_aceite_backend_seguranca] (depende de `tests/manual/_fixtures_lgpd.php`, que não existe no disco; ver pendência P23 do state).
+- Retenção: **nenhum DELETE ou cron**; tokens expirados também não são limpos. A retenção "acompanha o atendimento, sem prazo próprio".
+- Teste: [T: teste_lgpd_aceite_backend_seguranca] (depende de `tests/manual/_fixtures_lgpd.php`, que não existe no disco; ver pendência P23).
 
 ### 2.4 `tb_atendimento`
 
@@ -176,7 +176,7 @@ Cada atendimento é uma máquina de estados. É a tabela central; as FKs de `tb_
 
 **Campos do Talent:** `talent_enviado_em` DATETIME; `talent_senha` VARCHAR(20) (recebe o `nrRegAcesso`); `talent_protocolo` VARCHAR(60); `talent_checkin_status` ENUM('NAO_ENVIADO','ENVIANDO','ENVIADO','ERRO_REPROCESSAVEL','ENVIO_INDETERMINADO') default `NAO_ENVIADO`; `talent_tentativa_id` VARCHAR(32); `talent_status_iniciado_em` DATETIME. O corpo de resposta do Talent não é guardado.
 
-- Índices: PK; UNIQUE `codigo_publico`; FK `id_totem`; `idx_placa`; `idx_status`; `idx_atendimento_aceite_lgpd`. Não há índice composto (pendência registrada no state).
+- Índices: PK; UNIQUE `codigo_publico`; FK `id_totem`; `idx_placa`; `idx_status`; `idx_atendimento_aceite_lgpd`. Não há índice composto (pendência registrada).
 - Acesso: E/L `AtendimentoDao` (todas as transições); L também `ClienteGestaoDao`, `TotemGestaoDao`, `LogSistemaDao`, `OrdemColetaGestaoDao`, `OrdemColetaPendenteBaixaDao` (JOIN).
 
 **Transições de `status`** [C] (testes: [T: teste_integridade_conclusao_atendimento], [T: teste_hardening_r4_abandono])
@@ -350,7 +350,7 @@ Referências **lógicas sem FK**: `tb_atendimento.id_aceite_lgpd`, `tb_atendimen
 
 ## 4. Retenção e rotinas de limpeza
 
-Todos os crons são **somente CLI** (recusam outro SAPI), registram `cron_resumo`/`cron_falhou` no `LogSistema` e saem com código 1 em falha. Os horários abaixo são os registrados no state e no checklist de deploy (fuso do servidor -03, PHP `ea-php83` no cPanel). Os 5 crons estão agendados e executando em produção (confirmado pelo responsável do projeto em 2026-10-10). **[A]**
+Todos os crons são **somente CLI** (recusam outro SAPI), registram `cron_resumo`/`cron_falhou` no `LogSistema` e saem com código 1 em falha. Os horários abaixo são os registrados no checklist de deploy (fuso do servidor -03, PHP `ea-php83` no cPanel). Os 5 crons estão agendados e executando em produção (confirmado pelo responsável do projeto em 2026-10-10). **[A]**
 
 | Objeto | Regra | Script | Agenda de produção |
 |---|---|---|---|
@@ -384,7 +384,7 @@ O dump local `docs/<CONTA_CPANEL>_db_gestao_coletas.sql` (fora do Git) reflete a
 
 Campos do dump: `id`, `numero_ordem_coleta` VARCHAR(50), `cliente_id`, `transportadora_nome`, `transportadora_cnpj`, `motorista_id`, `email_recebido_id`, `placa_prevista` VARCHAR(10), `motorista_nome_previsto`, `cnh_prevista`, `status`, `inativada_em`, `criado_em`, `atualizado_em`. Índices do dump: UNIQUE `uk_ordem_cliente (cliente_id, numero_ordem_coleta)`, `idx_ordens_numero_ordem`, `_cliente_id`, `_motorista_id`, `_email_recebido_id`, `_placa_prevista`, `_transportadora`. **[C]** (dump)
 
-Também constam do dump: `status` ENUM('ATIVA','INATIVA') NOT NULL DEFAULT 'ATIVA'; `inativada_em` DATETIME NULL; índices `idx_ordens_placa_status (placa_prevista, status)`, `idx_oc_status_criado (status, criado_em)`, `idx_oc_status_inativada (status, inativada_em)`. A infra de teste (`tests/manual/qa_gestao_oc_infra.php`) embute uma cópia dessa estrutura. As migrations externas 001-004 (removidas do repositório) foram aplicadas em produção segundo o state (001-003 em 2026-10-05; 004 em 2026-10-09, MySQL 5.7.44). Para mudar o banco externo no futuro, criar uma nova migration. **[C]** (dump)
+Também constam do dump: `status` ENUM('ATIVA','INATIVA') NOT NULL DEFAULT 'ATIVA'; `inativada_em` DATETIME NULL; índices `idx_ordens_placa_status (placa_prevista, status)`, `idx_oc_status_criado (status, criado_em)`, `idx_oc_status_inativada (status, inativada_em)`. A infra de teste (`tests/manual/qa_gestao_oc_infra.php`) embute uma cópia dessa estrutura. As migrations externas 001-004 (removidas do repositório) foram aplicadas em produção (001-003 em 2026-10-05; 004 em 2026-10-09, MySQL 5.7.44). Para mudar o banco externo no futuro, criar uma nova migration. **[C]** (dump)
 
 Escritas feitas pelo totem e pela Gestão (únicas colunas escritas):
 
@@ -408,21 +408,21 @@ O `tests/manual/qa_*` e a infra de teste criam essa estrutura em bancos `qa_` de
 
 ## 6. Divergências
 
-1. **Dump externo fora do Git.** `docs/<CONTA_CPANEL>_db_gestao_coletas.sql` reflete a estrutura de produção extraída em 2026-10-10 (somente estrutura, sem dados) e contém `tb_ordens_coleta.status`, `inativada_em`, os índices novos e `tb_ordem_coleta_arquivos`. Não há script do banco externo no repositório; `docs/` é ignorado pelo git (só um handoff é versionado). A documentação do fornecedor em `docs/db_gestao_coletas.md` continua template/desatualizada quanto à API de clientes e às ordens por placa.
-2. **Cache VIO sem uso.** `tb_vio_cache_*` tem DAO nunca chamado; `tb_vio_api_cache_*` não tem DAO. O state ainda descreve o cache `VIO_CACHE` (AES-256-GCM, HMAC, TTL de 7 dias) como capacidade; no código QR-only ele não é usado. `ClienteApiClient` também é código morto.
-3. **`etapa_atual` livre.** VARCHAR(40) sem ENUM; a enumeração só existe espalhada no código. O front tem 26 telas (26 casos em `renderTela`); `rec_cnh` é nome de etapa do backend, sem tela. A referência do state a "27 estados" foi corrigida para 26.
+1. **Dump externo fora do Git.** `docs/<CONTA_CPANEL>_db_gestao_coletas.sql` reflete a estrutura de produção extraída em 2026-10-10 (somente estrutura, sem dados) e contém `tb_ordens_coleta.status`, `inativada_em`, os índices novos e `tb_ordem_coleta_arquivos`. Não há script do banco externo no repositório; `docs/` é ignorado pelo git. A documentação do fornecedor em `docs/db_gestao_coletas.md` continua template/desatualizada quanto à API de clientes e às ordens por placa.
+2. **Cache VIO sem uso.** `tb_vio_cache_*` tem DAO nunca chamado; `tb_vio_api_cache_*` não tem DAO. Descrições anteriores ainda tratam o cache `VIO_CACHE` (AES-256-GCM, HMAC, TTL de 7 dias) como capacidade; no código QR-only ele não é usado. `ClienteApiClient` também é código morto.
+3. **`etapa_atual` livre.** VARCHAR(40) sem ENUM; a enumeração só existe espalhada no código. O front tem 26 telas (26 casos em `renderTela`); `rec_cnh` é nome de etapa do backend, sem tela. A referência anterior a "27 estados" foi corrigida para 26.
 4. **Valores de ENUM sem uso.** `PROCESSANDO` (processamento e `status_ocr`) não é gravado por nenhum código lido; as origens `VIO_TRIAL`, `VIO_VALIDADO` e `VIO_CACHE` são só legado.
 5. **`ENVIO_INDETERMINADO` sem saída (timeout/falha de rede; o caso "2xx sem número" está resolvido: `cancelado`).** Nenhuma tela ou rotina o resolve; o abandono ignora esse estado e a Gestão não tem tela de atendimentos (F5 descartada). O atendimento fica `em_andamento` indefinidamente.
 6. **Schema x produção em `tb_totem`.** Em produção há a FK `fk_totem_empresa` e um índice redundante; o schema declara a FK sem nome. O CHECK de JSON de `dados_brutos_json` existe só no MariaDB. **[A]**
 7. **Tamanhos de CNPJ diferentes.** `tb_cliente.cnpj` e `tb_atendimento.cliente_cnpj` são VARCHAR(20); `tb_clientes.cnpj` externo é VARCHAR(14). O código normaliza para dígitos antes de comparar (`OrdemColetaDao::normalizarCnpj`). Que `tb_clientes.cnpj` em produção tenha só dígitos não foi confirmado (P60).
-8. **README anterior e checklist desatualizados.** O README anterior (até `4188fee`) mandava "rodar `sql/schema.sql` no MariaDB" (produção é MySQL 5.7.44) e "cadastrar um totem em `tb_totem`" (hoje é pela Gestão, depois de `criar-admin.php`). O `docs/deploy-checklist.md` ainda lista migrations removidas. O state (seção 3) ainda cita migrations 001-017 como "preservadas".
-9. **Auditoria "sem PII".** O state diz isso, mas o IP do ator é gravado em `tb_gestao_auditoria.ip`. Só o `detalhe` é livre de dados pessoais.
+8. **README anterior e checklist desatualizados.** O README anterior (até `4188fee`) mandava "rodar `sql/schema.sql` no MariaDB" (produção é MySQL 5.7.44) e "cadastrar um totem em `tb_totem`" (hoje é pela Gestão, depois de `criar-admin.php`). O `docs/deploy-checklist.md` ainda lista migrations removidas. Documentos anteriores ainda citam migrations 001-017 como "preservadas".
+9. **Auditoria "sem PII".** Documentos anteriores dizem isso, mas o IP do ator é gravado em `tb_gestao_auditoria.ip`. Só o `detalhe` é livre de dados pessoais.
 10. **Retenção (decisão de produto em 2026-10-10: não será tratado).** Comportamento atual, para o desenvolvedor: não há poda em `tb_lgpd_aceite`, `tb_rate_limit_vio_status`, `tb_ordem_coleta_pendente_baixa`, linhas de `tb_atendimento`/`tb_atendimento_nota`; dados pessoais do motorista (nome, CPF, validade da CNH) ficam em texto plano em `tb_atendimento`, sem prazo de retenção.
-11. **Índice faltante registrado.** `tb_atendimento` só tem `idx_status`, `idx_placa` e `idx_atendimento_aceite_lgpd`; o índice composto por OC (cliente+número) está pendente no state, sem migration.
+11. **Índice faltante registrado.** `tb_atendimento` só tem `idx_status`, `idx_placa` e `idx_atendimento_aceite_lgpd`; o índice composto por OC (cliente+número) está pendente, sem migration.
 
 ## 7. PENDENTE DE CONFIRMAÇÃO
 
-- Collation real das tabelas em produção (exceto `tb_totem.codigo`, citada como `utf8mb4_general_ci` no state) e charset padrão do banco `<CONTA_CPANEL>_udlog_totem`. **[P]**
+- Collation real das tabelas em produção (exceto `tb_totem.codigo`, citada como `utf8mb4_general_ci` em registro anterior) e charset padrão do banco `<CONTA_CPANEL>_udlog_totem`. **[P]**
 - Comportamento do totem/Talent com `tb_totem.id_empresa` NULL. **[P]**
 - Origem do carregamento inicial dos 38 clientes e dos dados de empresa/totem para uma instalação nova. **[P]**
 - Se o `idx_cnpj` redundante de `tb_cliente` existe igual em produção. **[P]**

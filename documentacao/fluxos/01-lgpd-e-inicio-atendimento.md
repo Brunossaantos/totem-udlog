@@ -64,7 +64,7 @@ Na tela `lgpd` e `home` não há botão de cancelar nem aviso de inatividade. De
 
 ## Pendências conhecidas
 
-- **Retenção** (decisão de produto em 2026-10-10: não será tratado): nenhuma rotina remove `tb_lgpd_aceite` (nem tokens expirados). O state registra "retenção acompanha o atendimento, sem prazo próprio nem rotina de exclusão". `[CÓDIGO]`
-- Aprovação do DPO ao texto: só registrada no state, sem evidência no repositório. `[PENDENTE DE CONFIRMAÇÃO]`
+- **Retenção** (decisão de produto em 2026-10-10: não será tratado): nenhuma rotina remove `tb_lgpd_aceite` (nem tokens expirados). Descrição anterior: "retenção acompanha o atendimento, sem prazo próprio nem rotina de exclusão". `[CÓDIGO]`
+- Aprovação do DPO ao texto: só relatada, sem evidência no repositório. `[PENDENTE DE CONFIRMAÇÃO]`
 - `[TESTE: teste_lgpd_aceite_backend_seguranca]` depende de `tests/manual/_fixtures_lgpd.php`, ausente no disco (ignorado pelo git); `[PENDENTE DE CONFIRMAÇÃO]` se roda hoje.
 - Placa sem validação de formato.

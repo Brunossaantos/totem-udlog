@@ -38,12 +38,12 @@ Dar ao administrador uma visão das falhas do sistema (integrações, banco, cro
 - **Escrita**: enfileirada e gravada no encerramento da requisição por conexão dedicada, fora da transação do chamador; os crons chamam `LogSistema::descarregar()` explicitamente. `[CÓDIGO: LogSistema, cron/limpar-logs-gestao.php]`
 - **Throttle de escrita** (1 por categoria a cada 60 s, marcador em arquivo) para `totem_nao_autorizado` e `n8n_anexo_recusado`: o contador dessas categorias é subestimado por desenho; falha do throttle descarta a linha. `[CÓDIGO]`
 - **Tetos**: 10 por requisição; 500 por dia por categoria (exceto `cron_*` e `log_suprimido`); 2000 por dia no total; 100000 linhas na tabela. Ao suprimir, registra `log_suprimido` com o motivo (`teto_categoria`, `teto_diario`, `teto_total`). `[CÓDIGO: LogSistema constantes]` `[TESTE: teste_log_sistema]`
-- **Instrumentação**: ligada em 53 pontos do código segundo o state (token de totem inválido, consulta/baixa de OC, banco de coletas, anexo do n8n, Talent, VIO, erros de banco/técnicos, limite de OCR, etiqueta/impressão, os crons e a Gestão). Os `error_log` já existentes foram mantidos (registro duplo). `[TESTE: teste_gestao_instrumentacao]` (cobertura; não reexecutado)
+- **Instrumentação**: ligada em 53 pontos do código (token de totem inválido, consulta/baixa de OC, banco de coletas, anexo do n8n, Talent, VIO, erros de banco/técnicos, limite de OCR, etiqueta/impressão, os crons e a Gestão). Os `error_log` já existentes foram mantidos (registro duplo). `[TESTE: teste_gestao_instrumentacao]` (cobertura; não reexecutado)
 
 ### O que NÃO é gravado no log central
 
 - Por desenho: nunca `getMessage()` de exceção, dado pessoal, token, IP ou caminho de arquivo; só a classe da exceção e códigos de domínio fechado; a mensagem é a do catálogo. `[CÓDIGO]`
-- Por decisão do usuário (não instrumentados, só `error_log` quando existe): banco do totem fora do ar, serviço de impressão do mini PC, `vio_reprovado`, login (vai para a auditoria), erros 4xx do usuário e anexo omitido no `TalentRn`. `[AMBIENTE-TERCEIRO: decisão relatada no state]`
+- Por decisão do usuário (não instrumentados, só `error_log` quando existe): banco do totem fora do ar, serviço de impressão do mini PC, `vio_reprovado`, login (vai para a auditoria), erros 4xx do usuário e anexo omitido no `TalentRn`. `[AMBIENTE-TERCEIRO: decisão relatada pelo responsável]`
 - 401 só é logado quando o token foi **informado** e é inválido; token vazio não gera log. `[CÓDIGO: Auth::validarTotem]`
 
 ### Auditoria (`AuditoriaDao`)
@@ -95,12 +95,12 @@ Este fluxo é a própria trilha. A ação deste fluxo é `RETENCAO_EXECUTAR` (al
 
 Registradas sem correção:
 
-- **IP do ator na auditoria**: `tb_gestao_auditoria.ip` guarda o IP do ator em binário (não hash). O state fala em auditoria "sem PII", mas só o `detalhe` é livre de dado pessoal. `[CÓDIGO]`
+- **IP do ator na auditoria**: `tb_gestao_auditoria.ip` guarda o IP do ator em binário (não hash). Documentos anteriores falam em auditoria "sem PII", mas só o `detalhe` é livre de dado pessoal. `[CÓDIGO]`
 - **Agendamento do cron em produção**: a linha `10 4 * * *` está no crontab e executando corretamente (confirmado pelo responsável do projeto em 2026-10-10). `[AMBIENTE-TERCEIRO]`
-- Não há segundo usuário MySQL só para o DELETE da auditoria; a imutabilidade é por código, não por permissão de banco (state, não confirmado na Hostgator). `[PENDENTE DE CONFIRMAÇÃO]`
-- O teto diário global de 2000 pode suprimir logs legítimos se um token válido gerar muitos ids (risco registrado no state).
-- Byte NUL fora do contrato do `LogSistema` passa cru ao HTML (`h()` não remove NUL; não explotável, state).
-- Mensagem completa só no detalhe (sem `title` na lista); aviso de sessão expirada não aparece ao redirecionar ao login (state).
-- `STORAGE_PATH` gravável no cPanel e SAPI/FPM da Hostgator: não confirmados (state). `[AMBIENTE-TERCEIRO]`
-- Testes: `[TESTE: teste_gestao_logs]` (uma falha só por fim de linha CRLF no Windows, state), `[TESTE: teste_gestao_qa_logs]`, `[TESTE: teste_gestao_qa_logs_tela]`, `[TESTE: teste_gestao_retencao]`, `[TESTE: teste_log_sistema]`, `[TESTE: teste_gestao_instrumentacao]`; não reexecutados.
+- Não há segundo usuário MySQL só para o DELETE da auditoria; a imutabilidade é por código, não por permissão de banco (não confirmado na Hostgator). `[PENDENTE DE CONFIRMAÇÃO]`
+- O teto diário global de 2000 pode suprimir logs legítimos se um token válido gerar muitos ids (risco registrado).
+- Byte NUL fora do contrato do `LogSistema` passa cru ao HTML (`h()` não remove NUL; não explotável).
+- Mensagem completa só no detalhe (sem `title` na lista); aviso de sessão expirada não aparece ao redirecionar ao login.
+- `STORAGE_PATH` gravável no cPanel e SAPI/FPM da Hostgator: não confirmados. `[AMBIENTE-TERCEIRO]`
+- Testes: `[TESTE: teste_gestao_logs]` (uma falha só por fim de linha CRLF no Windows), `[TESTE: teste_gestao_qa_logs]`, `[TESTE: teste_gestao_qa_logs_tela]`, `[TESTE: teste_gestao_retencao]`, `[TESTE: teste_log_sistema]`, `[TESTE: teste_gestao_instrumentacao]`; não reexecutados.
 - Itens descartados pelo usuário e inexistentes: painel, status das integrações, saúde dos crons (tela que mostraria a execução dos crons), fotos de notas do Recebimento, F5.

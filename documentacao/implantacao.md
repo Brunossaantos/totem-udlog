@@ -1,6 +1,6 @@
 # Implantação do totem-udlog
 
-Guia de implantação e atualização do totem de autoatendimento UDLOG (Expedição e Recebimento). Descreve o que está **confirmado** (registrado em `ia_development_state.md` e nos deploys já feitos) e marca como `PENDENTE DE CONFIRMAÇÃO` o que não está.
+Guia de implantação e atualização do totem de autoatendimento UDLOG (Expedição e Recebimento). Descreve o que está **confirmado** (registrado nos deploys já feitos) e marca como `PENDENTE DE CONFIRMAÇÃO` o que não está.
 
 Este guia não executa nada: cada passo em produção depende de autorização explícita de quem opera a hospedagem. Nenhum valor real (credencial, token, chave, caminho de máquina) aparece aqui; use os placeholders `<CONTA_CPANEL>` e `<INSTALACAO>` (raiz do repositório no servidor).
 
@@ -238,7 +238,7 @@ Resumo; o detalhamento do ambiente de desenvolvimento não é objetivo deste gui
 2. **Checklist cita variáveis removidas**: a seção 1.Z manda preencher `VIO_API_BR_CACHE_TTL_DIAS`, `VIO_API_BR_CACHE_HMAC_KEY_V1`, `VIO_API_BR_CACHE_HMAC_VERSION` e `DOCUMENTO_QR_HMAC_KEY`, e o item 1 cita `IMPRESSORAS_PERMITIDAS`/`IMPRESSAO_TIMEOUT_MS` no `.env`; nenhuma tem consumidor no código.
 3. **Versão do PHP web (divergência histórica, resolvida)**: o checklist registra `.htaccess` em `public_html` fixando `ea-php82`; o PHP web de produção é 8.3 (confirmado pelo responsável do projeto em 2026-10-10), igual ao do cron (`ea-php83`).
 4. **`HEAD` do servidor**: o estado registra o servidor em `9d44513` (entrada de encerramento) e o checklist registra deploy até `4188fee`; o ponto final não está reconciliado.
-5. **`docs/` fora do Git**: `docs/` (incluindo o checklist) e `CLAUDE.md` estão no `.gitignore`; só um handoff está versionado. Este guia fica em `documentacao/`, versionado.
+5. **`docs/` fora do Git**: `docs/` (incluindo o checklist) está no `.gitignore` e não vem em um clone. Este guia fica em `documentacao/`, versionado.
 6. **README do serviço de impressão** ainda cita `Restart-Service` (serviço Windows descartado), marca a origem de produção como "não ativada" (o estado registra em uso) e menciona medição com `Receipt5` (o estado registra `Receipt6`).
 7. **Estado, seção 2**: diz "sem SSH root, sem processo persistente"; os deploys usam SSH de usuário.
 8. **`.env.example`**: o texto antigo citava MariaDB; produção é MySQL 5.7.44.

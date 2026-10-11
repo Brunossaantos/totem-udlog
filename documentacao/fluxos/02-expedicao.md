@@ -85,4 +85,4 @@ Botão "Cancelar atendimento" em toda tela exceto `home`/`lgpd`; inatividade 180
 - **Edições em `exp_dados` não persistem**: a tela permite editar Cliente, CNPJ, Placa, Veículo e OC, mas `avancarDados` só envia `id_atendimento` ao backend; o backend segue com os valores do banco externo e Placa/Veículo/OC editadas nem são lidas. `[CÓDIGO]`
 - 0 OCs ou falha de consulta deixam atendimento `em_andamento` em `placa` até cancelar ou abandono. `[CÓDIGO]`
 - `selecionar-ordem` sem tratamento de exceção do banco externo (resposta `[PENDENTE DE CONFIRMAÇÃO]`).
-- P22 (veículo sem RNTRC), P24 (fixture do teste de consulta), P25, P48 e P49 do state.
+- P22 (veículo sem RNTRC), P24 (fixture do teste de consulta), P25, P48 e P49.

@@ -75,7 +75,7 @@ Resultado de `status-processamento` (esboço): com `status=failed` no fornecedor
 - `iniciar-processamento` só envia se o `UPDATE` condicional `iniciarEnvioVioApiBr` vencer (`PENDENTE` ou `ERRO`, ou `CONCLUIDO` + `NAO_VALIDADO` sem `*_validado_em`, que permite re-escanear). Grava `tentativa_id` (32 hex) e `GET_LOCK('vio_api_br_validar_<id>_<tipo>', 0)` como defesa adicional.
 - Já aprovado, em processamento (`ENVIANDO`/`PROCESSANDO_*`) ou `INDETERMINADO`: **nunca** reabre; devolve o estado atual sem novo POST.
 - Resultado e id externo só são gravados com o **mesmo `tentativa_id`** e `status='em_andamento'`; tentativa obsoleta é descartada (log `id externo descartado`).
-- Re-escaneio: após reprovação `CONCLUIDO` + `NAO_VALIDADO` o front oferece "Escanear novamente" (terceira reprovação só oferece manual). **Não há limite de re-escaneio no backend** (P52 do state). **[C]**
+- Re-escaneio: após reprovação `CONCLUIDO` + `NAO_VALIDADO` o front oferece "Escanear novamente" (terceira reprovação só oferece manual). **Não há limite de re-escaneio no backend** (P52). **[C]**
 
 ## Erros e indisponibilidade
 

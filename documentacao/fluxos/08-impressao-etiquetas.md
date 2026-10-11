@@ -79,7 +79,7 @@ Nenhuma no banco: o atendimento já está `concluido`/`impressao`. O estado de i
 
 ## Integrações
 
-Serviço local Node e impressora. Detecção de papel validada só para EPSON TM-T88VII segundo o state; sucesso do spooler não confirma impressão física e outras falhas físicas não são detectadas (P27). `[AMBIENTE-TERCEIRO]`
+Serviço local Node e impressora. Detecção de papel validada só para EPSON TM-T88VII; sucesso do spooler não confirma impressão física e outras falhas físicas não são detectadas (P27). `[AMBIENTE-TERCEIRO]`
 
 ## Conclusão
 
@@ -96,4 +96,4 @@ Após `concluido`, cancelar retorna 409. A tela final oferece "Imprimir novament
 ## Pendências
 
 - P27 (falhas físicas não detectadas), P28 (diagnóstico), P30/P31/P46 (produção), P47, P54.
-- O repositório ainda contém `scripts/instalar-servico-windows.js` e `desinstalar-servico-windows.js` (legado) ao lado da tarefa de logon, enquanto o state diz que o serviço Windows foi descartado. Registrado sem correção.
+- O repositório ainda contém `scripts/instalar-servico-windows.js` e `desinstalar-servico-windows.js` (legado) ao lado da tarefa de logon, enquanto o serviço Windows foi descartado por decisão registrada. Registrado sem correção.

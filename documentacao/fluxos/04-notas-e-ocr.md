@@ -28,7 +28,7 @@ Atendimento de Recebimento `em_andamento`, etapa `digitalizacao_notas` (definida
 ### Captura (front)
 
 - `capturarFotoScannerNota` desenha o quadro de vídeo num canvas com **rotação fixa de 270 graus** e gera JPEG com qualidades de 0,92 a 0,4 até caber em 4,5 MiB; se ainda não couber, reduz a escala (fator 0,9) até 600 px. O **mesmo JPEG rotacionado** é a prévia, o arquivo enviado ao servidor e a entrada do OCR. `[CÓDIGO]`
-- **Divergência registrada, sem correção:** o `ia_development_state.md` diz que a rotação valeria só para a cópia do OCR e que a imagem original seria salva sem alteração. No código atual não existe cópia separada. Validação física da orientação: `[PENDENTE DE CONFIRMAÇÃO]` (P13, P32).
+- **Divergência registrada, sem correção:** um registro anterior dizia que a rotação valeria só para a cópia do OCR e que a imagem original seria salva sem alteração. No código atual não existe cópia separada. Validação física da orientação: `[PENDENTE DE CONFIRMAÇÃO]` (P13, P32).
 
 ### Upload (`nota.php?acao=processar`)
 
@@ -36,7 +36,7 @@ Atendimento de Recebimento `em_andamento`, etapa `digitalizacao_notas` (definida
 - Todo o processamento roda sob transação com `SELECT ... FOR UPDATE` do atendimento, serializando uploads do mesmo atendimento. Falha de lock (1205/1213) vira 503. `[CÓDIGO]`
 - **Idempotência por `client_uid`:** UNIQUE (`id_atendimento`, `client_uid`). Se a nota com o `uid` já existe, responde 200 com `reaproveitada=true` e os mesmos `id_nota`/`ordem`. `[CÓDIGO]` `[TESTE: teste_hardening_r4_uid_reconciliacao]`
 - Limite de 5: a 6ª nota é recusada; `ordem` é a primeira posição livre de 1 a 5. `[CÓDIGO]`
-- Validação da imagem (fail-closed): máximo de 5 MiB (`NOTA_IMAGEM_MAX_BYTES`), assinatura JPEG e EOI, dimensões até 5000 px por lado e 13.000.000 px de área, decodificação GD completa. Risco residual aceito no state: JPEG truncado com EOI forjado. `[CÓDIGO]` `[TESTE: teste_validacao_jpeg_seguro]`
+- Validação da imagem (fail-closed): máximo de 5 MiB (`NOTA_IMAGEM_MAX_BYTES`), assinatura JPEG e EOI, dimensões até 5000 px por lado e 13.000.000 px de área, decodificação GD completa. Risco residual aceito: JPEG truncado com EOI forjado. `[CÓDIGO]` `[TESTE: teste_validacao_jpeg_seguro]`
 - Gravação em `STORAGE_PATH/<pasta_documentos>/nota_NN.jpg` (fora do `public_html`) e inserção da linha em `tb_atendimento_nota`. Em erro ou rollback, a compensação apaga o arquivo. `[CÓDIGO]`
 - Não há teto de tamanho do corpo HTTP em `nota.php` antes do `json_decode` (diferente de `documento.php`); valem os limites do PHP/servidor e os 5 MiB do binário decodificado. `[CÓDIGO]`
 - Timeouts do front: 90 s no upload e 20 s no `listar`.
@@ -62,7 +62,7 @@ Em falha de rede o front guarda o `clientUid` pendente. `reconciliarNotasComServ
 5. O resultado é gravado com compare-and-swap (só se `status_ocr` está `PENDENTE`/`PROCESSANDO`): imutável por nota. `[CÓDIGO]`
 6. Clientes inativos nunca identificam. `[CÓDIGO]`
 
-**Papel emitente/destinatário: NÃO implementado.** O state registra a decisão de que só o CNPJ comprovadamente emitente/destinatário associaria o cliente automaticamente e a transportadora nunca. O código não classifica papel: qualquer CNPJ candidato válido presente em `tb_cliente` ativo identifica. Registrado sem correção (P05, P09 abertas).
+**Papel emitente/destinatário: NÃO implementado.** Há decisão registrada de que só o CNPJ comprovadamente emitente/destinatário associaria o cliente automaticamente e a transportadora nunca. O código não classifica papel: qualquer CNPJ candidato válido presente em `tb_cliente` ativo identifica. Registrado sem correção (P05, P09 abertas).
 
 ### Definir número (`nota.php?acao=definir-numero`)
 
@@ -116,10 +116,10 @@ Cancelar ou abandonar move as fotos para quarentena (24 h) ([09](09-cancelamento
 
 ## Pendências
 
-- Rotação de 270 graus aplicada à prévia, ao upload e ao OCR (divergência com o state). `[PENDENTE DE CONFIRMAÇÃO]`
+- Rotação de 270 graus aplicada à prévia, ao upload e ao OCR (divergência com registro anterior). `[PENDENTE DE CONFIRMAÇÃO]`
 - Papel emitente/destinatário não implementado (P05, P09).
 - **Retenção das fotos de notas de atendimentos concluídos** (decisão de produto em 2026-10-10: não será tratado): comportamento atual, nenhuma rotina as remove (o abandono só atua em `em_andamento`; a limpeza de quarentena só apaga `.del`).
 - `CONCLUIR_EXIGE_NUMERO_NOTA`: padrão `false`; decisão do usuário em 2026-10-11 de ativar em produção, valor no servidor a confirmar (P08).
-- Chave de acesso da nota sempre nula (P26); demanda `captura-notas-sem-interrupcao` (P01 a P16) com implementações 2 e 3 não iniciadas e testes físicos pendentes.
+- Chave de acesso da nota sempre nula (P26); captura de notas sem interrupção (P01 a P16) com implementações 2 e 3 não iniciadas e testes físicos pendentes.
 - P04: lacuna preexistente no guard de `idAtendimento` após `await` em `identificar-cliente`, aberta.
 - `teste_hardening_exclusao` com falha E17 preexistente (P55).
