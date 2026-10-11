@@ -8,9 +8,9 @@ backend PHP.
 
 Este documento cobre instalacao e operacao. O hardware de producao e a EPSON
 TM-T88VII (driver `Receipt6`, porta `TMUSB001`, impressora `EPSON TM-T88VII Receipt`).
-Impressao real, papel "totem" 80x80, `printSettings`, tarefa de logon e deteccao de
-falta de papel foram exercitados no PC de desenvolvimento com a TM-T88VII; a
-validacao fisica completa no mini PC de producao continua pendente (secao 6).
+A impressao no mini PC de producao (papel "totem" 80x80, `printSettings`, tarefa de
+logon, deteccao de falta de papel) foi validada fisicamente pelo usuario em 2026-10-06
+(secao 6).
 
 ## 1. Por que Node.js + `pdf-to-printer` + `node-windows`
 
@@ -23,9 +23,9 @@ validacao fisica completa no mini PC de producao continua pendente (secao 6).
   panos). Evita depender de bibliotecas com `node-gyp`/compilacao nativa,
   que costumam dar problema em maquina Windows sem toolchain de C++
   instalado.
-- **`node-windows`**: usada so na tentativa de Servico do Windows, que foi
-  DESCARTADA (ver secao 3); a inicializacao automatica adotada e a tarefa de
-  logon do Agendador de Tarefas (secao 3.1).
+- **`node-windows`**: dependencia legada, usada so na tentativa de Servico do
+  Windows, DESCARTADA em 2026-10-02 (ver secao 3); a inicializacao automatica
+  vigente e a tarefa de logon do Agendador de Tarefas (secao 3.1).
 - **`express`**: so para organizar rotas/middleware (CORS, PNA, auth,
   parsing de JSON) de forma legivel; nao decide nada de dominio.
 
@@ -65,8 +65,8 @@ validacao fisica completa no mini PC de producao continua pendente (secao 6).
    ```
    npm install
    ```
-   Isso instala `express`, `pdf-to-printer` e `node-windows` (legado; servico do Windows descartado) (nenhuma
-   exige compilacao nativa).
+   Isso instala `express`, `pdf-to-printer` e `node-windows` (legado; servico do Windows descartado em
+   2026-10-02) (nenhuma exige compilacao nativa).
 
 ### 2.4. Gerar o token do servico
 
@@ -115,12 +115,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
      path e **sem** barra final — o cabecalho HTTP `Origin` enviado pelo
      navegador nunca inclui path) autorizadas a chamar este servico via
      navegador. Cada ambiente mantem **so a sua propria origem**:
-     - **Desenvolvimento (ja ativo agora)**:
+     - **Desenvolvimento**:
        ```json
        "origensPermitidas": ["http://localhost:8080"]
        ```
-     - **Producao (documentado, NAO ativado ainda — so no deploy final no
-       mini PC)**:
+     - **Producao (ativa no mini PC de producao)**:
        ```json
        "origensPermitidas": ["https://totem.udlog.online"]
        ```
@@ -135,11 +134,10 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
        (diagnostico local via curl/PowerShell), rejeitando qualquer
        chamada de navegador. Voltar a lista para `[]` e o rollback seguro
        caso a origem ativa cause algum problema.
-     - No deploy final em producao, depois de ativar
-       `["https://totem.udlog.online"]` no mini PC, reconfirmar visualmente na
-       barra de endereco do navegador do totem que a origem realmente
-       servida e exatamente `https://totem.udlog.online`, sem path, antes de
-       considerar o CORS/PNA validado em producao.
+   - O valor e lido de `config/config.json` (validado em `src/config.js`); a
+     comparacao e por igualdade exata com o cabecalho `Origin`
+     (`src/middleware/cors.js`). O `config/config.example.json` traz `[]` de proposito
+     (fail-closed) e deve ser preenchido com a origem do ambiente.
    - `idempotencia.ttlMs` / `idempotencia.maxEntries`: controle de
      deduplicacao de impressao por identificador de job (padrao sugerido
      `600000` ms / `500` entradas).
@@ -165,12 +163,13 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
         conferir antes de adicionar).
      2. Editar `config/config.json` no mini PC e acrescentar o nome exato
         ao array `impressorasPermitidas`.
-     3. Reiniciar o servico para a config ser recarregada:
-        ```
-        Restart-Service "UDLOG Servico Impressao Local"
-        ```
-        (ou, se estiver rodando via `npm start` manual em vez do Servico
-        do Windows, parar com `Ctrl+C` e rodar `npm start` de novo).
+     3. Reiniciar o servico para a config ser recarregada: encerrar o
+        processo `node` do servico (secao 4.6, sempre por PID) e disparar
+        a tarefa de logon de novo (secao 3.1:
+        `Start-ScheduledTask -TaskName "UDLOG Servico Impressao Local (logon)"`)
+        (ou, se estiver rodando via `npm start` manual, parar com `Ctrl+C`
+        e rodar `npm start` de novo). O Servico do Windows foi descartado
+        em 2026-10-02.
    - `timeoutMs`: tempo maximo, em milissegundos, que um job de impressao
      pode levar antes de ser considerado travado. **Default `30000`
      (30s) se o campo for omitido.** Ao estourar:
@@ -191,24 +190,19 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    `.env` do PHP deve apontar para `http://127.0.0.1:<porta>` (a mesma
    porta configurada aqui).
 
-### 2.5.1. Alerta operacional — sincronizacao manual com o `.env` do backend PHP
+### 2.5.1. Configuracao do servico x `.env` do backend PHP
 
-`.env.example` do backend PHP (Hostgator) documenta duas variaveis que
-sao **espelho manual** dos campos acima, no mesmo padrao ja usado para
-`IMPRESSAO_LOCAL_TOKEN`:
+O servico le **somente** `config/config.json`: `impressorasPermitidas` e
+`timeoutMs` existem apenas ali (nao sao variaveis do `.env` do PHP; as antigas
+`IMPRESSORAS_PERMITIDAS` e `IMPRESSAO_TIMEOUT_MS` foram removidas do
+`.env.example`). Alterar um desses valores exige editar `config/config.json` no
+mini PC e reiniciar o servico (passo 3 do item `impressorasPermitidas`).
 
-- `IMPRESSORAS_PERMITIDAS` ↔ `impressorasPermitidas`
-- `IMPRESSAO_TIMEOUT_MS` ↔ `timeoutMs`
-
-**Nao existe conexao viva entre os dois ambientes.** Sempre que um desses
-valores for alterado no `.env` do backend PHP (Hostgator), o MESMO valor
-precisa ser replicado manualmente aqui, em `config/config.json` no mini
-PC, e vice-versa — e o servico precisa ser reiniciado (passo 3 do item
-`impressorasPermitidas` acima) para a mudanca valer. Existe tambem
-`IMPRESSAO_FRONTEND_TIMEOUT_MS` no `.env` do PHP, que controla apenas o
-timeout do lado do front-end (navegador do totem) e nao tem
-correspondente em `config.json` — nao confundir com `timeoutMs` deste
-servico.
+O `.env` do backend PHP guarda apenas `IMPRESSAO_LOCAL_URL`,
+`IMPRESSAO_LOCAL_TOKEN` (MESMO valor de `token`, sincronizado manualmente) e
+`IMPRESSAO_FRONTEND_TIMEOUT_MS`, que controla so o timeout do lado do front-end
+(navegador do totem) e nao tem correspondente em `config.json` — nao confundir
+com `timeoutMs` deste servico.
 
 ### 2.6. Testar manualmente antes de instalar a tarefa de logon
 
@@ -246,8 +240,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\desinstalar-tarefa
 
 E execucao unica: a tarefa persiste entre reinicios e inicia a cada logon
 (reinicia 3x/1 min em falha). So funciona com o usuario logado; no mini PC
-de producao usar login automatico do Windows com o usuario do kiosk
-(decisao do deploy final). Pare o `npm start` manual antes (porta 4747).
+de producao usa-se login automatico do Windows com o usuario do kiosk. Pare o `npm start` manual antes (porta 4747).
 
 ## 4. Roteiro de diagnostico
 
@@ -392,16 +385,13 @@ teste/dev, nunca em cima de uma impressora fisica ou virtual real.
 
 ### 4.5. CORS / Private Network Access
 
-`origensPermitidas` em `config/config.json` (ver secao 2.5) hoje esta
-ativa em desenvolvimento com `["http://localhost:8080"]`. A origem de
-producao `https://totem.udlog.online` esta documentada mas **nao** ativada
-neste arquivo — sera ligada somente no deploy final no mini PC, com
-reconfirmacao da origem na barra do navegador depois do deploy (ver
-secao 2.5). Enquanto `origensPermitidas` estiver vazio (`[]`), qualquer
-chamada do navegador do totem com cabecalho `Origin` deve ser rejeitada
-com `403` de proposito (fail-closed) — esse e o comportamento padrao
-antes de qualquer ambiente ser configurado, e tambem o rollback seguro
-caso a origem ativa precise ser desativada.
+`origensPermitidas` em `config/config.json` (ver secao 2.5) esta ativa no mini PC
+de producao com `["https://totem.udlog.online"]` (em desenvolvimento,
+`["http://localhost:8080"]`). Enquanto `origensPermitidas` estiver vazio (`[]`),
+qualquer chamada do navegador do totem com cabecalho `Origin` e rejeitada com
+`403` de proposito (fail-closed) — esse e o comportamento padrao antes de
+qualquer ambiente ser configurado, e tambem o rollback seguro caso a origem
+ativa precise ser desativada.
 
 ### 4.6. Parar o servico manualmente (teste/depuracao)
 
@@ -440,16 +430,13 @@ pessoa.
 - Nunca persiste a escolha de impressora — isso e responsabilidade do
   front-end do totem (localStorage).
 
-## 6. Pendencias conhecidas
+## 6. Estado e observacoes
 
-- **Ativacao de `origensPermitidas` para producao** (`https://totem.udlog.online`)
-  em `config/config.json` — origem ja confirmada e documentada na secao
-  2.5, mas so sera ativada no arquivo real durante o deploy final no mini
-  PC (nao antes disso).
-- **Validacao no hardware fisico do mini PC de producao** (`EPSON TM-T88VII
-  Receipt` via USB (porta `TMUSB001`) + Epson Advanced Printer Driver 6 (`Receipt6`), papel "totem" 80x80,
-  tarefa de logon com login automatico): pendente, adiada para o deploy final.
-  Testes fisicos ainda nao feitos: falta de papel real pela fila, duas etiquetas
-  (motorista + ajudante) em sequencia.
+- **Origem de producao**: `https://totem.udlog.online` ja esta em
+  `origensPermitidas` e em uso no mini PC de producao (confirmado em
+  2026-10-06).
+- **Validacao fisica no mini PC de producao**: feita pelo usuario em 2026-10-06
+  (`EPSON TM-T88VII Receipt` via USB, porta `TMUSB001`, driver `Receipt6`,
+  papel "totem" 80x80, tarefa de logon).
 - **Largura util da etiqueta**: a TM-T88VII imprime so ~50,8 mm dos 80 mm; o
   backend gera o conteudo em area util de 48 mm (`ETIQUETA_AREA_UTIL_MM`).
