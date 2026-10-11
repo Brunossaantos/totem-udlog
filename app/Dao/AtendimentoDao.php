@@ -594,6 +594,20 @@ class AtendimentoDao
         return $stmt->rowCount() > 0;
     }
 
+    public function cancelarPorRespostaSemRegistroTalent(int $id, string $tentativaId): bool
+    {
+        $stmt = $this->pdo->prepare("
+            UPDATE tb_atendimento
+            SET talent_checkin_status = 'ENVIO_INDETERMINADO',
+                status = IF(status = 'em_andamento', 'cancelado', status)
+            WHERE id_atendimento = :id AND talent_tentativa_id = :tentativa
+              AND talent_checkin_status = 'ENVIANDO' AND status != 'concluido'
+        ");
+        $stmt->execute(['id' => $id, 'tentativa' => $tentativaId]);
+
+        return $stmt->rowCount() > 0;
+    }
+
     public function marcarEnvioTalentObsoletoComoIndeterminado(int $id, int $timeoutSegundos): bool
     {
         $stmt = $this->pdo->prepare("

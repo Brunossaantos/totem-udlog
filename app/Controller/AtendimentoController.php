@@ -693,6 +693,26 @@ class AtendimentoController
                 }
                 Resposta::erro($textoFalha, 202);
                 return;
+            case 'SEM_REGISTRO_CANCELADO':
+                error_log('[AtendimentoController] checkin_talent_sem_registro_cancelado id_atendimento=' . $idAtendimento . ' categoria=resposta_ilegivel');
+                self::registrarFalhaCheckinNoLog('talent_indeterminado', $idAtendimento, $idTotem, $atendimento['tipo'], 'resposta_ilegivel');
+                $this->quarentenarFotosDasNotas($idAtendimento, $atendimento);
+                Resposta::erroComDados(
+                    'Nao foi possivel concluir seu check-in. Dirija-se ao guiche da portaria.',
+                    'TALENT_SEM_REGISTRO',
+                    ['acao' => 'guiche_portaria', 'tentar_novamente' => false],
+                    422
+                );
+                return;
+            case 'SEM_REGISTRO_NAO_APLICADO':
+                self::registrarFalhaCheckinNoLog('talent_indeterminado', $idAtendimento, $idTotem, $atendimento['tipo'], 'resposta_ilegivel');
+                Resposta::erroComDados(
+                    'Nao foi possivel concluir seu check-in. Dirija-se ao guiche da portaria.',
+                    'TALENT_SEM_REGISTRO',
+                    ['acao' => 'guiche_portaria', 'tentar_novamente' => false],
+                    422
+                );
+                return;
             case 'ENVIO_INDETERMINADO':
                 self::registrarFalhaCheckinNoLog('talent_indeterminado', $idAtendimento, $idTotem, $atendimento['tipo'], self::categoriaFalhaCheckinParaLog($resultado['erro_categoria'] ?? null));
                 Resposta::erro('Nao foi possivel confirmar seu check-in — procure um atendente', 500);

@@ -721,6 +721,80 @@ async function exercitarErroFinalizar(page) {
     });
 }
 
+async function exercitarGuichePortaria(page) {
+    return page.evaluate(async () => {
+        const r = {};
+        const origApi = window.api;
+        const aguardar = () => new Promise(res => setTimeout(res, 0));
+        let chamadas = []; let resposta = null;
+        window.api = async (a, acao) => {
+            chamadas.push(acao);
+            if (acao === 'finalizar' && resposta) { const e = Object.assign(new Error(resposta.msg), { status: resposta.status }); if (resposta.codigo !== undefined) e.codigo = resposta.codigo; if (resposta.dados !== undefined) e.dados = resposta.dados; throw e; }
+            return {};
+        };
+        const SEM_REG = { status: 422, msg: 'Nao foi possivel concluir seu check-in. Dirija-se ao guiche da portaria.', codigo: 'TALENT_SEM_REGISTRO', dados: { acao: 'guiche_portaria', tentar_novamente: false } };
+        const info = () => {
+            const el = document.getElementById('imprConteudo'); const b = [...el.querySelectorAll('button')];
+            const bar = document.getElementById('barraCancelar');
+            return { tela: state.tela, imprTela: imprState.tela, texto: el.textContent, html: el.innerHTML,
+                botoes: b.map(x => ({ t: x.textContent.trim(), h: Math.round(x.getBoundingClientRect().height), prim: x.classList.contains('btn-primario'), fundo: getComputedStyle(x).backgroundColor, dentro: x.getBoundingClientRect().left >= 0 && x.getBoundingClientRect().right <= innerWidth })),
+                overflow: el.scrollWidth > el.clientWidth || document.documentElement.scrollWidth > innerWidth,
+                suspensa: imprInatividadeSuspensa(), guiche: imprGuicheAtivo(), barra: bar ? getComputedStyle(bar).display : null,
+                chamadas: chamadas.join(','), aviso: document.getElementById('modalInatividadeFundo').classList.contains('aberto') };
+        };
+        const abrir = async (tipo, resp) => {
+            iniciarApp();
+            const k = tipo === 'expedicao' ? 'exp' : 'rec';
+            Object.assign(state, { idAtendimento: 7, tipo, tela: k + '_impressao', dados: {}, ajudante: { nome: 'JOSE LIMA', cpf: '52998224725' }, ajudanteCorrecao: false });
+            document.getElementById('barraCancelar').style.display = 'block';
+            localStorage.setItem('totem_impressora_nome', 'EPSON TESTE');
+            document.getElementById('tela').innerHTML = telaImpressao();
+            imprResetarEtiquetas(); chamadas = []; resposta = resp;
+            await processarImpressao();
+        };
+        for (const tipo of ['expedicao', 'recebimento']) {
+            const k = tipo === 'expedicao' ? 'exp' : 'rec';
+            const R = r[k] = {};
+            await abrir(tipo, SEM_REG);
+            R.guiche = info();
+            resposta = { status: 400, msg: 'Atendimento nao esta em andamento' };
+            await imprFinalizar(); await aguardar();
+            R.segundo400 = info();
+            await processarImpressao(); await aguardar();
+            R.processar400 = info();
+            resposta = { status: 500, msg: 'Erro interno' };
+            await imprFinalizar();
+            R.segundo500 = info();
+            resposta = SEM_REG;
+            await imprFinalizar();
+            R.segundoSemReg = info();
+            ir(k + '_impressao'); await aguardar();
+            R.reentrada = info();
+            chamadas = [];
+            await mostrarInatividade(); await aguardar();
+            R.idle = { tela: state.tela, id: state.idAtendimento, chamadas: chamadas.join(','), aviso: document.getElementById('modalInatividadeFundo').classList.contains('aberto'), guiche: imprState.guiche };
+            await abrir(tipo, SEM_REG);
+            chamadas = [];
+            await cancelarESair(); await aguardar();
+            R.cancelarSair = { tela: state.tela, chamadas: chamadas.join(',') };
+            await abrir(tipo, SEM_REG);
+            chamadas = [];
+            document.getElementById('imprBtnVoltarInicio').click(); await aguardar();
+            R.voltar = { tela: state.tela, id: state.idAtendimento, tipo: state.tipo, chamadas: chamadas.join(','), guiche: imprState.guiche, barra: getComputedStyle(document.getElementById('barraCancelar')).display, lgpd: !!document.querySelector('.lgpd-tela') };
+            await abrir(tipo, { status: 500, msg: 'Erro interno' });
+            R.apos = info();
+            for (const [nome, resp] of [['confirmacao', { status: 422, msg: 'Confirmacao incompleta', codigo: 'CONFIRMACAO_INCOMPLETA' }], ['notas', { status: 422, msg: 'Notas sem numero', codigo: 'NOTAS_SEM_NUMERO' }], ['semCodigo', { status: 422, msg: 'OC ausente' }], ['http202', { status: 202, msg: 'x', dados: { mensagem_api: 'Reg. acesso ajudante. Erro.' } }], ['http500', { status: 500, msg: 'x' }], ['http400', { status: 400, msg: 'Atendimento nao esta em andamento' }]]) {
+                await abrir(tipo, resp);
+                R[nome] = info();
+            }
+            await abrir(tipo, { ...SEM_REG, msg: '<img src=x onerror="window.__xss=3">' });
+            R.htmlSrv = { ...info(), xss: window.__xss || 0 }; imprResetarEtiquetas();
+        }
+        window.api = origApi;
+        return r;
+    });
+}
+
 async function exercitarCorrecaoAjudante(page) {
     return page.evaluate(async () => {
         const r = {};
@@ -1186,6 +1260,24 @@ async function main() {
             ok(ef.vazia.motivo === null && ef.naoString.motivo === null && ef.mensagemApiAposSem === '', `${viewport.width}: mensagem_api vazia/nao string e ignorada e nao vaza para a tentativa seguinte`);
             ok([ef.com, ef.longa, ef.html, ef.sem].every(x => x.suspensa === true), `${viewport.width}: inatividade suspensa em erro_finalizar (com e sem motivo)`);
             ok(ef.html.botoes.length === 2 && ef.sem.botoes.length === 2 && ef.sem.botoes.every(b => b.t !== 'Corrigir dados do ajudante') && !ef.html.botoes.some(b => b.t === 'Corrigir dados do ajudante'), `${viewport.width}: sem a palavra "ajudante" nao mostra "Corrigir dados do ajudante"`);
+            const gp = await exercitarGuichePortaria(page);
+            for (const k of ['exp', 'rec']) {
+                const g = gp[k], tg = `${viewport.width}: ${k} guiche`;
+                ok(g.guiche.imprTela === 'guiche_portaria' && g.guiche.texto.includes('Não foi possível concluir seu check-in.') && g.guiche.texto.includes('Dirija-se ao guichê da portaria.') && g.guiche.chamadas === 'finalizar', `${tg}: 422 TALENT_SEM_REGISTRO mostra a tela de guiche so com finalizar`);
+                ok(g.guiche.botoes.length === 1 && g.guiche.botoes[0].t === 'Voltar ao início' && g.guiche.botoes[0].prim && g.guiche.botoes[0].h >= 96 && g.guiche.botoes[0].fundo === 'rgb(1, 121, 173)' && g.guiche.botoes[0].dentro && !g.guiche.overflow, `${tg}: um unico botao Voltar ao inicio solido >= 96px, sem overflow ${JSON.stringify(g.guiche.botoes)}`);
+                ok(!/Tentar novamente|ajudante|Novo atendimento|Imprim/i.test(g.guiche.texto) && g.guiche.barra === 'none' && g.guiche.guiche && !g.guiche.suspensa, `${tg}: sem retry/ajudante/impressao, sem barra cancelar, inatividade nao suspensa`);
+                ok(['segundo400', 'processar400', 'segundo500', 'segundoSemReg', 'reentrada'].every(n => g[n].imprTela === 'guiche_portaria' && g[n].texto === g.guiche.texto && g[n].botoes.length === 1), `${tg}: 2o finalizar (400/500/422) e reentrada mantem a tela de guiche`);
+                ok(g.segundo400.chamadas === 'finalizar,finalizar' && !g.reentrada.chamadas.includes('cancelar') && !g.reentrada.chamadas.includes('gerar-etiqueta'), `${tg}: nenhum cancelar/etiqueta em chamadas ${g.reentrada.chamadas}`);
+                ok(g.idle.tela === 'lgpd' && g.idle.id === null && g.idle.chamadas === '' && !g.idle.aviso && !g.idle.guiche, `${tg}: inatividade volta ao inicio sem aviso e sem cancelar`);
+                ok(g.cancelarSair.tela === 'lgpd' && g.cancelarSair.chamadas === '', `${tg}: cancelarESair na tela de guiche nao chama cancelar`);
+                ok(g.voltar.tela === 'lgpd' && g.voltar.id === null && g.voltar.tipo === null && g.voltar.chamadas === '' && !g.voltar.guiche && g.voltar.barra === 'none' && g.voltar.lgpd, `${tg}: Voltar ao inicio reinicia sem chamar cancelar`);
+                ok(g.apos.imprTela === 'erro_finalizar' && g.apos.botoes.some(b => b.t === 'Tentar novamente'), `${tg}: novo atendimento apos guiche volta ao tratamento normal`);
+                for (const n of ['confirmacao', 'notas', 'semCodigo', 'http202', 'http500', 'http400']) {
+                    ok(g[n].imprTela === 'erro_finalizar' && g[n].botoes.map(b => b.t).includes('Tentar novamente') && g[n].botoes.map(b => b.t).includes('Novo atendimento') && g[n].suspensa && !g[n].guiche, `${tg}: regressao ${n} segue em erro_finalizar`);
+                }
+                ok(g.http202.botoes.some(b => b.t === 'Corrigir dados do ajudante') && g.http202.texto.includes('Motivo informado pelo sistema:'), `${tg}: regressao 202 com motivo da Talent mantida`);
+                ok(g.htmlSrv.imprTela === 'guiche_portaria' && !/onerror|<img/.test(g.htmlSrv.html) && g.htmlSrv.xss === 0 && !g.htmlSrv.texto.includes('onerror'), `${tg}: mensagem do servidor nao e exibida nem injetada`);
+            }
             const ca = await exercitarCorrecaoAjudante(page);
             ok(ca.crit.join(',') === 'true,true,false,false,true', `${viewport.width}: criterio de texto (acentos/caixa) para erro de ajudante`);
             for (const k of ['exp', 'rec']) {

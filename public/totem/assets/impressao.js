@@ -37,11 +37,13 @@ const imprState = {
     etiquetaPendente: 'motorista', // motorista | ajudante: qual etiqueta ainda precisa ser impressa
     motoristaImpressa: false, // true quando a etiqueta do motorista ja saiu com sucesso
     temEtiquetaAjudante: false, // tem_etiqueta_ajudante da resposta de gerar-etiqueta do motorista
+    guiche: false,
     processando: false, // trava de reentrancia contra toque duplo/chamadas concorrentes (item 3 da demanda impressao-arquitetura-producao-ux)
 };
 
 // Reinicia o controle das duas etiquetas (novo atendimento/cancelar/novo finalizar).
 function imprResetarEtiquetas() {
+    imprState.guiche = false;
     imprState.etiquetaPendente = 'motorista';
     imprState.motoristaImpressa = false;
     imprState.temEtiquetaAjudante = false;
@@ -84,6 +86,11 @@ function imprMensagemAmigavel(contexto, erro) {
 // Ponto de entrada de renderTela() para exp/rec_impressao. Ao voltar da correcao
 // do ajudante (Voltar, sem salvar) so reexibe a tela de erro, sem novo finalizar.
 function entrarTelaImpressao() {
+    if (imprState.guiche) {
+        imprState.tela = 'guiche_portaria';
+        imprRender();
+        return;
+    }
     if (imprState.retornoSemProcessar) {
         imprState.retornoSemProcessar = false;
         imprRender();
@@ -93,6 +100,11 @@ function entrarTelaImpressao() {
 }
 
 async function processarImpressao() {
+    if (imprState.guiche) {
+        imprState.tela = 'guiche_portaria';
+        imprRender();
+        return;
+    }
     Object.assign(imprState, {
         tela: 'enviando',
         mensagemErro: '',
@@ -117,6 +129,15 @@ async function imprFinalizar() {
         };
         await imprIniciarImpressao();
     } catch (e) {
+        if (imprState.guiche) return;
+        if (e && e.codigo === 'TALENT_SEM_REGISTRO') {
+            imprState.guiche = true;
+            imprState.mensagemErro = '';
+            imprState.mensagemApi = '';
+            imprState.tela = 'guiche_portaria';
+            imprRender();
+            return;
+        }
         // Inclui o codigo TALENT_CHECKIN_DESATIVADO (esperado nesta etapa,
         // .env ainda nao ativado) e qualquer outro erro de finalizar() —
         // sempre tratado como estado de erro claro/recuperavel, nunca como
@@ -415,6 +436,10 @@ function imprRender() {
     const el = document.getElementById('imprConteudo');
     if (!el) return;
     el.innerHTML = imprRenderCorpo();
+    if (imprState.tela === 'guiche_portaria') {
+        const barra = document.getElementById('barraCancelar');
+        if (barra) barra.style.display = 'none';
+    }
     if (imprState.tela === 'erro_finalizar') imprPreencherMotivoApi();
     // Nos estados que aguardam o atendente (sem papel / erro com "Tentar
     // novamente") a inatividade fica suspensa: fecha aviso aberto e rearma.
@@ -443,6 +468,12 @@ function imprTelaCarregando(mensagem) {
 // true quando a tela de impressao esta aguardando acao do atendente/motorista
 // (sem papel, erro, indeterminado ou erro ao finalizar). Consultada por app.js
 // (mostrarInatividade) para suspender o timer de inatividade, sem teto.
+function imprGuicheAtivo() {
+    return imprState.guiche
+        && (state.tela === 'exp_impressao' || state.tela === 'rec_impressao')
+        && imprState.tela === 'guiche_portaria';
+}
+
 function imprInatividadeSuspensa() {
     // Correcao do ajudante (a partir de erro_finalizar): o motorista aguarda o atendente.
     if ((state.tela === 'exp_ajudante' || state.tela === 'rec_ajudante') && state.ajudanteCorrecao) return true;
@@ -456,6 +487,7 @@ function imprRenderCorpo() {
         case 'sem_papel': return imprTelaSemPapel();
         case 'enviando': return imprTelaCarregando('Enviando seus dados...');
         case 'erro_finalizar': return imprTelaErroFinalizar();
+        case 'guiche_portaria': return imprTelaGuichePortaria();
         case 'selecionar_impressora': return imprTelaSelecionarImpressora();
         case 'preparando': return imprTelaCarregando('Preparando etiqueta...');
         case 'imprimindo': return imprTelaCarregando(imprTextoImprimindo());
@@ -477,6 +509,16 @@ function imprLinhaAjudantePendente() {
     return (imprState.etiquetaPendente === 'ajudante' && imprState.motoristaImpressa)
         ? '<div class="subtitulo">A etiqueta do ajudante ainda não foi impressa.</div>'
         : '';
+}
+
+function imprTelaGuichePortaria() {
+    return `<div class="impr-alerta" role="alert">
+            <div class="impr-alerta-titulo">Não foi possível concluir seu check-in.</div>
+            <div class="impr-alerta-texto">Dirija-se ao guichê da portaria.</div>
+        </div>
+        <div class="grupo-botoes">
+            <button class="btn-primario impr-btn-alvo" id="imprBtnVoltarInicio" onclick="novoAtendimento()">Voltar ao início</button>
+        </div>`;
 }
 
 function imprTelaErroFinalizar() {

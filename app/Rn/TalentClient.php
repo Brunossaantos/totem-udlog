@@ -56,16 +56,14 @@ class TalentClient
             $dados = json_decode($resposta, true);
             unset($resposta);
 
-            if (!is_array($dados)) {
-                return ['senha' => null, 'protocolo' => null];
+            $senha = is_array($dados) && is_string($dados['nrRegAcesso'] ?? null) ? $dados['nrRegAcesso'] : null;
+            unset($dados);
+
+            if ($senha === null || trim($senha) === '') {
+                throw new TalentClientException('resposta_ilegivel');
             }
 
-            unset($dados['msg']);
-
-            return [
-                'senha' => is_string($dados['nrRegAcesso'] ?? null) ? $dados['nrRegAcesso'] : null,
-                'protocolo' => null,
-            ];
+            return ['senha' => $senha, 'protocolo' => null];
         }
 
         $mensagemApi = is_string($resposta) ? \Util\MensagemApi::extrairDoCorpo($resposta) : null;

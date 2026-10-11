@@ -17,10 +17,8 @@
  * - 200/201 com nrRegAcesso extraido corretamente e mapeado para a chave
  *   interna 'senha' (protocolo sempre null, API real nunca devolve isso);
  * - 'msg' NUNCA aparece no array de retorno (descartado);
- * - 2xx sem nrRegAcesso no corpo -> senha=null, sem excecao;
- * - 2xx com corpo nao interpretavel como JSON -> senha=null, sem excecao
- *   (resposta_ilegivel nao e lancada aqui pois o codigo trata isso como
- *   sucesso tecnico sem dados extras, nao erro);
+ * - 2xx sem nrRegAcesso utilizavel (ausente, vazio, nao-string, corpo
+ *   nao-JSON/nao-array) -> TalentClientException 'resposta_ilegivel';
  * - HTTP 409 -> TalentClientException categoria 'conflito' (nunca
  *   reconciliado automaticamente como sucesso/duplicidade);
  * - HTTP 500 -> TalentClientException categoria 'erro_servidor';
@@ -109,24 +107,45 @@ try {
 }
 
 // ============================================================
-// 3. 200 sem nrRegAcesso no corpo -> senha=null, SEM excecao
+// 3/4. 2xx sem nrRegAcesso utilizavel NAO e sucesso -> resposta_ilegivel
 // ============================================================
-try {
-    $r = chamar($baseUrl, 'campo_ausente_200')['resultado'];
-    afirmar('HTTP 200 sem nrRegAcesso no corpo: senha=null, sem excecao', $r['senha'] === null && $r['protocolo'] === null);
-} catch (\Throwable $e) {
-    afirmar('HTTP 200 sem nrRegAcesso: nao deveria lancar excecao (' . $e->getMessage() . ')', false);
+foreach ([
+    'campo_ausente_200' => '200 sem nrRegAcesso',
+    'corpo_ilegivel_200' => '200 com corpo nao-JSON',
+    'nr_vazio_200' => '200 com nrRegAcesso vazio',
+    'nr_espacos_200' => '200 com nrRegAcesso so espacos',
+    'nr_null_200' => '201 com nrRegAcesso null',
+    'nr_numero_200' => '200 com nrRegAcesso numerico',
+    'nr_array_200' => '200 com nrRegAcesso array',
+    'json_lista_200' => '200 com JSON lista vazia',
+    'json_string_200' => '200 com JSON string',
+    'corpo_vazio_204' => '204 sem corpo',
+    'nr_aninhado_200' => '200 com nrRegAcesso aninhado em "dados"',
+] as $cenarioIlegivel => $rotulo) {
+    $categoriaIlegivel = null;
+    $retornou = false;
+    try {
+        chamar($baseUrl, $cenarioIlegivel);
+        $retornou = true;
+    } catch (TalentClientException $e) {
+        $categoriaIlegivel = $e->categoria();
+    }
+    afirmar("HTTP {$rotulo}: lanca resposta_ilegivel (nunca sucesso)", !$retornou && $categoriaIlegivel === 'resposta_ilegivel');
 }
-
-// ============================================================
-// 4. 200 com corpo ilegivel como JSON -> senha=null, SEM excecao
-// ============================================================
-try {
-    $r = chamar($baseUrl, 'corpo_ilegivel_200')['resultado'];
-    afirmar('HTTP 200 com corpo nao-JSON: senha=null, sem excecao (sucesso tecnico sem dados extras)', $r['senha'] === null && $r['protocolo'] === null);
-} catch (\Throwable $e) {
-    afirmar('HTTP 200 corpo ilegivel: nao deveria lancar excecao (' . $e->getMessage() . ')', false);
+foreach ([
+    'nr_zero_200' => '0',
+    'nr_zeros_esquerda_200' => '00123',
+    'nr_espaco_meio_200' => 'AB 12',
+    'nr_espacos_bordas_200' => '  ABC  ',
+] as $cenarioAceito => $valorEsperado) {
+    try {
+        $rAceito = chamar($baseUrl, $cenarioAceito)['resultado'];
+        afirmar("nrRegAcesso string com trim() !== '' e aceito: senha identica ao valor ('" . $valorEsperado . "'), sem trim, protocolo null", $rAceito['senha'] === $valorEsperado && $rAceito['protocolo'] === null);
+    } catch (\Throwable $e) {
+        afirmar("nrRegAcesso '" . $valorEsperado . "' nao deveria lancar excecao", false);
+    }
 }
+afirmar('resposta_ilegivel nao e indeterminada nem conflito', (new TalentClientException('resposta_ilegivel'))->ehIndeterminado() === false && (new TalentClientException('resposta_ilegivel'))->ehConflito() === false);
 
 // ============================================================
 // 5. HTTP 409 -> categoria propria 'conflito', NUNCA reconciliado como sucesso

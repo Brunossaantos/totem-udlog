@@ -15,7 +15,63 @@ $cenario = str_starts_with($auth, 'Bearer cenario_') ? substr($auth, strlen('Bea
 
 header('Content-Type: application/json; charset=utf-8');
 
+$arquivoContagem = getenv('TALENT_MOCK_CONTAGEM');
+if (is_string($arquivoContagem) && $arquivoContagem !== '') {
+    file_put_contents($arquivoContagem, $cenario . "\n", FILE_APPEND | LOCK_EX);
+}
+
 switch ($cenario) {
+    case 'nr_vazio_200':
+        http_response_code(200);
+        echo json_encode(['nrRegAcesso' => '', 'msg' => null]);
+        break;
+    case 'nr_espacos_200':
+        http_response_code(200);
+        echo json_encode(['nrRegAcesso' => "  \t ", 'msg' => null]);
+        break;
+    case 'nr_null_200':
+        http_response_code(201);
+        echo json_encode(['nrRegAcesso' => null, 'msg' => 'registrado']);
+        break;
+    case 'nr_zero_200':
+        http_response_code(200);
+        echo json_encode(['nrRegAcesso' => '0']);
+        break;
+    case 'nr_zeros_esquerda_200':
+        http_response_code(200);
+        echo json_encode(['nrRegAcesso' => '00123']);
+        break;
+    case 'nr_espaco_meio_200':
+        http_response_code(200);
+        echo json_encode(['nrRegAcesso' => 'AB 12']);
+        break;
+    case 'nr_espacos_bordas_200':
+        http_response_code(200);
+        echo json_encode(['nrRegAcesso' => '  ABC  ']);
+        break;
+    case 'nr_aninhado_200':
+        http_response_code(200);
+        echo json_encode(['dados' => ['nrRegAcesso' => 'X']]);
+        break;
+    case 'nr_numero_200':
+        http_response_code(200);
+        echo json_encode(['nrRegAcesso' => 12345]);
+        break;
+    case 'nr_array_200':
+        http_response_code(200);
+        echo json_encode(['nrRegAcesso' => ['X']]);
+        break;
+    case 'json_lista_200':
+        http_response_code(200);
+        echo '[]';
+        break;
+    case 'json_string_200':
+        http_response_code(200);
+        echo '"ok"';
+        break;
+    case 'corpo_vazio_204':
+        http_response_code(204);
+        break;
     case 'sucesso_200':
         http_response_code(200);
         echo json_encode(['nrRegAcesso' => 'ABC123', 'msg' => null]);

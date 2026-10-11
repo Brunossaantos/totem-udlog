@@ -424,6 +424,10 @@ function notificarFimDeTrabalhoNotas() {
 }
 
 function mostrarInatividade() {
+    if (typeof imprGuicheAtivo === 'function' && imprGuicheAtivo()) {
+        novoAtendimento();
+        return;
+    }
     if (typeof imprInatividadeSuspensa === 'function' && imprInatividadeSuspensa()) {
         suspensaoInicioMs = 0;
         clearTimeout(idleTimerPrincipal);
@@ -500,7 +504,7 @@ function confirmarCancelar() {
 }
 
 async function cancelarESair() {
-    if (state.idAtendimento) {
+    if (state.idAtendimento && !(typeof imprGuicheAtivo === 'function' && imprGuicheAtivo())) {
         try { await api('atendimento.php', 'cancelar', { id_atendimento: state.idAtendimento }); } catch (e) { }
     }
     novoAtendimento();

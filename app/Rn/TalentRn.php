@@ -53,6 +53,10 @@ class TalentRn
         try {
             $resultado = $this->talentClient->checkin($payload);
         } catch (TalentClientException $e) {
+            if ($e->categoria() === 'resposta_ilegivel') {
+                $cancelou = $this->atendimentoDao->cancelarPorRespostaSemRegistroTalent($idAtendimento, $tentativaId);
+                return ['status' => $cancelou ? 'SEM_REGISTRO_CANCELADO' : 'SEM_REGISTRO_NAO_APLICADO', 'senha' => null, 'protocolo' => null, 'erro_categoria' => 'resposta_ilegivel'];
+            }
             $statusFinal = $e->ehIndeterminado() ? 'ENVIO_INDETERMINADO' : 'ERRO_REPROCESSAVEL';
             $this->atendimentoDao->gravarResultadoEnvioTalent($idAtendimento, $tentativaId, $statusFinal, null, null);
             return ['status' => $statusFinal, 'senha' => null, 'protocolo' => null, 'erro_categoria' => $e->categoria(), 'mensagem_api' => $e->mensagemApi()];
