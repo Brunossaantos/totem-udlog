@@ -150,7 +150,7 @@ Limiares sem calibração com dados reais. **[P]** (P39 do estado)
 
 - Todas as notas apontando o mesmo cliente = IDENTIFICADO: o cliente é gravado no atendimento e a etapa pula para `rec_cnh`.
 - Dois ou mais clientes distintos = ANOMALIA/CONFLITO; nota em `ERRO` ou ainda processando (expirada) = ANOMALIA/INDETERMINADO; nenhum identificado: etapa `cliente`. Nos casos de anomalia e sem identificação o motorista seleciona o cliente manualmente. **[C]**
-- Cliente manual (`salvar-etapa cliente`): só aceita cliente **selecionado da lista** (CNPJ válido e cliente ativo); texto livre é recusado (400). O nome e o CNPJ gravados vêm do banco, não do que o motorista digitou. O autocomplete começa em 3 caracteres e retorna até 8 itens. **[C]** [T: teste_salvar_etapa_cliente_manual]
+- Cliente manual (`salvar-etapa cliente`): só aceita cliente **selecionado da lista** (CNPJ válido e cliente ativo); texto livre é recusado (400). O nome e o CNPJ gravados vêm do banco, não do que o motorista digitou. O autocomplete começa em 3 caracteres e mostra **no máximo uma** sugestão: só quando o texto digitado (CNPJ por prefixo, nome por trecho; normalizados) corresponde a um único cliente ativo; com 0 ou mais de 1 não mostra nada, e o motorista precisa tocar na sugestão para confirmar. **[C]** [T: teste_salvar_etapa_cliente_manual]
 
 ---
 
@@ -418,7 +418,6 @@ Fluxos: [acesso e usuários](fluxos/11-gestao-acesso-e-usuarios.md), [totens](fl
 - Sem rate limit de falhas de token nas APIs do totem; limites de login não atômicos entre processos.
 - Regerar a URL do totem não rotaciona o token da API (risco aceito pelo usuário).
 - `S6`: exceção após o commit do UPDATE de status de OC fecha a auditoria como `ERRO` mesmo se o estado mudou.
-- `ClienteDao::buscarPorTermo` usa LIKE sem escape; ver o estado para as demais pendências baixas.
 
 ### Decisões de produto (não serão tratadas)
 

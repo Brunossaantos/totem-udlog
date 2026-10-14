@@ -96,6 +96,5 @@ Registradas sem correção:
 - Ações POST voltam à lista sem filtros e página; "Voltar e editar o nome" abre o formulário em branco.
 - `NomeCadastro` aceita alguns invisíveis raros (U+17B4/5, U+180B-D, U+FE00/E, U+E0100), inofensivos.
 - Custo da simulação de ambiguidade: cerca de 0,46 s com 200 clientes ativos e 2,9 s com 500 (medido); acima de 500 a simulação é pulada.
-- `ClienteDao::buscarPorTermo` usa `LIKE` sem escape de curingas (anterior à F6).
 - Não há F5 (atendimentos do dia, travados, anexos órfãos), painel, status das integrações, saúde dos crons nem fotos de notas: descartados pelo usuário. A tela de clientes não toca o banco externo (`tb_clientes` do banco de coletas).
 - Testes: `[TESTE: teste_gestao_cadastros]`, `[TESTE: teste_gestao_qa_cadastros]`; não reexecutados.

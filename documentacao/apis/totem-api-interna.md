@@ -208,12 +208,12 @@ Testes: [T: _caso_nota_processar, _caso_nota_definir_numero, _caso_nota_pdo_falh
 
 | Ação | Método | Parâmetros | Resposta |
 |---|---|---|---|
-| `buscar` | `GET` no front (não validado) | query `termo` | 200 `{"clientes":[...]}` |
+| `buscar` | `GET` no front (não validado) | query `termo` | 200 `{"clientes":[]}` ou com **um único** cliente |
 
-- `termo` com menos de 3 bytes: 200 `{"clientes":[]}` sem consultar o banco. Senão `ClienteDao::buscarPorTermo` (prepared statement com `LIKE`, **sem escape** de `%` e `_`).
+- `termo` com menos de 3 bytes: 200 `{"clientes":[]}` sem consultar o banco. Senão `ClienteDao::buscarUnicoPorTermo`.
 - Outra ação: 404 `Acao invalida`.
-- A consulta é `SELECT * FROM tb_cliente WHERE ativo = 1 AND (nome LIKE :termo OR cnpj LIKE :termo) ORDER BY nome LIMIT 8`: devolve **todas as colunas** de `tb_cliente` (ver [banco-dados.md](../banco-dados.md)), no máximo 8 clientes ativos. **[C]**
-- Exemplo: `GET /api/cliente.php?acao=buscar&termo=exe` retorna `{"sucesso":true,"dados":{"clientes":[{"id_cliente":1,"nome":"CLIENTE EXEMPLO LTDA","cnpj":"00000000000191", "...":"demais colunas"}]}}` (ilustrativo).
+- Regra da busca manual (decisão do produto, 2026-10-14): no máximo **uma** sugestão. A consulta lê só `id_cliente`, `nome` e `cnpj` dos clientes **ativos**; o termo é normalizado (acentos, maiúsculas, espaços). Termo só com dígitos (ignorando `.`, `-`, `/` e espaços) casa por **prefixo do CNPJ**; caso contrário, por **trecho do nome**. Com 0 ou mais de 1 cliente distinto a resposta é `{"clientes":[]}`; com exatamente 1, devolve só `nome` e `cnpj`. **[C]**
+- Exemplo: `GET /api/cliente.php?acao=buscar&termo=exe` retorna `{"sucesso":true,"dados":{"clientes":[{"nome":"CLIENTE EXEMPLO LTDA","cnpj":"00000000000191"}]}}` (ilustrativo, só quando houver um único cliente ativo que case).
 - Testes `teste_hardening_cliente` e `teste_identificar_cliente` usam o banco de dev e não foram rodados na F6. **[A]**
 - O `catch` do front em `buscarClientes` engole erros 401/rede.
 

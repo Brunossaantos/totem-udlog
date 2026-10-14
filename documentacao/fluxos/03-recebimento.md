@@ -33,7 +33,7 @@ flowchart TD
     K --> L[rec_impressao]
 ```
 
-1. `rec_placa_qtd`: placa e "5 ou menos" / "Mais de 5". "Mais de 5" chama `bloquear-excesso-notas` e abre `rec_bloqueado` ("Esse atendimento precisa ser concluido no balcao da portaria"). `[CÓDIGO]`
+1. `rec_placa_qtd`: placa (o campo aceita no máximo 7 caracteres e o front exige exatamente 7; o backend não valida o formato) e "5 ou menos" / "Mais de 5". "Mais de 5" chama `bloquear-excesso-notas` e abre `rec_bloqueado` ("Esse atendimento precisa ser concluido no balcao da portaria"). `[CÓDIGO]`
 2. `rec_digitaliza`: captura cada nota (detalhes no fluxo [04](04-notas-e-ocr.md)); "Finalizar digitalização" habilita com 1 nota ou mais; com 5 notas a captura é desabilitada.
 3. `rec_revisao_numeros`: confirma o número de cada nota; "Continuar" só habilita com todas confirmadas.
 4. `rec_cliente` (somente se o cliente não foi identificado pelo OCR): autocomplete a partir de 3 letras; só aceita cliente **selecionado da lista**.

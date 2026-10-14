@@ -22,6 +22,7 @@ Este arquivo e atualizado ao final de cada ciclo (etapa 04), com entrada curta.
 
 ## Estado atual (2026-10-11)
 
+- [2026-10-14] Recebimento (sem commit/push; sem deploy): (1) campo de placa aceita no maximo 7 caracteres (`maxlength`, teclado virtual respeita o limite, front exige exatamente 7; backend NAO valida formato); (2) BUSCA MANUAL DE CLIENTE (quando o OCR nao identifica) mostra no maximo UMA sugestao: so quando o texto digitado resulta em um unico cliente ativo (CNPJ por prefixo em digitos; nome por trecho; normaliza acentos/espacos/caixa); 0 ou >1 = nenhuma; o motorista toca para confirmar; `cliente.php?acao=buscar` devolve 0 ou 1 item so com `nome` e `cnpj` (`ClienteDao::buscarUnicoPorTermo` substitui `buscarPorTermo`; `RazaoSocialMatcher::normalizarTextoBusca`). Inalterados: OCR automatico, Expedicao, Talent, banco/schema. Testes (QA/mock; historicos): `teste_busca_cliente_unica` 28, `teste_gestao_cadastros` 547, `teste_hardening_cliente` 104, `cliente_teclado_virtual.js` 23, `vio_captura_layout.js` 1868. Incidente: `teste_identificar_cliente.php` (usa o dev) rodado por engano 2x; dev conferido limpo. Handoff: `docs/handoffs/2026-10-14-busca-manual-cliente-recebimento.md`. Documentacao e CHANGELOG atualizados.
 - [2026-10-11] DECISAO DO USUARIO + IMPLEMENTACAO: Talent responde HTTP 2xx sem
   `nrRegAcesso` utilizavel (ausente/null/nao-string/vazio/so espacos/corpo
   nao-JSON/nao-array/204; criterio: string com `trim() !== ''`, "0" e "00123"
