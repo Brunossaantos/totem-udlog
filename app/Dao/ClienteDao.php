@@ -3,9 +3,12 @@
 namespace App\Dao;
 
 use PDO;
+use Util\RazaoSocialMatcher;
 
 class ClienteDao
 {
+    private const LIMITE_BUSCA_UNICA = 20000;
+
     public function __construct(private PDO $pdo) {}
 
     public function buscarPorCnpj(string $cnpj): ?array
@@ -15,15 +18,43 @@ class ClienteDao
         return $stmt->fetch() ?: null;
     }
 
-    public function buscarPorTermo(string $termo): array
+    public function buscarUnicoPorTermo(string $termo): ?array
     {
+        $termoNormalizado = RazaoSocialMatcher::normalizarTextoBusca($termo);
+        if (mb_strlen($termoNormalizado, 'UTF-8') < 3) {
+            return null;
+        }
+
+        $digitos = preg_replace('/[.\-\/\s]/', '', $termoNormalizado);
+        $porCnpj = is_string($digitos) && preg_match('/\A\d{3,}\z/', $digitos) === 1;
+
         $stmt = $this->pdo->prepare('
-            SELECT * FROM tb_cliente
-            WHERE ativo = 1 AND (nome LIKE :termo OR cnpj LIKE :termo)
-            ORDER BY nome LIMIT 8
-        ');
-        $stmt->execute(['termo' => "%{$termo}%"]);
-        return $stmt->fetchAll();
+            SELECT id_cliente, nome, cnpj
+            FROM tb_cliente
+            WHERE ativo = 1
+            ORDER BY id_cliente
+            LIMIT ' . self::LIMITE_BUSCA_UNICA
+        );
+        $stmt->execute();
+
+        $encontrados = [];
+        foreach ($stmt->fetchAll() as $linha) {
+            if ($porCnpj) {
+                $cnpjLinha = (string) preg_replace('/\D/', '', (string) $linha['cnpj']);
+                $casou = str_starts_with($cnpjLinha, $digitos);
+            } else {
+                $nomeLinha = RazaoSocialMatcher::normalizarTextoBusca((string) $linha['nome']);
+                $casou = mb_strpos($nomeLinha, $termoNormalizado, 0, 'UTF-8') !== false;
+            }
+            if ($casou) {
+                $encontrados[(int) $linha['id_cliente']] = $linha;
+                if (count($encontrados) > 1) {
+                    return null;
+                }
+            }
+        }
+
+        return count($encontrados) === 1 ? reset($encontrados) : null;
     }
 
     public function listarParaFuzzy(): array

@@ -89,6 +89,20 @@ class RazaoSocialMatcher
         'Ŵ' => 'W', 'Ŷ' => 'Y', 'Ÿ' => 'Y', 'Ź' => 'Z', 'Ż' => 'Z', 'Ž' => 'Z',
     ];
 
+    public static function normalizarTextoBusca(string $texto): string
+    {
+        $normalizado = mb_convert_encoding($texto, 'UTF-8', 'UTF-8');
+        $normalizado = mb_strtoupper($normalizado, 'UTF-8');
+        $semMarcas = preg_replace('/\p{Mn}+/u', '', $normalizado);
+        if (is_string($semMarcas)) {
+            $normalizado = $semMarcas;
+        }
+        $normalizado = strtr($normalizado, self::MAPA_ASCII);
+        $colapsado = preg_replace('/\s+/u', ' ', $normalizado);
+
+        return trim(is_string($colapsado) ? $colapsado : $normalizado);
+    }
+
     public static function normalizar(string $razaoSocial): string
     {
         $normalizada = mb_convert_encoding($razaoSocial, 'UTF-8', 'UTF-8');

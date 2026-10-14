@@ -1365,6 +1365,33 @@ async function main() {
             }
             ok(nm.campoH >= 100, `${W}: campo do numero da nota >= 100px (${nm.campoH}px)`);
             console.log(`  numerico ${W}x${viewport.height}: tecla ${nm.teclas[0].w}x${nm.teclas[0].h}px, fonte ${nm.teclas[0].fonte}px, modal ${nm.caixaW}px, rolagem interna ${nm.rolagem ? 'sim' : 'nao'}; botoes de modal min ${Math.min(...Object.values(at.modais).flatMap(m => m.botoes.map(b => b.h)))}px`);
+            const placaRec = await page.evaluate(async () => {
+                const origApi = window.api, origErr = window.mostrarErroTela;
+                const chamadas = []; let erro = null;
+                window.api = async (arq, acao) => { chamadas.push(arq + ':' + acao); throw Object.assign(new Error('parar'), { status: 500 }); };
+                window.mostrarErroTela = (m) => { erro = m; };
+                const saida = {};
+                document.getElementById('tela').innerHTML = telaRecPlacaQtd();
+                const campo = document.getElementById('inputPlacaRec');
+                saida.maxlength = campo.getAttribute('maxlength'); saida.placeholder = campo.getAttribute('placeholder');
+                abrirTeclado(campo);
+                for (const c of 'ABC1D23XYZ') digitar(c);
+                saida.valorTeclado = campo.value;
+                const tenta = async (v) => { campo.value = v; chamadas.length = 0; erro = null; await iniciarRecebimento(false); return { n: chamadas.filter(x => x === 'atendimento.php:iniciar').length, erro }; };
+                saida.vazio = await tenta(''); saida.seis = await tenta('ABC1D2'); saida.oito = await tenta('ABC1D234'); saida.sete = await tenta('ABC1D23');
+                fecharTeclado();
+                document.getElementById('tela').innerHTML = telaPlacaExpedicao();
+                saida.expMax = document.getElementById('inputPlaca').hasAttribute('maxlength');
+                window.api = origApi; window.mostrarErroTela = origErr;
+                return saida;
+            });
+            ok(placaRec.maxlength === '7' && placaRec.placeholder === 'AAA0A00', `${W}: placa do Recebimento com maxlength=7 e placeholder AAA0A00`);
+            ok(placaRec.valorTeclado === 'ABC1D23', `${W}: teclado virtual para no 7o caractere (${placaRec.valorTeclado})`);
+            ok(placaRec.vazio.n === 0 && placaRec.vazio.erro === 'Digite a placa', `${W}: placa vazia mostra Digite a placa sem chamar a API`);
+            ok(placaRec.seis.n === 0 && placaRec.seis.erro === 'A placa deve ter 7 caracteres', `${W}: placa de 6 caracteres nao chama iniciar e mostra erro`);
+            ok(placaRec.oito.n === 0 && placaRec.oito.erro === 'A placa deve ter 7 caracteres', `${W}: placa de 8 caracteres nao chama iniciar e mostra erro`);
+            ok(placaRec.sete.n === 1, `${W}: placa de 7 caracteres chama iniciar`);
+            ok(placaRec.expMax === false, `${W}: campo de placa da Expedicao continua sem maxlength`);
             // feedback visual ao toque (:active, cor solida) e nenhum :hover no bloco novo
             await page.evaluate(() => { document.getElementById('tela').innerHTML = telaPlacaExpedicao(); abrirTeclado(document.getElementById('inputPlaca')); });
             const fbTecla = await medirFeedbackToque(page, '#teclado .tecla:not(.tecla-ok):not(.tecla-apagar):not(.tecla-espaco)');

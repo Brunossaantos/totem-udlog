@@ -387,7 +387,7 @@ function montarTeclado() {
 function abrirTeclado(el) { campoAtivo = el; document.getElementById('teclado').classList.add('aberto'); }
 function fecharTeclado() { document.getElementById('teclado').classList.remove('aberto'); campoAtivo = null; }
 function notificarInput(el) { el.dispatchEvent(new Event('input', { bubbles: true })); }
-function digitar(c) { if (campoAtivo) { campoAtivo.value += c; ajustarAlturaTextarea(campoAtivo); notificarInput(campoAtivo); } }
+function digitar(c) { if (campoAtivo) { if (campoAtivo.maxLength > 0 && campoAtivo.value.length >= campoAtivo.maxLength) return; campoAtivo.value += c; ajustarAlturaTextarea(campoAtivo); notificarInput(campoAtivo); } }
 function apagar() { if (campoAtivo) { campoAtivo.value = campoAtivo.value.slice(0, -1); ajustarAlturaTextarea(campoAtivo); notificarInput(campoAtivo); } }
 
 let idleTimerPrincipal = null;
@@ -1927,7 +1927,7 @@ function voltarDaCorrecaoAjudante() {
 
 function telaRecPlacaQtd() {
     return `<div class="titulo">Digite a placa do veículo</div>
-        <input class="campo-texto kb-input" id="inputPlacaRec" autocomplete="off" placeholder="AAA-0A00">
+        <input class="campo-texto kb-input" id="inputPlacaRec" autocomplete="off" maxlength="7" placeholder="AAA0A00">
         <div class="subtitulo">Quantas notas fiscais você possui?</div>
         <div class="grupo-botoes">
             <button class="btn-primario" onclick="iniciarRecebimento(false)">5 ou menos</button>
@@ -1937,6 +1937,7 @@ function telaRecPlacaQtd() {
 async function iniciarRecebimento(excedeLimite) {
     const placa = document.getElementById('inputPlacaRec').value.trim();
     if (!placa) return mostrarErroTela('Digite a placa');
+    if (placa.length !== 7) return mostrarErroTela('A placa deve ter 7 caracteres');
     state.placa = placa;
     let dados;
     try {
@@ -3676,9 +3677,13 @@ async function buscarClientes(termo) {
             headers: { 'Authorization': `Bearer ${TOKEN}` },
         });
         const json = await res.json();
-        const lista = (json.dados && json.dados.clientes) || [];
-        document.getElementById('listaSugestoes').innerHTML = lista.map(c =>
-            `<div class="item" data-nome="${escapeHtml(c.nome)}" data-cnpj="${escapeHtml(c.cnpj)}">${escapeHtml(c.nome)}</div>`
+        const campo = document.getElementById('inputCliente');
+        const caixa = document.getElementById('listaSugestoes');
+        if (!campo || !caixa || campo.value.trim() !== termo) return;
+        let lista = json && json.dados && json.dados.clientes;
+        if (!Array.isArray(lista) || lista.length !== 1 || !lista[0] || typeof lista[0].nome !== 'string' || !lista[0].nome) lista = [];
+        caixa.innerHTML = lista.map(c =>
+            `<div class="item" data-nome="${escapeHtml(c.nome)}" data-cnpj="${escapeHtml(c.cnpj == null ? '' : String(c.cnpj))}">${escapeHtml(c.nome)}</div>`
         ).join('');
         document.querySelectorAll('#listaSugestoes .item').forEach(item => {
             item.addEventListener('click', () => {

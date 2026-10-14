@@ -18,10 +18,11 @@ $clienteDao = new ClienteDao($pdo);
 
 if (($_GET['acao'] ?? '') === 'buscar') {
     $termo = $_GET['termo'] ?? '';
-    if (strlen($termo) < 3) {
+    if (!is_string($termo) || strlen($termo) < 3) {
         Resposta::sucesso(['clientes' => []]);
     }
-    Resposta::sucesso(['clientes' => $clienteDao->buscarPorTermo($termo)]);
+    $cliente = $clienteDao->buscarUnicoPorTermo($termo);
+    Resposta::sucesso(['clientes' => $cliente === null ? [] : [['nome' => $cliente['nome'], 'cnpj' => $cliente['cnpj']]]]);
 } else {
     Resposta::erro('Acao invalida', 404);
 }
