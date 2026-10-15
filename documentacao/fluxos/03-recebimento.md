@@ -33,12 +33,12 @@ flowchart TD
     K --> L[rec_impressao]
 ```
 
-1. `rec_placa_qtd`: placa (o campo aceita no máximo 7 caracteres e o front exige exatamente 7; o backend não valida o formato) e "5 ou menos" / "Mais de 5". "Mais de 5" chama `bloquear-excesso-notas` e abre `rec_bloqueado` ("Esse atendimento precisa ser concluido no balcao da portaria"). `[CÓDIGO]`
-2. `rec_digitaliza`: captura cada nota (detalhes no fluxo [04](04-notas-e-ocr.md)); "Finalizar digitalização" habilita com 1 nota ou mais; com 5 notas a captura é desabilitada.
+1. `rec_placa_qtd`: placa (campo sem texto de exemplo; aceita no máximo 7 caracteres, inclusive pelo teclado virtual, e o front exige exatamente 7, com a mensagem "A placa deve ter 7 caracteres"; o backend não valida o formato) e "5 ou menos" / "Mais de 5". "Mais de 5" chama `bloquear-excesso-notas` e abre `rec_bloqueado` ("Esse atendimento precisa ser concluido no balcao da portaria"). `[CÓDIGO]`
+2. `rec_digitaliza`: captura cada nota (detalhes no fluxo [04](04-notas-e-ocr.md)); "Finalizar digitalização" habilita com 1 nota ou mais; com 5 notas a captura é desabilitada. Após salvar cada nota aparece uma faixa azul com a orientação seguinte ("Nota N de 5 salva! Coloque a próxima nota no scanner ou toque em Finalizar digitalização."; na 5ª, "Limite de 5 notas atingido. Toque em Finalizar digitalização."); ver [04](04-notas-e-ocr.md). `[CÓDIGO]`
 3. `rec_revisao_numeros`: confirma o número de cada nota; "Continuar" só habilita com todas confirmadas.
-4. `rec_cliente` (somente se o cliente não foi identificado pelo OCR): autocomplete a partir de 3 letras; só aceita cliente **selecionado da lista**.
-5. `rec_cnh_qr`, `rec_crlv_qr`, `rec_aguarde_documentos`: fluxo [05](05-cnh-crlv-qr-vio.md).
-6. `rec_confirma`, `rec_ajudante`, `rec_impressao`: como na [Expedição](02-expedicao.md), com Cliente somente leitura na confirmação.
+4. `rec_cliente` (somente se o cliente não foi identificado pelo OCR): busca manual a partir de 3 caracteres, com **no máximo uma** sugestão. A sugestão só aparece quando exatamente um cliente ativo casa com o termo (CNPJ por prefixo, se o termo tem só dígitos; senão, nome por trecho; acentos, espaços e caixa são normalizados); com nenhum ou mais de um, nenhuma sugestão. O motorista toca na sugestão para confirmar, e só aceita cliente **selecionado**. O front descarta respostas de um termo já substituído. `[CÓDIGO]` `[TESTE: teste_busca_cliente_unica, cliente_teclado_virtual.js]`
+5. `rec_cnh_qr`, `rec_crlv_qr`, `rec_aguarde_documentos`: fluxo [05](05-cnh-crlv-qr-vio.md); os títulos dos QR aparecem em faixa de destaque (azul na CNH, grafite no CRLV), como na Expedição. `[CÓDIGO]`
+6. `rec_confirma`, `rec_ajudante`, `rec_impressao`: como na [Expedição](02-expedicao.md), com Cliente somente leitura na confirmação. Na tela manual da CNH e na confirmação valem os mesmos filtros de nome (só letras e espaço), CPF (só números, 11) e validade (`DD-MM-AAAA`) da Expedição; no ajudante, o CPF exige exatamente 11 números. `[CÓDIGO]`
 
 ## Processamento interno
 
@@ -78,7 +78,8 @@ Ver [09](09-cancelamento-e-abandono.md). Cancelar ou abandonar move as fotos das
 ## Pendências conhecidas
 
 - **`finalizar` não exige cliente no Recebimento**: um registro de 02/10 dizia que o `finalizar` exigiria também o cliente; no código só a confirmação (`camposObrigatoriosAusentes`) exige `cliente_nome`. O CNPJ do depositante é validado ao montar o payload do Talent (falha vira `ERRO_REPROCESSAVEL`/`erro_montagem_payload`). `[CÓDIGO]`
-- `CONCLUIR_EXIGE_NUMERO_NOTA`: padrão `false`; decisão do usuário em 2026-10-11 de ativar em produção (valor no servidor a confirmar): ver fluxo 04.
+- `CONCLUIR_EXIGE_NUMERO_NOTA`: padrão `false`; em produção está `true` (conferido em 2026-10-16): ver fluxo 04.
+- O backend não valida o formato da placa; só o front limita (7 caracteres no Recebimento). Observação de comportamento, não pendência de produto.
 - Papel emitente/destinatário não implementado: ver fluxo 04.
 - Captura de notas sem interrupção (P01 a P16): implementações 2 e 3 não iniciadas; testes físicos pendentes. `[PENDENTE DE CONFIRMAÇÃO]`
 - Chave de acesso da nota é sempre nula no payload (P26).

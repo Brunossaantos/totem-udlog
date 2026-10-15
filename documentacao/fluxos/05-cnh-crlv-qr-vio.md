@@ -18,7 +18,7 @@ Atendimento `em_andamento` e etapa permitida: CNH em `exp_cnh`/`exp_crlv`/`exp_a
 
 ## Etapas do motorista
 
-1. `*_cnh_qr`: posiciona o QR da CNH digital no guia da câmera e toca para ler. O front tenta até 3 quadros por toque (intervalo 150 ms, orçamento de 300 ms por quadro, watchdog de 4 s). `[CÓDIGO]`
+1. `*_cnh_qr`: o título "Leia o QR code da CNH" aparece em faixa de destaque (36 px, peso 800, texto branco) com fundo azul UDLOG (`#0179AD`); na tela do CRLV (`*_crlv_qr`), "Leia o QR code do CRLV" usa a mesma faixa com fundo grafite (`#3A3A3A`). Vale para Expedição e Recebimento. O motorista posiciona o QR da CNH digital no guia da câmera e toca para ler. O front tenta até 3 quadros por toque (intervalo 150 ms, orçamento de 300 ms por quadro, watchdog de 4 s). `[CÓDIGO]`
 2. Achou o QR: o front envia o quadro JPEG (qualidade 0,85, base64) ao backend e avança; `*_crlv_qr` repete para o CRLV. CNH e CRLV processam em paralelo. `[CÓDIGO]`
 3. `*_aguarde_documentos`: o front consulta o status a cada 2 s, com teto de 125 s. Se ambos aprovados, segue para a confirmação. `[CÓDIGO]`
 4. Não achou o QR: contador de tentativas por tipo; na 3ª falha abre `*_manual`.
@@ -65,7 +65,13 @@ flowchart TD
 
 ### Fallback manual (`documento.php?acao=preencher-manual`)
 
-CNH (nome, CPF, validade) ou CRLV (placa, exercício, UF, RNTRC, tipo). Passa pelas **mesmas** validações, com origem `MANUAL` e `status_revisao=PENDENTE_REVISAO`; CNH vencida e placa divergente também são recusadas. RNTRC/tipo vazios herdam do snapshot se a origem atual é VIO. No front a tela manual só confere campos não vazios e CPF com 11 dígitos. `[CÓDIGO]`
+CNH (nome, CPF, validade) ou CRLV (placa, exercício, UF, RNTRC, tipo). Passa pelas **mesmas** validações, com origem `MANUAL` e `status_revisao=PENDENTE_REVISAO`; CNH vencida e placa divergente também são recusadas. RNTRC/tipo vazios herdam do snapshot se a origem atual é VIO. No front a tela manual só confere campos não vazios, CPF com 11 dígitos e validade completa e existente. `[CÓDIGO]`
+
+**Campos do motorista no totem** (tela manual da CNH e tela "Confirme os dados", na Expedição e no Recebimento): `[CÓDIGO]` `[TESTE: vio_captura_layout.js]`
+
+- **Nome:** aceita só letras (inclusive acentuadas) e espaço; o filtro roda ao digitar. Limitação: um nome vindo da CNH com apóstrofo, hífen ou ponto só é alterado se o motorista editar o campo.
+- **CPF:** só números, no máximo 11 (valor pré-preenchido com pontuação aparece só com dígitos). O dígito verificador continua validado **só no backend**.
+- **Validade da CNH** (rótulo "Validade (DD-MM-AAAA)"): máscara automática; o motorista digita só números e o campo insere os hífens antes do 3º e do 5º dígito (ex.: `20082035` vira `20-08-2035`). Valores vindos do sistema (`AAAA-MM-DD` ou `DD/MM/AAAA`) são exibidos em `DD-MM-AAAA`. Ao confirmar, o front converte e **envia ao backend como `AAAA-MM-DD`** (o backend aceita só `AAAA-MM-DD` ou `DD/MM/AAAA`). Data incompleta ou inexistente (por exemplo, 31-02-2030) não chama a API e mostra "Informe a validade no formato DD-MM-AAAA"; validade vazia mantém a mensagem e a obrigatoriedade anteriores ("Informe a validade da CNH").
 
 ### Rebaixamento para MANUAL na confirmação
 

@@ -137,6 +137,7 @@ Verificação prévia sugerida do ambiente (sem tocar dados): rodar `teste_prepe
 | A-VAL-10 | Regras de CRLV e rebaixamento a MANUAL | `php tests/manual/teste_vio_api_br_regras_crlv_e_rebaixamento.php` | RE-A | QA |
 | A-VAL-11 | `autocomplete="off"` nos campos do quiosque | `php tests/manual/teste_totem_autocomplete_off.php` | RE-A | ZERO |
 | A-VAL-12 | Aceite LGPD (backend, 14 cenários) | `php tests/manual/teste_lgpd_aceite_backend_seguranca.php` | **Não roda**: falta `_fixtures_lgpd.php` (D6) | QA (pelo cabeçalho) |
+| A-VAL-13 | Busca manual de cliente (Recebimento): `ClienteDao::buscarUnicoPorTermo` e a rota real `cliente.php?acao=buscar` via php-cgi; no máximo um cliente ativo (CNPJ por prefixo, nome por trecho, normalização), 0 ou mais de 1 devolvem lista vazia, só `nome` e `cnpj` | `php tests/manual/teste_busca_cliente_unica.php` | RE-A | QA (php-cgi) |
 
 ### 2.4 Concorrência (GET_LOCK, CAS, UNIQUE)
 
@@ -231,8 +232,14 @@ Os locks usam `GET_LOCK` (ex.: `DocumentoController` com chave por atendimento e
 | A-GES-08 | Telas de OC e PDF (auditoria antes do 1º byte) | `php tests/manual/teste_gestao_ordens.php` | RE-A | QA |
 | A-GES-09 | Clientes/empresas: CRUD, auditoria, aviso de ambiguidade do OCR, nomes exóticos | `php tests/manual/teste_gestao_cadastros.php`, `teste_gestao_qa_cadastros.php` | RE-A | QA |
 | A-GES-10 | Unidade e totens (código `NOME-EMPRESA-HASH16`, regerar URL, `TOTEM_URL_BASE`) | `php tests/manual/teste_gestao_unidade.php`, `teste_gestao_totens.php` | RE-A | QA |
-| A-GES-11 | Autocomplete de cliente com teclado virtual/físico (`cliente.php` mockado) | `node tests/manual/cliente_teclado_virtual.js` | RE-A | sem banco (Chrome) |
+| A-GES-11 | Autocomplete de cliente com teclado virtual/físico (`cliente.php` mockado); inclui a regra da busca única no front (no máximo uma sugestão; 0, 2 ou formato inesperado = nenhuma; sem seleção automática; toque confirma; resposta de termo antigo descartada) e o limite de `maxLength` no `digitar` | `node tests/manual/cliente_teclado_virtual.js` | RE-A | sem banco (Chrome) |
 | A-GES-12 | Layout e QR do totem (frame simulado). Cobre, desde 2026-10-11, a tela `guiche_portaria` (título e texto com acentos, um único botão "Voltar ao início", sem retry/ajudante/impressão, barra Cancelar oculta, `cancelar` nunca chamado, 2º `finalizar` 400/500/422 mantém a tela, inatividade de 180 s volta ao início sem aviso) em Expedição e Recebimento | `node tests/manual/vio_captura_layout.js` | RE-A | sem banco (Chrome) |
+| A-GES-13 | Títulos dos QR: as 4 telas (`exp_cnh_qr`, `exp_crlv_qr`, `rec_cnh_qr`, `rec_crlv_qr`) têm a faixa `.titulo-doc` (36 px, peso 800, texto branco; CNH azul `#0179AD`, CRLV grafite `#3A3A3A`) | `node tests/manual/vio_captura_layout.js` | RE-A | sem banco (Chrome) |
+| A-GES-14 | Mensagem de próxima nota em `rec_digitaliza`: texto exato nas notas 1 a 4 e na 5ª (limite, captura desabilitada), some em "Capturar nota"/"Refazer", não aparece durante o envio nem em erro de upload ou de rede, nos 3 viewports | `node tests/manual/vio_captura_layout.js` | RE-A | sem banco (Chrome) |
+| A-GES-15 | Placa: Recebimento com `maxlength=7` e sem `placeholder`, placa de 6 ou 8 caracteres não chama `iniciar` e mostra "A placa deve ter 7 caracteres"; Expedição sem `placeholder` e sem `maxlength` | `node tests/manual/vio_captura_layout.js` | RE-A | sem banco (Chrome) |
+| A-GES-16 | CPF do ajudante: `maxlength=11`, `inputmode=numeric`, 10 dígitos ou vazio não chama `salvar-etapa` (nem no modo de correção) e mostra "O CPF deve ter 11 números"; nome só letras | `node tests/manual/vio_captura_layout.js` | RE-A | sem banco (Chrome) |
+| A-GES-17 | Campos do motorista (CNH manual na Expedição e no Recebimento e "Confirme os dados"): nome só letras e espaço; CPF só números (11; valor pré-preenchido só com dígitos); validade com máscara `DD-MM-AAAA` (`20082035` vira `20-08-2035`), rótulo "Validade (DD-MM-AAAA)", exibição em `DD-MM-AAAA` e envio como `AAAA-MM-DD` | `node tests/manual/vio_captura_layout.js` | RE-A | sem banco (Chrome) |
+| A-GES-18 | Validade incompleta, inexistente (31-02-2030) ou com mês 13 não chama a API e mostra "Informe a validade no formato DD-MM-AAAA" | `node tests/manual/vio_captura_layout.js` | RE-A | sem banco (Chrome) |
 
 ### 2.10 Impressão e equipamentos (automatizado, sem hardware)
 
@@ -312,6 +319,16 @@ Lacuna (ver seção 6): não há teste automatizado de rota HTTP, CORS ou 409 `s
 ### B-TEC-01 Teclado virtual
 - **Objetivo / risco:** digitar placa, nome e cliente (autocomplete) no teclado virtual em tela touch; teclado cobrindo campos. **Esperado:** autocomplete funciona, campos visíveis. **[HISTÓRICO]** confirmado fisicamente pelo usuário em 2026-10-08 (histórico; repetir se a tela mudar). **Tipo:** FÍSICO. Automatizado relacionado: A-GES-11.
 
+### B-TOT-01 Campos e telas do totem alterados recentemente (conferência no quiosque)
+- **Objetivo / risco:** conferir no quiosque real (monitor touch em retrato, teclado virtual) o que só os testes headless simulam. **Pré-condições:** totem de **teste**; dados fictícios; Talent e impressão desligados ou em mock. **Tipo:** MANUAL/FÍSICO. **Automatizados relacionados:** A-VAL-13, A-GES-11, A-GES-13 a A-GES-18. **Esperado:** conforme [02](fluxos/02-expedicao.md), [03](fluxos/03-recebimento.md), [04](fluxos/04-notas-e-ocr.md) e [05](fluxos/05-cnh-crlv-qr-vio.md). Verificar, tela a tela:
+  1. **Placa:** campos da Expedição e do Recebimento sem texto de exemplo; no Recebimento o teclado virtual não passa de 7 caracteres e 6 ou 8 caracteres mostram "A placa deve ter 7 caracteres".
+  2. **Ajudante:** nome só com letras e espaço; CPF só com números, no máximo 11; "Confirmar" com menos de 11 mostra "O CPF deve ter 11 números".
+  3. **CNH manual e "Confirme os dados":** nome só com letras e espaço; CPF só números (11); validade com hífens automáticos (digitar `20082035` mostra `20-08-2035`); validade incompleta ou inexistente (31-02-2030) mostra "Informe a validade no formato DD-MM-AAAA"; na confirmação, a validade vinda do sistema aparece em `DD-MM-AAAA`.
+  4. **QR coloridos:** "Leia o QR code da CNH" em faixa azul e "Leia o QR code do CRLV" em faixa grafite, legíveis, nas quatro telas (Expedição e Recebimento).
+  5. **Próxima nota (Recebimento):** após salvar cada nota, faixa azul com "Nota N de 5 salva! ..."; na 5ª, a mensagem de limite; some ao tocar "Capturar nota" ou "Refazer"; não aparece em erro de upload.
+  6. **Busca de cliente (Recebimento, OCR sem identificar):** digitar parte do nome ou do CNPJ de um cliente ativo único mostra uma sugestão, que só vale ao tocar; termo com 0 ou mais de 1 correspondência não mostra nada.
+  7. **Guichê da portaria:** ver B-INT-02.
+
 ### B-INA-01 Inatividade, cancelamento e recarga da página (sem retomada)
 - **Objetivo / risco:** timeout de inatividade, abandono e comportamento após F5 no meio do atendimento (não existe retomada: P38).
 - **Passos:** iniciar atendimento; deixar ocioso até o aviso e até o encerramento; em outro atendimento, recarregar a página no meio de uma etapa.
@@ -375,6 +392,9 @@ Todas as contagens abaixo são registros históricos de datas passadas e **nenhu
 | `gestao_layout.js` | 5682 (F6) e 4037 (F4) | bateria de 2026-10-09 |
 | `vio_captura_layout.js` | 1745 | bateria de 2026-10-09 |
 | `vio_captura_layout.js` (com a tela `guiche_portaria`) | 1847 (102 novas) | entrada de 2026-10-11 (relato do QA; histórico) |
+| `teste_busca_cliente_unica` | 28 | relato anterior ao deploy de 2026-10-16 (data da execução não registrada; histórico) |
+| `cliente_teclado_virtual.js` (inclui a busca única) | 23 | relato anterior ao deploy de 2026-10-16 (data não registrada; histórico) |
+| `vio_captura_layout.js` (títulos QR, próxima nota, placa, ajudante e campos do motorista) | 1958 no commit `82ad36d`; 2030 no último estado do código, ainda não commitado | relato anterior ao deploy de 2026-10-16 (data não registrada; histórico) |
 | `teste_talent_sem_registro` | 142 | execução de 2026-10-11 após os ajustes de CAS e de cobertura (relato do implementador e reexecução; histórico, não é aprovação futura) |
 | e2e mock / QR integração / sem_fila / salvar_etapa_cliente | 38 / 50 / 49 / 18 | bateria de 2026-10-09 |
 | OC anexo: lógica / http / lacunas | 183 / 59 / 59 | bateria de 2026-10-09 |
@@ -387,6 +407,7 @@ Observações:
 - Os valores pós-higienização (272, 215, 233, 89, 116, 74, 3, 49, 183) vêm de entradas que registram só a mudança de contagem, **não** uma nova execução completa.
 - Para a regressão pós-`d783768`/`9d44513`, só há registro de vio_layout 1745, e2e 38, QR 50, sem_fila 53 e qa_independente 286.
 - Não há registro de bateria completa após o HEAD `4188fee`.
+- Relato recente, sem data de execução registrada e sem reexecução ao escrever esta documentação: `teste_gestao_unidade` 254, `teste_gestao_http` 168 e `gestao_layout.js` 5682 (relatadas como resultado recente); `teste_talent_sem_registro` 142. Histórico, não é aprovação atual.
 - As duas linhas de 2026-10-11 (1847 e 93) são o relato das revisões de QA, segurança e UX do ajuste "Talent 2xx sem `nrRegAcesso`", sobre alterações ainda não commitadas; **não foram reexecutadas ao escrever este documento** e não valem como aprovação atual. O `teste_talent_client_parsing` foi atualizado na mesma alteração; não há contagem registrada para ele neste documento.
 
 ---
@@ -408,3 +429,5 @@ Observações:
 | D11 | **Testes físicos pendentes:** P47 (falta de papel real, duas etiquetas, QR com o Netum), P32 (Netum como videoinput, roteiro de 20 itens), P33 (OCR no mini PC), P36 (permissão de câmera no Chrome kiosk), P54 (medidas finais do papel). | B-IMP-02/03/04, B-QR-01, B-OCR-01, B-CAM-01. |
 | D12 | Outras: P24 (`consulta_ordem_coleta` 12/17 por fixture), P58 (`oc_anexo_lacunas` rc 0 com falhas), P23 (`status_processamento` flaky), P59 (`link()` validado só em Windows/NTFS), `leitura_falhou` do PDF sem caso dinâmico, risco residual aceito de JPEG truncado com EOI forjado, resíduos de bancos `qa_*` antigos, sem PHPUnit e sem CI. | Ler as saídas completas; registrar resíduos. |
 | D13 | Divergência de impressão: o registro do projeto afirma validação física no mini PC de produção (2026-10-06); o README do serviço ainda diz que a validação e a ativação de `origensPermitidas` de produção estão pendentes. | Tratar B-IMP-01 como não confirmado até nova evidência. |
+| D14 | `front_r4_f8_f9.js`: 70 verificações OK e 7 falhas; `front_r4b_uid_409.js`: timeout intermitente. Relato de que **ambos já falhavam antes das mudanças recentes** (não reconferido ao escrever esta documentação). | A-CAN-05 e A-IDE-02 não devem ser lidos como aprovados; não é regressão atribuída às mudanças recentes. |
+| D15 | `teste_identificar_cliente.php` usa o banco de desenvolvimento e **não deve ser rodado sem cuidado** (ver D7). Não cobre a busca manual (essa é A-VAL-13, em banco QA). | A-VAL-07 segue como DEV. |

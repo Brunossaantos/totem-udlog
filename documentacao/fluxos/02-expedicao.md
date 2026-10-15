@@ -33,13 +33,13 @@ flowchart TD
     AJ --> IMP[exp_impressao]
 ```
 
-1. `exp_placa`: digita a placa. 0 OCs: mensagem "Nenhuma ordem de coleta em aberto para essa placa"; falha na consulta: "Nao foi possivel consultar as ordens de coleta agora". 1 OC: vai direto a `exp_dados`. Várias: `exp_selecionar_ordem`. `[CÓDIGO]`
+1. `exp_placa`: digita a placa (campo sem texto de exemplo; o backend não valida o formato da placa). 0 OCs: mensagem "Nenhuma ordem de coleta em aberto para essa placa"; falha na consulta: "Nao foi possivel consultar as ordens de coleta agora". 1 OC: vai direto a `exp_dados`. Várias: `exp_selecionar_ordem`. `[CÓDIGO]`
 2. `exp_selecionar_ordem` (só com várias OCs): escolhe a OC.
 3. `exp_dados` ("Dados da ordem - toque para editar"): Cliente, CNPJ, Placa, Veículo e Ordem de coleta. Toca avançar.
-4. `exp_cnh_qr` e `exp_crlv_qr`: aponta o QR do documento (fluxo [05](05-cnh-crlv-qr-vio.md)). CNH e CRLV processam em paralelo.
-5. `exp_aguarde_documentos`: espera a validação; se reprovado, modal com "Escanear novamente", "Preencher manualmente" ou "Cancelar atendimento".
-6. `exp_confirma`: cartões Motorista, Veículo e Atendimento; Placa e Ordem somente leitura; confirma.
-7. `exp_ajudante`: "Possui ajudante?" Não, ou Sim com nome e CPF.
+4. `exp_cnh_qr` e `exp_crlv_qr`: aponta o QR do documento (fluxo [05](05-cnh-crlv-qr-vio.md)); o título ("Leia o QR code da CNH" / "Leia o QR code do CRLV") aparece em faixa de destaque, azul para a CNH e grafite para o CRLV. CNH e CRLV processam em paralelo. `[CÓDIGO]`
+5. `exp_aguarde_documentos`: espera a validação; se reprovado, modal com "Escanear novamente", "Preencher manualmente" ou "Cancelar atendimento". Na tela manual da CNH, o nome aceita só letras e espaço, o CPF só números (até 11) e a validade usa máscara `DD-MM-AAAA` (detalhes no fluxo [05](05-cnh-crlv-qr-vio.md)). `[CÓDIGO]`
+6. `exp_confirma`: cartões Motorista, Veículo e Atendimento; Placa e Ordem somente leitura; confirma. Nome, CPF e validade da CNH seguem os mesmos filtros e a mesma máscara da tela manual; a validade é exibida como `DD-MM-AAAA` e enviada ao backend como `AAAA-MM-DD`. `[CÓDIGO]`
+7. `exp_ajudante`: "Possui ajudante?" Não, ou Sim com nome (só letras e espaço) e CPF (só números, 11 exatos; com menos, a mensagem "O CPF deve ter 11 números" aparece sem chamar a API). `[CÓDIGO]`
 8. `exp_impressao`: envio ao Talent, senha na tela e impressão (fluxos [07](07-checkin-talent.md) e [08](08-impressao-etiquetas.md)).
 
 ## Processamento interno
@@ -48,7 +48,7 @@ flowchart TD
 - `selecionar-ordem`: exige Expedição, `em_andamento` e etapa `placa`; **revalida no servidor** que o número está entre as OCs reais da placa. `[CÓDIGO]`
 - `avancar-etapa-documentos`: percorre `dados_encontrados` -> `exp_cnh` -> `exp_crlv` -> `exp_aguarde_documentos` -> `exp_confirmacao`; a entrada em `exp_confirmacao` exige CNH e CRLV aprovados e devolve `dados_confirmacao` (motorista, CPF, validade, ano, UF, RNTRC, tipo). `[CÓDIGO]`
 - `salvar-etapa` `confirmacao`: exige etapa `exp_confirmacao`; valida placa, nome, CPF válido com dígito verificador, validade, ano, UF (27), RNTRC (1 a 20), tipo (1 a 60) e OC não vazia; senão 422 `CONFIRMACAO_INCOMPLETA` com `campos` e `rotulos`. Se o motorista alterou algum campo vindo da VIO, a origem do documento é rebaixada para MANUAL com `PENDENTE_REVISAO`. `[CÓDIGO]`
-- `salvar-etapa` `ajudante`: nome até 150 e CPF de 11 dígitos (sem verificação de dígito, decisão do usuário); gravação sob `SELECT ... FOR UPDATE` e só com Talent em `NAO_ENVIADO` ou `ERRO_REPROCESSAVEL`, senão 409. `[CÓDIGO]` `[TESTE: teste_talent_correcao_ajudante]`
+- `salvar-etapa` `ajudante`: nome até 150 e CPF de 11 dígitos (sem verificação de dígito, decisão do usuário; o front limita o campo a 11 números e o backend segue exigindo 11 dígitos); gravação sob `SELECT ... FOR UPDATE` e só com Talent em `NAO_ENVIADO` ou `ERRO_REPROCESSAVEL`, senão 409. `[CÓDIGO]` `[TESTE: teste_talent_correcao_ajudante]`
 - `finalizar` e etiquetas: fluxos 07 e 08. Após ENVIADO, baixa da OC (fluxo 06).
 
 ## Endpoints envolvidos

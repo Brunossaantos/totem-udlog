@@ -17,7 +17,7 @@ Ambiente real: hospedagem compartilhada HostGator via cPanel, com SSH de usuári
 | Banco | MySQL 5.7.44 em produção (banco do totem e banco externo de gestão de coletas); MariaDB em desenvolvimento. |
 | Extensões usadas | `pdo_mysql`, `curl`, `gd` (sem GD toda imagem é rejeitada), `openssl`, `mbstring` (usada e não declarada no `composer.json`; presente em produção), `ctype`, `json`, `hash`, `pcre`. Opcionais: `intl` (há fallback), Argon2id (há fallback para bcrypt; disponível em produção). |
 | Limites do PHP | `memory_limit` >= 128M (256M recomendado para o GD), `post_max_size` >= 16M para o anexo de OC (~7 MB de corpo), `upload_max_filesize`, `max_execution_time`: `PENDENTE DE CONFIRMAÇÃO` no PHP efetivo da web (CLI e web podem divergir). |
-| Rede de saída | HTTPS (curl) para Talent e vio.api.br. Histórico de bloqueio de rede citado no estado: `PENDENTE DE CONFIRMAÇÃO` por integração. |
+| Rede de saída | HTTPS (curl) para Talent e vio.api.br. Bloqueios de rede de saída da hospedagem, por integração: `PENDENTE DE CONFIRMAÇÃO`. |
 | HTTPS | AutoSSL (Let's Encrypt via cPanel) no domínio. A gestão e a rota de anexo da OC exigem HTTPS. |
 | Cron | Somente o cron do cPanel (PHP CLI). |
 | Proibido | Docker, filas persistentes, WebSocket server, processo persistente, binário arbitrário no servidor. |
@@ -76,7 +76,7 @@ Regras:
 | `ETIQUETA_AREA_UTIL_MM` | Não (padrão 48) | Largura útil do conteúdo da etiqueta (20 até a largura da página). |
 | `NOTA_IMAGEM_MAX_BYTES` | Não (padrão 5242880) | Teto do binário decodificado de imagens. |
 | `ORDEM_COLETA_ANEXO_MAX_BYTES` | Não (padrão 5242880) | Teto do PDF decodificado do anexo da OC. |
-| `CONCLUIR_EXIGE_NUMERO_NOTA` | Não (desligado) | Só `true` liga o 422 `NOTAS_SEM_NUMERO` em `concluir-digitalizacao` (alguma nota ativa sem número válido; o front destaca as notas). Desligada, o motorista segue e só o `finalizar` recusa (422 `NOTAS_SEM_NUMERO`) se alguma nota tiver número vazio. **Decisão do usuário em 2026-10-11 de ativar em produção; valor no servidor a confirmar.** |
+| `CONCLUIR_EXIGE_NUMERO_NOTA` | Não (padrão do código e do `.env.example`: `false`; em produção: `true`) | Só `true` liga o 422 `NOTAS_SEM_NUMERO` em `concluir-digitalizacao` (alguma nota ativa sem número válido; o front destaca as notas). Desligada, o motorista segue e só o `finalizar` recusa (422 `NOTAS_SEM_NUMERO`) se alguma nota tiver número vazio. **Em produção está `true`, conferido em 2026-10-16.** |
 | `GESTAO_SESSION_IDLE_MIN` | Não (30; faixa 1..1440) | Inatividade da sessão da gestão. |
 | `GESTAO_SESSION_ABSOLUTE_MIN` | Não (720; faixa 1..10080) | Teto absoluto da sessão da gestão. |
 | `DOCUMENTO_DATA_KEY` | Não | Chave AES-256-GCM (64 hex) do cache de CNH/CRLV (`VioCacheDao`), que o fluxo atual (QR) não consulta. |
@@ -111,7 +111,7 @@ Variáveis que existiram no `.env.example` e foram removidas por não terem cons
 
 Somente `public/` é servido. Não podem ser acessíveis por URL: `storage/` (fotos de CNH/CPF/CRLV/notas e PDFs de OC, LGPD), `app/`, `util/`, `sql/`, `tests/`, `tools/`, `cron/`, `.env`, `vendor/`, `docs/` e `documentacao/`. Não há `.htaccess` versionado: a proteção é o docroot em `public/`.
 
-Verificação feita em produção (2026-10-08/09): `/storage`, `/app`, `/sql`, `/tools`, `/cron` e `/vendor` respondem 404 e `/.env` responde 406. `tools/*.php` e `cron/*.php` recusam SAPI diferente de CLI. A confirmação formal de que `storage/` está fora do docroot real consta como pendência aberta no estado (P35).
+Verificação feita em produção (2026-10-08/09): `/storage`, `/app`, `/sql`, `/tools`, `/cron` e `/vendor` respondem 404 e `/.env` responde 406. `tools/*.php` e `cron/*.php` recusam SAPI diferente de CLI. A confirmação formal de que `storage/` está fora do docroot real consta como pendência aberta (P35).
 
 ## 8. Docroot, domínio, HTTPS e Cloudflare
 
@@ -119,7 +119,7 @@ Verificação feita em produção (2026-10-08/09): `/storage`, `/app`, `/sql`, `
 - O quiosque precisa de HTTPS válido (`getUserMedia` exige contexto seguro).
 - Cloudflare: `/gestao/*` deve **ficar sem cache**. Em produção foi observado `cf-cache-status: DYNAMIC` e `Cache-Control: no-store, private`, sem regra extra de bypass registrada; confirmar após qualquer mudança de regras do Cloudflare.
 - O IP do cliente (`CF-Connecting-IP`) só é usado quando `REMOTE_ADDR` está em faixa oficial do Cloudflare.
-- WAF/limite de corpo do Cloudflare/HostGator para POST de ~7 MB (anexo de OC): `PENDENTE DE CONFIRMAÇÃO`. O n8n anônimo recebe 406 (observação do estado).
+- WAF/limite de corpo do Cloudflare/HostGator para POST de ~7 MB (anexo de OC): `PENDENTE DE CONFIRMAÇÃO`. O n8n anônimo recebe 406.
 - Cookie `Secure` e `REMOTE_ADDR` real só são verificáveis em produção. `AuthServidor::requisicaoHttps` confia em `X-Forwarded-Proto` (pendência P57).
 
 ## 9. Jobs agendados (cron do cPanel)
@@ -237,10 +237,10 @@ Resumo; o detalhamento do ambiente de desenvolvimento não é objetivo deste gui
 1. **`docs/deploy-checklist.md` desatualizado quanto às migrations**: ainda manda aplicar migrations (013, 015, 016, 018, 019, 002/003 externas etc.) e cita `sql/migrations/`, que foram removidas em 2026-10-09. Vale `sql/schema.sql`.
 2. **Checklist cita variáveis removidas**: a seção 1.Z manda preencher `VIO_API_BR_CACHE_TTL_DIAS`, `VIO_API_BR_CACHE_HMAC_KEY_V1`, `VIO_API_BR_CACHE_HMAC_VERSION` e `DOCUMENTO_QR_HMAC_KEY`, e o item 1 cita `IMPRESSORAS_PERMITIDAS`/`IMPRESSAO_TIMEOUT_MS` no `.env`; nenhuma tem consumidor no código.
 3. **Versão do PHP web (divergência histórica, resolvida)**: o checklist registra `.htaccess` em `public_html` fixando `ea-php82`; o PHP web de produção é 8.3 (confirmado pelo responsável do projeto em 2026-10-10), igual ao do cron (`ea-php83`).
-4. **`HEAD` do servidor**: o estado registra o servidor em `9d44513` (entrada de encerramento) e o checklist registra deploy até `4188fee`; o ponto final não está reconciliado.
+4. **`HEAD` do servidor (resolvido)**: registros antigos citavam `9d44513` e `4188fee`; em 2026-10-16 o servidor foi verificado em `82ad36d`, igual ao `origin/main` da época.
 5. **`docs/` fora do Git**: `docs/` (incluindo o checklist) está no `.gitignore` e não vem em um clone. Este guia fica em `documentacao/`, versionado.
-6. **README do serviço de impressão** ainda cita `Restart-Service` (serviço Windows descartado), marca a origem de produção como "não ativada" (o estado registra em uso) e menciona medição com `Receipt5` (o estado registra `Receipt6`).
-7. **Estado, seção 2**: diz "sem SSH root, sem processo persistente"; os deploys usam SSH de usuário.
+6. **README do serviço de impressão (resolvido)**: foi atualizado; a origem de produção consta como ativa, o driver do mini PC é `Receipt6` (o `Receipt5` é só histórico de outro modelo) e não há mais instrução com `Restart-Service`.
+7. **Hospedagem compartilhada**: sem acesso root e sem processo persistente; os deploys usam SSH de usuário.
 8. **`.env.example`**: o texto antigo citava MariaDB; produção é MySQL 5.7.44.
 
 ## 17. Pendências desta documentação

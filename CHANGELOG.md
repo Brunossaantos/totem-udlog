@@ -8,7 +8,7 @@ Categorias usadas: Adicionado, Alterado, Corrigido, Removido, Documentação.
 
 ## [Não publicado]
 
-Documentação completa do projeto e a mudança de comportamento do check-in no Talent descrita abaixo (decisão do usuário em 2026-10-11; implementada, revisada e ainda não commitada):
+Documentação completa do projeto, a mudança de comportamento do check-in no Talent (decisão do usuário em 2026-10-11) e os ajustes de interface do totem descritos abaixo. O deploy de 2026-10-16 foi verificado em modo somente leitura: o servidor estava no commit `82ad36d`; os campos com filtro e máscara do motorista (itens finais de "Alterado") ainda não estavam commitados nessa data.
 
 ### Adicionado
 - Tela `guiche_portaria` em `public/totem/assets/impressao.js` (Expedição e Recebimento): "Não foi possível concluir seu check-in. / Dirija-se ao guichê da portaria.", um único botão "Voltar ao início", sem retry, ajudante nem impressão; a inatividade de 180 s volta ao início sem aviso.
@@ -18,7 +18,7 @@ Documentação completa do projeto e a mudança de comportamento do check-in no 
 
 ### Alterado
 - **Talent 2xx sem `nrRegAcesso` cancela o atendimento e orienta o guichê.** Antes, a resposta 2xx sem número utilizável gravava `ENVIADO`/`concluido` com senha nula. Agora `TalentClient` lança `resposta_ilegivel`, `TalentRn` cancela o atendimento (`ENVIO_INDETERMINADO` + `cancelado`, sem sobrescrever `bloqueado`/`concluido`) e `finalizar` responde 422 `TALENT_SEM_REGISTRO` (`dados.acao=guiche_portaria`, sem senha). As fotos das notas vão à quarentena e, na Expedição, a OC não é baixada. Arquivos de código: `app/Rn/TalentClient.php`, `app/Rn/TalentRn.php`, `app/Dao/AtendimentoDao.php`, `app/Controller/AtendimentoController.php`, `public/totem/assets/app.js`, `public/totem/assets/impressao.js`.
-- **`CONCLUIR_EXIGE_NUMERO_NOTA`:** decisão do usuário em 2026-10-11 de ativar em produção (valor no servidor a confirmar); padrão do código e do `.env.example` segue `false`. Documentada a diferença entre ligada (422 `NOTAS_SEM_NUMERO` na digitalização) e desligada (só o `finalizar` recusa número vazio).
+- **`CONCLUIR_EXIGE_NUMERO_NOTA`:** decisão do usuário em 2026-10-11 de ativar em produção; conferida em 2026-10-16: está `true` em produção (junto com `TALENT_CHECKIN_ATIVO=true`). O padrão do código e do `.env.example` segue `false`. Documentada a diferença entre ligada (422 `NOTAS_SEM_NUMERO` na digitalização) e desligada (só o `finalizar` recusa número vazio).
 - `servico-impressao-local/README.md` atualizado.
 - `.env.example` revisado contra todas as leituras de variáveis em `app/`, `util/`, `public/`, `cron/`, `tools/` e `servico-impressao-local/`: organizado em OBRIGATÓRIAS e OPCIONAIS, com comentários curtos e valores fictícios (hosts `exemplo.invalid`, `TALENT_CHECKIN_ATIVO=false`, chaves vazias, `GESTAO_HASH_SALT` vazio).
 - `README.md` reescrito.
@@ -28,7 +28,11 @@ Documentação completa do projeto e a mudança de comportamento do check-in no 
 - Totem: os títulos "Leia o QR code da CNH" e "Leia o QR code do CRLV" (Expedição e Recebimento) viram faixas de destaque, CNH em azul UDLOG e CRLV em grafite, para não haver confusão.
 - Totem: removido o texto de exemplo (máscara) dos campos de placa; CPF do ajudante aceita apenas 11 números (não permite digitar mais nem confirmar com menos).
 - Gestão: o texto de ajuda do login passa a "Formato: nome.sobrenome" (sem nome de pessoa).
-- Recebimento: depois de salvar cada nota, o totem mostra uma faixa destacada "Nota N de 5 salva! Coloque a próxima nota no scanner ou toque em Finalizar digitalização." (na 5ª nota: "Limite de 5 notas atingido. Toque em Finalizar digitalização."), que permanece até o motorista tocar em "Capturar nota" ou "Refazer", ou até haver erro ou troca de tela.
+- Recebimento: depois de salvar cada nota, o totem mostra uma faixa destacada "Nota N de 5 salva! Coloque a próxima nota no scanner ou toque em Finalizar digitalização." (na 5ª nota: "Limite de 5 notas atingido. Toque em Finalizar digitalização."), que permanece até o motorista tocar em "Capturar nota" ou "Refazer", ou até haver erro ou troca de tela. Substitui o aviso anterior de confirmação do envio; não aparece durante o envio nem após erro de upload.
+- Totem (motorista): na tela manual da CNH e na tela "Confirme os dados" (Expedição e Recebimento), o nome aceita só letras (inclusive acentuadas) e espaço, e o CPF aceita só números (máximo 11; o dígito verificador continua validado apenas no backend). Nomes vindos da CNH com apóstrofo, hífen ou ponto só são alterados se o motorista editar o campo.
+- Totem (motorista): a validade da CNH usa máscara `DD-MM-AAAA` (o campo insere os hífens; ex.: `20082035` vira `20-08-2035`; rótulo "Validade (DD-MM-AAAA)"). Valores vindos do sistema são exibidos nesse formato e o front envia ao backend como `AAAA-MM-DD`; o backend não mudou. Data incompleta ou inexistente não chama a API e mostra "Informe a validade no formato DD-MM-AAAA".
+- Totem (ajudante): o nome aceita só letras e espaço; o CPF exige exatamente 11 números (mensagem "O CPF deve ter 11 números", sem chamar a API), sem verificação de dígito (decisão do usuário).
+- Documentação: registrados o deploy verificado em 2026-10-16 e a flag `CONCLUIR_EXIGE_NUMERO_NOTA` ativa em produção.
 
 ### Removido
 - Do `.env.example`, variáveis sem consumidor no código: `DOCUMENTO_QR_HMAC_KEY`, `VIO_API_BR_CACHE_TTL_DIAS`, `VIO_API_BR_CACHE_HMAC_KEY_V1`, `VIO_API_BR_CACHE_HMAC_VERSION`, `IMPRESSORAS_PERMITIDAS` e `IMPRESSAO_TIMEOUT_MS` (as duas últimas pertencem ao `config.json` do serviço de impressão).
@@ -190,4 +194,4 @@ Fim da Gestão Totem; repositório higienizado.
 
 ## Deploys registrados
 
-Não são versões. Servidor de produção: `6a3f353` em 2026-10-05; `fab53ab` em 2026-10-08 (Gestão F0 a F2); até `9d44513` em 2026-10-09 (estado) e `4188fee` (checklist de deploy). O ponto final de deploy não está reconciliado.
+Não são versões. Servidor de produção: `6a3f353` em 2026-10-05; `fab53ab` em 2026-10-08 (Gestão F0 a F2); até `9d44513` em 2026-10-09 e `4188fee` (higienização); em 2026-10-16 o servidor foi verificado em `82ad36d`.

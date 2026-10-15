@@ -99,7 +99,7 @@ Etapas do backend (`etapa_atual`) e status `[CÓDIGO]`: `placa`, `dados_encontra
 - **`finalizar` não exige cliente no Recebimento**: só a tela de confirmação exige (fluxos 03 e 07).
 - **Talent `ENVIO_INDETERMINADO`** (timeout/falha de rede) sem saída e `cancelar` durante o envio sem proteção (fluxos 07 e 09). O caso "Talent 2xx sem `nrRegAcesso`" foi **resolvido** em 2026-10-11 (atendimento cancelado e tela do guichê da portaria; fluxos 07, 08 e 09).
 - **Retenção** (decisão de produto em 2026-10-10: não será tratado): comportamento atual, nenhuma rotina remove `tb_lgpd_aceite` nem as fotos de notas de atendimentos concluídos (fluxos 01, 04 e 09).
-- **`CONCLUIR_EXIGE_NUMERO_NOTA`** tem padrão `false` em `.env.example`; decisão do usuário em 2026-10-11 de ativar em produção, valor no servidor a confirmar (fluxo 04).
+- **`CONCLUIR_EXIGE_NUMERO_NOTA`** tem padrão `false` em `.env.example`; em produção está `true`, conferido em 2026-10-16 (fluxo 04).
 - **Edições em `exp_dados`** não são persistidas (fluxo 02).
 - **Sem limite de re-escaneio no backend** (P52; fluxo 05).
 - Registros anteriores ainda descrevem migrations e "retenção hoje SEM poda" como pendentes; migrations foram removidas e `cron/limpar-logs-gestao.php` existe. Fora do escopo dos fluxos do motorista.

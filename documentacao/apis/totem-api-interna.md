@@ -80,13 +80,14 @@ Ações: `iniciar`, `selecionar-ordem`, `salvar-etapa`, `bloquear-excesso-notas`
 ### `salvar-etapa`
 
 - Corpo: `id_atendimento`, `etapa`, `dados`. 200 `{"ok":true}`.
+- Datas de validade da CNH: o backend aceita `AAAA-MM-DD` ou `DD/MM/AAAA` (`dados.cnh_validade` em `confirmacao`; `validade` em `preencher-manual`). O totem exibe e recebe a data do motorista como `DD-MM-AAAA` e **converte para `AAAA-MM-DD` antes de enviar**; o formato `DD-MM-AAAA` não é aceito pelo backend. **[C]**
 - Etapas:
 
 | `etapa` | Regra | Erros |
 |---|---|---|
 | `confirmacao` | só em `exp_confirmacao`/`rec_confirmacao` | 422 `CONFIRMACAO_INCOMPLETA` com `dados{campos[],rotulos[]}` (campo `codigo`); 400/404 de estado |
 | `cliente` | só Recebimento; CNPJ válido e existente em `tb_cliente` | 400 `Cliente invalido ou nao cadastrado`; 500 `Nao foi possivel confirmar o cliente agora` |
-| `ajudante` | nome completo e CPF de 11 dígitos (sem DV); `salvarAjudanteSeEditavel` com `SELECT ... FOR UPDATE`, só com Talent `NAO_ENVIADO` ou `ERRO_REPROCESSAVEL` | 409 se concluído ou Talent `ENVIANDO`/`ENVIADO`/indeterminado; 422 dados inválidos |
+| `ajudante` | nome completo e CPF de 11 dígitos (sem DV; o front limita o campo a 11 números e exige os 11 antes de chamar a API); `salvarAjudanteSeEditavel` com `SELECT ... FOR UPDATE`, só com Talent `NAO_ENVIADO` ou `ERRO_REPROCESSAVEL` | 409 se concluído ou Talent `ENVIANDO`/`ENVIADO`/indeterminado; 422 dados inválidos |
 | `digitalizacao_notas` | só Recebimento, etapa `placa` | 400/404 de estado |
 
 - **Etapa desconhecida: 200 `{"ok":true}` sem nenhum efeito** (sem `default`). Registrado, não corrigido. **[C]**
@@ -180,7 +181,7 @@ Sempre **404** `Acao invalida` (desativada). **[C]**
 
 ### `preencher-manual`
 
-- Corpo CNH: `nome`, `cpf`, `validade`. Corpo CRLV: `placa`, `exercicio`, `uf`, `rntc`, `tipo_veiculo`. Marca `*_status_processamento='CONCLUIDO'`.
+- Corpo CNH: `nome`, `cpf`, `validade` (`AAAA-MM-DD` ou `DD/MM/AAAA`; o front envia `AAAA-MM-DD`). Corpo CRLV: `placa`, `exercicio`, `uf`, `rntc`, `tipo_veiculo`. Marca `*_status_processamento='CONCLUIDO'`.
 - Erros: 400 `Dados incompletos`; 500 `Nao foi possivel processar o preenchimento manual agora`.
 
 ## 4. `nota.php` (só Recebimento, etapa `digitalizacao_notas`)

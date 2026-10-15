@@ -12,7 +12,7 @@ Mesma legenda do [banco-dados.md](banco-dados.md).
 |---|---|
 | **[C]** | Confirmado lendo o código. |
 | **[T: nome]** | Existe teste em `tests/manual/` que cobre a regra. O teste não foi reexecutado ao escrever este documento; o "passa" vem de registro histórico. |
-| **[A]** | Depende de ambiente ou terceiro (Hostgator, banco externo real, n8n, Talent, vio.api.br, mini PC). Só vale como relato registrado no estado. |
+| **[A]** | Depende de ambiente ou terceiro (Hostgator, banco externo real, n8n, Talent, vio.api.br, mini PC). Só vale como relato registrado. |
 | **[P]** | PENDENTE DE CONFIRMAÇÃO. Não verificado; nada foi presumido. |
 
 Quando o código e registros anteriores divergem, o código vence (ver a seção final).
@@ -64,7 +64,7 @@ Fluxos: [LGPD e início](fluxos/01-lgpd-e-inicio-atendimento.md), [Expedição](
 
 ### 2.4 Início do atendimento
 
-- Exige `tipo` em {expedicao, recebimento}, `placa` não vazia e token LGPD válido. A placa é gravada em maiúsculas; **não há validação de formato de placa** no backend nem no front. **[C]**
+- Exige `tipo` em {expedicao, recebimento}, `placa` não vazia e token LGPD válido. A placa é gravada em maiúsculas; o **backend não valida o formato da placa**. No front, os campos de placa (Expedição e Recebimento) não têm texto de exemplo; só o Recebimento limita a 7 caracteres (`maxlength=7`, inclusive no teclado virtual) e exige exatamente 7 ("A placa deve ter 7 caracteres"). **[C]**
 - O token LGPD é consumido ANTES da consulta de OCs da Expedição: se a placa não tem OC (400) ou a consulta falha (502), sobra um atendimento `em_andamento` na etapa `placa`, que só sai por cancelamento do front ou abandono de 24 h. **[C]**
 - Ao criar um atendimento, processamentos VIO pendentes de OUTROS atendimentos `em_andamento` do mesmo totem viram `INDETERMINADO`. **[C]**
 
@@ -73,6 +73,7 @@ Fluxos: [LGPD e início](fluxos/01-lgpd-e-inicio-atendimento.md), [Expedição](
 - Inatividade: aviso após 180 s sem toque; 30 s depois cancela o atendimento. Não conta em `home` e `lgpd`. Fica suspensa durante impressão em `sem_papel`/`erro`/`indeterminado`/`erro_finalizar` e na correção do ajudante; com captura/OCR de notas ativo adia até 120 s no total. **[C]** [T: vio_captura_layout.js]
 - Botão Cancelar (com confirmação) em toda tela exceto `home` e `lgpd`. `cancelarESair` ignora falha da API e volta à tela LGPD. **[C]**
 - Ao recarregar a página não há retomada do atendimento. **[C]**
+- Recebimento, `rec_digitaliza`: após salvar cada nota, faixa azul com "Nota N de 5 salva! Coloque a próxima nota no scanner ou toque em Finalizar digitalização." (na 5ª, "Limite de 5 notas atingido. Toque em Finalizar digitalização."); sem temporizador, some ao tocar "Capturar nota"/"Refazer", em erro ou ao trocar de tela. **[C]** [T: vio_captura_layout.js]
 - Ao iniciar novo atendimento o front zera todo o estado local; persistem só a impressora escolhida (`totem_impressora_nome`) e o `deviceId` da câmera/scanner (`localStorage` `totem_scanner_deviceId`). **[C]**
 
 Fluxo: [cancelamento e abandono](fluxos/09-cancelamento-e-abandono.md).
@@ -121,7 +122,7 @@ Atendimento de Recebimento, do totem do token, `em_andamento`, etapa `digitaliza
 
 - Exige `em_andamento` e 1 a 5 notas. Se a etapa já é a de destino ou posterior, responde 200 idempotente.
 - Nota com OCR PENDENTE/PROCESSANDO há menos de 120 s bloqueia com 409 `OCR_EM_ANDAMENTO`.
-- `CONCLUIR_EXIGE_NUMERO_NOTA` (variável opcional; só o texto `true` a liga; padrão do código e do `.env.example`: `false`). **Ligada:** `concluir-digitalizacao` responde 422 `NOTAS_SEM_NUMERO` (`dados.ordens_pendentes`, `total_notas`, `total_pendentes`) se alguma nota ativa não tiver número válido (`NotaFiscalRn::numeroNotaValido`) e o front destaca as notas. **Desligada:** esse bloqueio não ocorre na digitalização (o front só libera "Continuar" com todas as notas confirmadas); o motorista segue e só o `finalizar` recusa (422 `NOTAS_SEM_NUMERO`) se alguma nota tiver número vazio (critério mais frouxo: não vazio). Decisão do usuário em 2026-10-11 de **ativar em produção**; valor no servidor a confirmar. **[C]** **[A]**
+- `CONCLUIR_EXIGE_NUMERO_NOTA` (variável opcional; só o texto `true` a liga; padrão do código e do `.env.example`: `false`). **Ligada:** `concluir-digitalizacao` responde 422 `NOTAS_SEM_NUMERO` (`dados.ordens_pendentes`, `total_notas`, `total_pendentes`) se alguma nota ativa não tiver número válido (`NotaFiscalRn::numeroNotaValido`) e o front destaca as notas. **Desligada:** esse bloqueio não ocorre na digitalização (o front só libera "Continuar" com todas as notas confirmadas); o motorista segue e só o `finalizar` recusa (422 `NOTAS_SEM_NUMERO`) se alguma nota tiver número vazio (critério mais frouxo: não vazio). **Em produção está ligada (`true`)**, conferido em 2026-10-16 depois do deploy; vale o comportamento "Ligada". **[C]** **[A]**
 - Perdeu o CAS e outra requisição já avançou: 200 idempotente; senão 409. Lock timeout: 503. **[C]**
 
 [T: teste_hardening_concluir_422, teste_hardening_r4_ocr_em_andamento]
@@ -144,7 +145,7 @@ Atendimento de Recebimento, do totem do token, `em_andamento`, etapa `digitaliza
 4. Sem correspondência por CNPJ: comparação por razão social (`RazaoSocialMatcher`): maior pontuação >= **80** (`LIMIAR_MINIMO`) e diferença para a segunda >= **15** (`MARGEM_MINIMA`) = IDENTIFICADA; pontuação >= 80 sem a margem = `RAZAO_SOCIAL_AMBIGUA`; abaixo de 80 = NAO_IDENTIFICADA. **[C]** [T: teste_identificar_cliente, teste_hardening_cliente (não rodados nas últimas rodadas; usam o dev)]
 5. Normalização (`RazaoSocialMatcher::normalizar`): maiúsculas, **sem acentos** (mapa fixo, independe de locale/`iconv`), sem pontuação, com tratamento de sufixos societários. "Café Ação Ltda" e "CAFÉ AÇÃO" resultam em `CAFE ACAO`. Letras fora do mapa viram espaço. **[C]** [T: teste_razao_social_normalizacao, teste_qa_normalizacao]
 
-Limiares sem calibração com dados reais. **[P]** (P39 do estado)
+Limiares sem calibração com dados reais. **[P]** (P39)
 
 ### 4.3 Resultado do atendimento
 
@@ -187,7 +188,7 @@ Fluxo: [CNH, CRLV, QR e VIO](fluxos/05-cnh-crlv-qr-vio.md).
 - Reprovação grava `CONCLUIDO` com origem `NAO_VALIDADO` e o motivo ao motorista (`motivo_usuario`: `placa_divergente`, `cnh_vencida`, `documento_ilegivel`, `dados_invalidos`; só vem na chamada que efetiva o terminal; não é persistido). **[C]**
 - Novo POST para o mesmo documento só é aceito se o processamento está `PENDENTE`/`ERRO` ou `CONCLUIDO` reprovado e sem validação; aprovado é idempotente; `PROCESSANDO_*`, `ENVIANDO` e `INDETERMINADO` nunca reabrem. **[C]**
 - No front: o botão "Escanear novamente" só aparece enquanto `qrTentativas + 1 < 3`; na **3ª falha o único caminho é o preenchimento manual** (ou cancelar). QR não encontrado também conta tentativas, com a 3ª levando à tela manual. **[C]**
-- **O backend não limita o número de re-escaneios** (nem tem rate limit próprio de `iniciar-processamento`); o teto de 3 é só do front. **[C]** (P52 do estado)
+- **O backend não limita o número de re-escaneios** (nem tem rate limit próprio de `iniciar-processamento`); o teto de 3 é só do front. **[C]** (P52)
 
 ### 5.5 Fallback manual e rebaixamento
 
@@ -198,11 +199,13 @@ Fluxo: [CNH, CRLV, QR e VIO](fluxos/05-cnh-crlv-qr-vio.md).
 
 Campos obrigatórios (422 `CONFIRMACAO_INCOMPLETA` se faltar): placa; nome; CPF válido **com DV**; validade válida; ano > 0; UF das 27; RNTRC (1 a 20 caracteres); Tipo (1 a 60); OC (Expedição) ou cliente (Recebimento). Placa, OC e cliente aparecem somente leitura. **[C]**
 
+**Entradas do motorista no totem** (tela manual da CNH e "Confirme os dados", Expedição e Recebimento): o nome aceita só letras (Unicode, inclusive acentuadas) e espaço; o CPF, só números, no máximo 11 (valor pré-preenchido com pontuação aparece só com dígitos), com o DV validado **só no backend**; a validade da CNH usa máscara `DD-MM-AAAA` (rótulo "Validade (DD-MM-AAAA)"), exibe valores do sistema (`AAAA-MM-DD` ou `DD/MM/AAAA`) em `DD-MM-AAAA` e **envia ao backend como `AAAA-MM-DD`**. O backend não mudou e só aceita `AAAA-MM-DD` ou `DD/MM/AAAA` (`AtendimentoRn::normalizarDataParaComparacao`, `DocumentoRn::normalizarData`). Data incompleta ou inexistente (por exemplo, 31-02-2030) não chama a API e mostra "Informe a validade no formato DD-MM-AAAA"; validade vazia mantém a mensagem e a obrigatoriedade anteriores. Limitação: nomes vindos da CNH com apóstrofo, hífen ou ponto só são alterados se o motorista editar o campo (o filtro roda ao digitar). **[C]** [T: vio_captura_layout.js]
+
 Na Expedição, as edições da tela "Dados da ordem" (cliente, CNPJ, placa, veículo, OC) **não são enviadas nem persistidas**: o servidor segue com os valores do banco externo. **[C]**
 
 ### 5.7 Ajudante
 
-Nome até 150 caracteres e CPF de **11 dígitos sem verificação de DV** (decisão do usuário; o CPF do motorista é validado com DV). No totem, o campo do CPF do ajudante aceita só números, no máximo 11, e "Confirmar" exige exatamente 11 (mensagem "O CPF deve ter 11 números", sem chamar a API); o backend continua exigindo 11 dígitos. "Sem ajudante" grava nome e CPF nulos. Salvar ou corrigir só é aceito com `em_andamento`, etapa de confirmação e `talent_checkin_status` em `NAO_ENVIADO`/`ERRO_REPROCESSAVEL` (sob `FOR UPDATE`); senão 409. O CPF do ajudante nunca é impresso. **[C]** [T: teste_talent_correcao_ajudante]
+Nome até 150 caracteres e CPF de **11 dígitos sem verificação de DV** (decisão do usuário; o CPF do motorista é validado com DV). No totem, o nome do ajudante aceita só letras e espaço e o campo do CPF aceita só números, no máximo 11, e "Confirmar" exige exatamente 11 (mensagem "O CPF deve ter 11 números", sem chamar a API); o backend continua exigindo 11 dígitos. "Sem ajudante" grava nome e CPF nulos. Salvar ou corrigir só é aceito com `em_andamento`, etapa de confirmação e `talent_checkin_status` em `NAO_ENVIADO`/`ERRO_REPROCESSAVEL` (sob `FOR UPDATE`); senão 409. O CPF do ajudante nunca é impresso. **[C]** [T: teste_talent_correcao_ajudante]
 
 ---
 
@@ -213,7 +216,7 @@ Fluxo: [LGPD e início do atendimento](fluxos/01-lgpd-e-inicio-atendimento.md).
 - A tela inicial exige marcar "Li e estou ciente do Aviso de Privacidade" antes de habilitar "Iniciar". **[C]**
 - `lgpd.php?acao=aceitar` emite um token de **256 bits**, gravando só o SHA-256 em `tb_lgpd_aceite` com `versao_termo`, `hash_termo`, validade de **10 minutos** e status `PENDENTE_USO`. **[C]**
 - **Uso único:** o token é consumido na criação do atendimento por UPDATE condicional (status `PENDENTE_USO`, não expirado, mesmo totem, mesma versão e mesmo hash do termo vigente), em transação. Token inválido, expirado, já usado ou de outro totem/versão = 409, e o front volta à tela LGPD. **[C]** [T: teste_lgpd_aceite_backend_seguranca (depende de fixture ausente no disco, ver seção final)]
-- **Versão do termo:** `2026-09-25-v2`; hash = SHA-256 do texto. A aprovação do DPO consta só no estado, sem evidência no repositório. **[C]** / **[P]**
+- **Versão do termo:** `2026-09-25-v2`; hash = SHA-256 do texto. A aprovação do DPO consta apenas em registro interno do projeto, sem evidência no repositório. **[C]** / **[P]**
 - Retenção: nenhuma rotina remove `tb_lgpd_aceite` nem tokens expirados (decisão de produto em 2026-10-10: não será tratado). **[C]**
 
 ---
@@ -393,7 +396,7 @@ Fluxos: [acesso e usuários](fluxos/11-gestao-acesso-e-usuarios.md), [totens](fl
 
 ### Divergências entre registros anteriores e o código (o código vence)
 
-1. Linha 3 do estado ainda lista F2 a F6 como pendentes e diz que as migrations 020/021 não foram aplicadas; entradas posteriores (08 e 09/10) registram F2 a F4 e F6 reduzida em produção e as migrations foram removidas do repositório. O cron de retenção de 90 dias já existe (`cron/limpar-logs-gestao.php`), ao contrário de "hoje SEM poda".
+1. Registros antigos do projeto listavam F2 a F6 como pendentes e as migrations 020/021 como não aplicadas; hoje F2 a F4 e F6 reduzida estão em produção e as migrations foram removidas do repositório. O cron de retenção de 90 dias existe (`cron/limpar-logs-gestao.php`), ao contrário de "hoje SEM poda".
 2. Estado: "dados pessoais mascarados, só admin revela" foi superado na F4 ("sem máscara"); o código não tem máscara nem "revelar" (só máscara de formato de CNPJ).
 3. Estado: URL do RECEPCAO-01 "fixa"; entrada de 2026-10-08 registra a URL regerada e o `.bat` atualizado. Vale a mais recente.
 4. Estado: "auditoria sem PII"; o `detalhe` não tem PII, mas o IP do ator é gravado em binário em `tb_gestao_auditoria.ip`.
@@ -404,7 +407,7 @@ Fluxos: [acesso e usuários](fluxos/11-gestao-acesso-e-usuarios.md), [totens](fl
 9. Estado descreve o cache VIO (`VIO_CACHE`) como capacidade; no código o cache não é chamado no fluxo QR-only, e `ClienteApiClient` é código morto.
 10. Estado: a estrutura do banco externo é a do dump local em `docs/` (fora do Git), extraída da produção em 2026-10-10 (somente estrutura, sem dados), com `status`, `inativada_em` e `tb_ordem_coleta_arquivos`.
 11. Estado diz serviço do Windows descartado; o repositório ainda contém `scripts/instalar-servico-windows.js` e `desinstalar-servico-windows.js` (legado) ao lado da tarefa de logon.
-12. `TALENT_CHECKIN_ATIVO` e `CONCLUIR_EXIGE_NUMERO_NOTA` valem só quando iguais a `true` no código; o `.env.example` traz `false` em ambas. `TALENT_CHECKIN_ATIVO=true` em produção, confirmado pelo responsável do projeto em 2026-10-10 (resolve a divergência com o checklist, P37/P68). `CONCLUIR_EXIGE_NUMERO_NOTA`: decisão do usuário em 2026-10-11 de ativar em produção; o valor no servidor não foi confirmado. **[A]**
+12. `TALENT_CHECKIN_ATIVO` e `CONCLUIR_EXIGE_NUMERO_NOTA` valem só quando iguais a `true` no código; o `.env.example` traz `false` em ambas. `TALENT_CHECKIN_ATIVO=true` em produção, confirmado pelo responsável do projeto em 2026-10-10 (resolve a divergência com o checklist, P37/P68). `CONCLUIR_EXIGE_NUMERO_NOTA`: em produção está `true`, conferido em 2026-10-16 (deploy em que o servidor estava no commit `82ad36d`). **[A]**
 
 ### Problemas funcionais registrados (não corrigidos)
 
@@ -414,7 +417,7 @@ Fluxos: [acesso e usuários](fluxos/11-gestao-acesso-e-usuarios.md), [totens](fl
 - Tela "Dados da ordem" da Expedição permite editar campos que não são enviados nem persistidos.
 - Sem teto de re-escaneio de CNH/CRLV no backend (só o front limita a 3).
 - Token LGPD é consumido antes da consulta de OC: placa sem OC ou falha de consulta deixa atendimento `em_andamento`.
-- Sem validação de formato de placa.
+- Sem validação de formato de placa no backend (observação; só o front limita a placa do Recebimento a 7 caracteres).
 - Sem rate limit de falhas de token nas APIs do totem; limites de login não atômicos entre processos.
 - Regerar a URL do totem não rotaciona o token da API (risco aceito pelo usuário).
 - `S6`: exceção após o commit do UPDATE de status de OC fecha a auditoria como `ERRO` mesmo se o estado mudou.
@@ -428,7 +431,7 @@ Fluxos: [acesso e usuários](fluxos/11-gestao-acesso-e-usuarios.md), [totens](fl
 
 - **[P]** Corpo de erro HTTP 400 do Talent.
 - **[P]** Contrato do banco externo de coletas em `docs/db_gestao_coletas.md` (template vazio na parte de ordens por placa).
-- **[P]** Aprovação do DPO sobre o termo LGPD (só relato no estado).
+- **[P]** Aprovação do DPO sobre o termo LGPD (só relato interno).
 - **[P]** Calibração dos limiares do `RazaoSocialMatcher` (80/15) com dados reais.
 - **[P]** Causa dos 48 mm úteis da etiqueta; deteção de `sem_papel` validada só para a TM-T88VII.
 - **[P]** `STORAGE_PATH` gravável no cPanel (sem isso, 401 e recusas anônimas não são logados) e SAPI/FPM da Hostgator.
@@ -436,5 +439,5 @@ Fluxos: [acesso e usuários](fluxos/11-gestao-acesso-e-usuarios.md), [totens](fl
 
 ### Testes
 
-- Os testes citados não foram reexecutados nesta documentação; o resultado "passa" vem do estado. Conhecidos: `teste_gestao_totem_f0` com 7 falhas (guarda do prepend e fim de linha CRLF), `teste_gestao_logs` com 1 falha por CRLF, `teste_consulta_ordem_coleta` com 12/17 por fixture do banco externo, `teste_talent_idor_finalizar` e `teste_concorrencia_finalizar_checkin` exigem `TALENT_CHECKIN_ATIVO` diferente de `true`.
+- Os testes citados não foram reexecutados nesta documentação; o resultado "passa" vem de registros históricos. Conhecidos: `teste_gestao_totem_f0` com 7 falhas (guarda do prepend e fim de linha CRLF), `teste_gestao_logs` com 1 falha por CRLF, `teste_consulta_ordem_coleta` com 12/17 por fixture do banco externo, `teste_talent_idor_finalizar` e `teste_concorrencia_finalizar_checkin` exigem `TALENT_CHECKIN_ATIVO` diferente de `true`.
 - `teste_lgpd_aceite_backend_seguranca` depende de `tests/manual/_fixtures_lgpd.php`, que não existe no disco (arquivos `_*.php` são ignorados pelo git).

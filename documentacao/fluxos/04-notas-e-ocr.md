@@ -18,7 +18,8 @@ Atendimento de Recebimento `em_andamento`, etapa `digitalizacao_notas` (definida
 
 ## Etapas do motorista
 
-1. `rec_digitaliza`: a câmera abre (resolução ideal 4096x3072). "Capturar nota" gera uma prévia; "Usar imagem" envia, "Refazer" descarta. O contador mostra "N de 5". "Finalizar digitalização" habilita com 1 nota ou mais; com 5 notas a captura é desabilitada ("Limite de 5 notas atingido"). `[CÓDIGO]`
+1. `rec_digitaliza`: a câmera abre (resolução ideal 4096x3072). "Capturar nota" gera uma prévia; "Usar imagem" envia, "Refazer" descarta. O contador mostra "N de 5". "Finalizar digitalização" habilita com 1 nota ou mais; com 5 notas a captura é desabilitada. `[CÓDIGO]`
+   - **Mensagem de próxima nota:** após salvar cada nota, uma faixa azul (texto branco, `role=status`) mostra "Nota N de 5 salva! Coloque a próxima nota no scanner ou toque em Finalizar digitalização."; na 5ª nota, "Limite de 5 notas atingido. Toque em Finalizar digitalização.". Não há temporizador: a faixa some ao tocar "Capturar nota" ou "Refazer", em caso de erro ou ao trocar de tela, e não aparece durante o envio nem após erro de upload. Substitui o antigo aviso "Documento salvo". `[CÓDIGO]` `[TESTE: vio_captura_layout.js]`
 2. `rec_revisao_numeros`: cada nota precisa de número confirmado. Se o OCR sugeriu número com confiança alta, abre modal de confirmação; senão, teclado numérico. "Adicionar outra nota" volta a `rec_digitaliza` se há menos de 5; "Continuar" só habilita com todas confirmadas. `[CÓDIGO]`
 3. Na revisão o motorista pode **excluir** uma nota (modal do número, com confirmação). Se zerar as notas, volta a `rec_digitaliza`. `[CÓDIGO]`
 4. "Continuar" chama `concluir-digitalizacao`; o destino é `rec_cnh_qr` (cliente identificado) ou `rec_cliente` (não identificado). `[CÓDIGO]`
@@ -78,7 +79,7 @@ Sob `FOR UPDATE` do atendimento e das notas: `[CÓDIGO]`
 4. **`CONCLUIR_EXIGE_NUMERO_NOTA`** (variável opcional; só o texto `true` a liga):
    - **Ligada:** `concluir-digitalizacao` responde 422 `NOTAS_SEM_NUMERO` (`dados.ordens_pendentes`, `total_notas`, `total_pendentes`) se alguma nota ativa não tiver número válido (`NotaFiscalRn::numeroNotaValido`), e o front destaca as notas pendentes; o motorista não avança até corrigir.
    - **Desligada (padrão do código e do `.env.example`):** esse bloqueio **não** acontece na digitalização (o front só libera "Continuar" com todas confirmadas); o motorista segue e só o `finalizar` recusa (422 `NOTAS_SEM_NUMERO`, no texto de `erro`) se alguma nota tiver número **vazio**: critério mais frouxo (não vazio) que o `numeroNotaValido` ([07](07-checkin-talent.md)).
-   - **Decisão do usuário em 2026-10-11 de ativar em produção;** valor no servidor **a confirmar** `[PENDENTE DE CONFIRMAÇÃO]` (P08).
+   - **Em produção a variável está ligada (`true`)**, conferida em 2026-10-16 depois do deploy; vale, portanto, o comportamento "Ligada" acima. `[CÓDIGO]`
 5. Avaliação do cliente do atendimento: dois ou mais clientes distintos => `ANOMALIA`/`CONFLITO`; nota em erro ou processamento expirado => `ANOMALIA`/`INDETERMINADO`; um cliente => `IDENTIFICADO`.
 6. `IDENTIFICADO`: grava o cliente (se ainda vazio) e vai para `rec_cnh`; caso contrário vai para `cliente`. Transição com compare-and-swap; se outra requisição já avançou, 200 idempotente. Lock timeout: 503.
 
@@ -109,7 +110,7 @@ Cancelar ou abandonar move as fotos para quarentena (24 h) ([09](09-cancelamento
 ## Falhas e alternativas
 
 - Falha de rede no upload: reconciliação com o mesmo `uid`.
-- Cliente não identificado ou em conflito: `rec_cliente` (seleção manual da lista).
+- Cliente não identificado ou em conflito: `rec_cliente` (busca manual com no máximo uma sugestão, a confirmar por toque; ver [03](03-recebimento.md)).
 - OCR em andamento ao concluir: 409, o front aguarda.
 - Mais de 5 notas: ver [03](03-recebimento.md) (balcão da portaria).
 - Inatividade durante captura/OCR: o aviso é adiado até 120 s no total ([09](09-cancelamento-e-abandono.md)).
@@ -119,7 +120,7 @@ Cancelar ou abandonar move as fotos para quarentena (24 h) ([09](09-cancelamento
 - Rotação de 270 graus aplicada à prévia, ao upload e ao OCR (divergência com registro anterior). `[PENDENTE DE CONFIRMAÇÃO]`
 - Papel emitente/destinatário não implementado (P05, P09).
 - **Retenção das fotos de notas de atendimentos concluídos** (decisão de produto em 2026-10-10: não será tratado): comportamento atual, nenhuma rotina as remove (o abandono só atua em `em_andamento`; a limpeza de quarentena só apaga `.del`).
-- `CONCLUIR_EXIGE_NUMERO_NOTA`: padrão `false`; decisão do usuário em 2026-10-11 de ativar em produção, valor no servidor a confirmar (P08).
+- `CONCLUIR_EXIGE_NUMERO_NOTA`: padrão do código e do `.env.example` é `false`; em produção está `true` (conferido em 2026-10-16).
 - Chave de acesso da nota sempre nula (P26); captura de notas sem interrupção (P01 a P16) com implementações 2 e 3 não iniciadas e testes físicos pendentes.
 - P04: lacuna preexistente no guard de `idAtendimento` após `await` em `identificar-cliente`, aberta.
 - `teste_hardening_exclusao` com falha E17 preexistente (P55).
