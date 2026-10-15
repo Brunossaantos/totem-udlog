@@ -291,6 +291,37 @@ async function exercitarQrLeitura(page, matriz) {
     }, matriz);
 }
 
+async function exercitarTituloDocQr(page) {
+    return page.evaluate(() => {
+        iniciarApp();
+        const tela = document.getElementById('tela');
+        const out = [];
+        const casos = [['exp_cnh_qr', telaExpCnhQr, 'Leia o QR code da CNH', 'exp'], ['exp_crlv_qr', telaExpCrlvQr, 'Leia o QR code do CRLV', 'exp'], ['rec_cnh_qr', telaRecCnhQr, 'Leia o QR code da CNH', 'rec'], ['rec_crlv_qr', telaRecCrlvQr, 'Leia o QR code do CRLV', 'rec']];
+        for (const [nome, fn, texto, pre] of casos) {
+            state.tela = nome;
+            document.getElementById('barraCancelar').style.display = 'block';
+            tela.innerHTML = fn();
+            const el = tela.querySelector('.titulo-doc');
+            const btn = document.getElementById(pre + 'CamBtnCapturar');
+            const medirBtn = () => { const b = btn.getBoundingClientRect(); return { h: Math.round(b.height), dentro: b.top >= 0 && b.bottom <= innerHeight && b.left >= 0 && b.right <= innerWidth }; };
+            const com = medirBtn();
+            const cs = el ? getComputedStyle(el) : null;
+            const er = el ? el.getBoundingClientRect() : null;
+            const linhas = el ? Math.round((er.height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) / (parseFloat(cs.lineHeight) || 1)) : 0;
+            const rec = {
+                nome, existe: !!el, texto: el && el.textContent, fundo: cs && cs.backgroundColor, cor: cs && cs.color, fonte: cs ? parseFloat(cs.fontSize) : 0, peso: cs && cs.fontWeight,
+                semOverflow: !!el && el.scrollWidth <= el.clientWidth + 1 && document.documentElement.scrollWidth <= innerWidth && tela.scrollWidth <= tela.clientWidth + 1 && er.left >= 0 && er.right <= innerWidth,
+                alturaFaixa: er ? Math.round(er.height) : 0, linhas, btn: com,
+                telaRola: tela.scrollHeight > tela.clientHeight + 1,
+                subtitulo: tela.querySelector('.subtitulo').textContent, guia: !!tela.querySelector('.guia-qr'),
+            };
+            if (el) { const classes = el.className; el.className = 'titulo'; rec.btnSem = medirBtn(); rec.telaRolaSem = tela.scrollHeight > tela.clientHeight + 1; el.className = classes; }
+            out.push(rec);
+        }
+        return out;
+    });
+}
+
 async function exercitarModalReprovacao(page) {
     return page.evaluate(async () => {
         const r = {};
@@ -852,7 +883,7 @@ async function exercitarCorrecaoAjudante(page) {
             falhaSalvar = Object.assign(new Error('Dados do ajudante invalidos: informe o nome completo e um CPF valido'), { status: 422 });
             document.getElementById('imprBtnCorrigirAjudante').click();
             document.querySelector('#ajudantePergunta .btn-primario').click();
-            document.getElementById('ajudanteNome').value = 'AB'; document.getElementById('ajudanteCpf').value = '123';
+            document.getElementById('ajudanteNome').value = 'AB'; document.getElementById('ajudanteCpf').value = '12345678901';
             chamadas = [];
             document.getElementById('ajudanteBtnConfirmar').click(); await aguardar();
             R.e422 = { ...info(), acoes: chamadas.map(c => c.acao).join(',') };
@@ -1313,6 +1344,17 @@ async function main() {
                 ok(t.inputs.every(h => h >= 84), `${tg} campos >= 84px (${t.inputs.join(',')})`);
             }
             console.log(`  alvos ${W}x${viewport.height}: cancelar ${at.telas.exp_placa.cancelar.h}px; Consultar ${at.telas.exp_placa.botoes[0].h}px; Ler QR ${at.telas.exp_cnh_qr.botoes[0].h}px; Confirmar ${at.telas.exp_confirma.botoes[0].h}px; Continuar revisao ${at.telas.rec_revisao_numeros.botoes.filter(b => b.prim)[0].h}px; cartao nota ${at.revisao.cartoes[0]}px`);
+            const td = await exercitarTituloDocQr(page);
+            console.log(`  titulo-doc ${W}x${viewport.height}: ` + td.map(x => `${x.nome} ${x.fonte}px/${x.peso} faixa ${x.alturaFaixa}px (${x.linhas} lin) botao ${x.btn.h}px`).join('; '));
+            ok(td.length === 4 && td.every(x => x.existe), `${W}: as 4 telas QR tem a faixa .titulo-doc`);
+            ok(td.every(x => x.texto === (/crlv/.test(x.nome) ? 'Leia o QR code do CRLV' : 'Leia o QR code da CNH')), `${W}: faixa mantem o texto exato dos titulos`);
+            ok(td.filter(x => /cnh/.test(x.nome)).every(x => x.fundo === 'rgb(1, 121, 173)') && td.filter(x => /crlv/.test(x.nome)).every(x => x.fundo === 'rgb(58, 58, 58)'), `${W}: CNH rgb(1, 121, 173) e CRLV rgb(58, 58, 58) ${td.map(x => x.fundo).join('|')}`);
+            ok(td[0].fundo !== td[1].fundo && td[2].fundo !== td[3].fundo, `${W}: CNH e CRLV com fundos diferentes`);
+            ok(td.every(x => x.cor === 'rgb(255, 255, 255)'), `${W}: texto da faixa branco`);
+            ok(td.every(x => x.fonte >= 32 && x.peso === '800'), `${W}: fonte da faixa >= 32px e peso 800`);
+            ok(td.every(x => x.semOverflow && x.linhas <= 2), `${W}: faixa sem overflow horizontal e em no maximo 2 linhas`);
+            ok(td.every(x => x.btn.dentro && x.btn.h >= 96 && x.btn.h >= x.btnSem.h && x.btnSem.dentro && x.telaRola === x.telaRolaSem), `${W}: botao Ler QR code visivel, dentro do viewport, altura >= atual e sem nova rolagem ${JSON.stringify(td.map(x => [x.btn, x.btnSem, x.telaRola, x.telaRolaSem]))}`);
+            ok(td.every(x => x.subtitulo === 'Encaixe o QR code dentro do quadrado, bem iluminado e sem reflexo.' && x.guia), `${W}: subtitulo e guia inalterados`);
             const CARACTERES = [...'1234567890QWERTYUIOPASDFGHJKLÇZXCVBNM,.'];
             for (const [nome, k] of Object.entries(at.teclado)) {
                 const tg = `${W}: teclado em ${nome}`;
@@ -1373,7 +1415,7 @@ async function main() {
                 const saida = {};
                 document.getElementById('tela').innerHTML = telaRecPlacaQtd();
                 const campo = document.getElementById('inputPlacaRec');
-                saida.maxlength = campo.getAttribute('maxlength'); saida.placeholder = campo.getAttribute('placeholder');
+                saida.maxlength = campo.getAttribute('maxlength'); saida.placeholder = campo.hasAttribute('placeholder');
                 abrirTeclado(campo);
                 for (const c of 'ABC1D23XYZ') digitar(c);
                 saida.valorTeclado = campo.value;
@@ -1381,17 +1423,68 @@ async function main() {
                 saida.vazio = await tenta(''); saida.seis = await tenta('ABC1D2'); saida.oito = await tenta('ABC1D234'); saida.sete = await tenta('ABC1D23');
                 fecharTeclado();
                 document.getElementById('tela').innerHTML = telaPlacaExpedicao();
-                saida.expMax = document.getElementById('inputPlaca').hasAttribute('maxlength');
+                saida.expMax = document.getElementById('inputPlaca').hasAttribute('maxlength'); saida.expPh = document.getElementById('inputPlaca').hasAttribute('placeholder');
                 window.api = origApi; window.mostrarErroTela = origErr;
                 return saida;
             });
-            ok(placaRec.maxlength === '7' && placaRec.placeholder === 'AAA0A00', `${W}: placa do Recebimento com maxlength=7 e placeholder AAA0A00`);
+            ok(placaRec.maxlength === '7' && placaRec.placeholder === false && placaRec.expPh === false, `${W}: placas do Recebimento (maxlength=7) e da Expedicao sem placeholder`);
             ok(placaRec.valorTeclado === 'ABC1D23', `${W}: teclado virtual para no 7o caractere (${placaRec.valorTeclado})`);
             ok(placaRec.vazio.n === 0 && placaRec.vazio.erro === 'Digite a placa', `${W}: placa vazia mostra Digite a placa sem chamar a API`);
             ok(placaRec.seis.n === 0 && placaRec.seis.erro === 'A placa deve ter 7 caracteres', `${W}: placa de 6 caracteres nao chama iniciar e mostra erro`);
             ok(placaRec.oito.n === 0 && placaRec.oito.erro === 'A placa deve ter 7 caracteres', `${W}: placa de 8 caracteres nao chama iniciar e mostra erro`);
             ok(placaRec.sete.n === 1, `${W}: placa de 7 caracteres chama iniciar`);
             ok(placaRec.expMax === false, `${W}: campo de placa da Expedicao continua sem maxlength`);
+            const cpfAj = await page.evaluate(async () => {
+                const origApi = window.api, origErr = window.mostrarErroTela;
+                const chamadas = []; let erro = null;
+                window.api = async (arq, acao, corpo) => { chamadas.push({ acao, corpo }); return { ok: true }; };
+                window.mostrarErroTela = (m) => { erro = m; };
+                const aguardar = () => new Promise(res => setTimeout(res, 0));
+                const S = {};
+                iniciarApp();
+                Object.assign(state, { idAtendimento: 7, tipo: 'expedicao', tela: 'exp_ajudante', ajudanteCorrecao: false, ajudante: null });
+                document.getElementById('tela').innerHTML = telaAjudante();
+                const cpf = document.getElementById('ajudanteCpf'), nome = document.getElementById('ajudanteNome');
+                S.max = cpf.getAttribute('maxlength'); S.inputmode = cpf.getAttribute('inputmode'); S.nomeMax = nome.hasAttribute('maxlength'); S.nomeInputmode = nome.hasAttribute('inputmode');
+                abrirTeclado(cpf);
+                for (const c of '12A.3-4 b5') digitar(c);
+                S.teclado = cpf.value;
+                cpf.value = ''; for (const c of '123456789012345') digitar(c);
+                S.limite = cpf.value;
+                cpf.value = '123.456.789-01x'; notificarInput(cpf); S.colado = cpf.value;
+                cpf.value = '1234567890123'; notificarInput(cpf); S.colado13 = cpf.value;
+                abrirTeclado(nome); for (const c of 'AB1.') digitar(c); S.nomeValor = nome.value;
+                fecharTeclado();
+                nome.value = 'MARIA SOUZA';
+                cpf.value = '1234567890'; chamadas.length = 0; erro = null; confirmarAjudante(); await aguardar();
+                S.dez = { n: chamadas.length, erro: erro || (document.getElementById('toastErro') || {}).textContent };
+                cpf.value = ''; chamadas.length = 0; confirmarAjudante(); await aguardar(); S.vazio = chamadas.length;
+                cpf.value = '12345678901'; chamadas.length = 0; confirmarAjudante(); await aguardar(); await aguardar();
+                S.onzeAcoes = chamadas.map(c => c.acao).join(','); S.onze = { n: chamadas.filter(c => c.acao === 'salvar-etapa').length, acao: chamadas[0] && chamadas[0].acao, corpo: chamadas[0] && JSON.stringify(chamadas[0].corpo), tipo: chamadas[0] && typeof chamadas[0].corpo.dados.cpf };
+                Object.assign(state, { idAtendimento: 7, tipo: 'recebimento', tela: 'rec_impressao', ajudanteCorrecao: true, ajudante: { nome: 'JOSE LIMA', cpf: '529.982.247-25' } });
+                document.getElementById('tela').innerHTML = telaAjudante();
+                S.corr = document.getElementById('ajudanteCpf').value;
+                state.ajudante = { nome: 'JOSE', cpf: '52998224725999' };
+                document.getElementById('tela').innerHTML = telaAjudante();
+                S.corrLongo = document.getElementById('ajudanteCpf').value;
+                document.getElementById('ajudanteCpf').value = '5299822472'; chamadas.length = 0; confirmarAjudante(); await aguardar();
+                S.corrDez = { n: chamadas.length, erro: document.getElementById('ajudanteErro').style.display !== 'none' ? document.getElementById('ajudanteErro').textContent : null };
+                state.ajudanteCorrecao = false;
+                Object.assign(state, { tipo: 'expedicao', tela: 'exp_ajudante' });
+                document.getElementById('tela').innerHTML = telaAjudante();
+                chamadas.length = 0; finalizarSemAjudante(); await aguardar(); await aguardar();
+                S.sem = { n: chamadas.filter(c => c.acao === 'salvar-etapa').length, corpo: chamadas[0] && JSON.stringify(chamadas[0].corpo) };
+                window.api = origApi; window.mostrarErroTela = origErr;
+                return S;
+            });
+            ok(cpfAj.max === '11' && cpfAj.inputmode === 'numeric' && cpfAj.nomeMax === false && cpfAj.nomeInputmode === false, `${W}: CPF do ajudante com maxlength=11 e inputmode numerico; Nome completo inalterado`);
+            ok(cpfAj.teclado === '12345' && cpfAj.limite === '12345678901' && cpfAj.colado === '12345678901' && cpfAj.colado13 === '12345678901', `${W}: CPF so aceita digitos e no maximo 11 (teclado ${cpfAj.teclado}, limite ${cpfAj.limite}, colado ${cpfAj.colado}, ${cpfAj.colado13})`);
+            ok(cpfAj.nomeValor === 'AB1.', `${W}: Nome completo continua aceitando letras e pontuacao`);
+            ok(cpfAj.dez.n === 0 && cpfAj.dez.erro === 'O CPF deve ter 11 números' && cpfAj.vazio === 0, `${W}: CPF com 10 digitos ou vazio nao confirma, nao chama salvar-etapa e mostra a mensagem`);
+            ok(cpfAj.onze.n === 1 && cpfAj.onze.acao === 'salvar-etapa' && cpfAj.onze.corpo === JSON.stringify({ id_atendimento: 7, etapa: 'ajudante', dados: { nome: 'MARIA SOUZA', cpf: '12345678901' } }) && cpfAj.onze.tipo === 'string', `${W}: CPF com 11 digitos confirma e envia cpf string de 11 digitos`);
+            ok(cpfAj.corr === '52998224725' && cpfAj.corrLongo === '52998224725', `${W}: modo correcao normaliza o CPF pre-preenchido (${cpfAj.corr}, ${cpfAj.corrLongo})`);
+            ok(cpfAj.corrDez.n === 0 && cpfAj.corrDez.erro === 'O CPF deve ter 11 números', `${W}: modo correcao com 10 digitos nao chama a API e mostra a mensagem no bloco de erro`);
+            ok(cpfAj.sem.n === 1 && cpfAj.sem.corpo === JSON.stringify({ id_atendimento: 7, etapa: 'ajudante', dados: { nome: null, cpf: null } }), `${W}: "Nao" (sem ajudante) continua enviando nome e cpf nulos`);
             // feedback visual ao toque (:active, cor solida) e nenhum :hover no bloco novo
             await page.evaluate(() => { document.getElementById('tela').innerHTML = telaPlacaExpedicao(); abrirTeclado(document.getElementById('inputPlaca')); });
             const fbTecla = await medirFeedbackToque(page, '#teclado .tecla:not(.tecla-ok):not(.tecla-apagar):not(.tecla-espaco)');

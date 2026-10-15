@@ -692,7 +692,7 @@ function selecionarTipo(tipo) {
 
 function telaPlacaExpedicao() {
     return `<div class="titulo">Digite a placa do veículo</div>
-        <input class="campo-texto kb-input" id="inputPlaca" autocomplete="off" placeholder="AAA-0A00">
+        <input class="campo-texto kb-input" id="inputPlaca" autocomplete="off">
         <button class="btn-primario" style="max-width:320px;margin:0 auto" onclick="consultarPlacaExpedicao()">Consultar</button>`;
 }
 async function consultarPlacaExpedicao() {
@@ -740,8 +740,8 @@ async function escolherOrdem(ordem) {
     } catch (e) { mostrarErroTela(e.message); }
 }
 
-function campo(rotulo, id, valor) {
-    return `<div class="campo"><label>${rotulo}</label><input class="kb-input" id="${id}" autocomplete="off" value="${escapeHtml(valor)}"></div>`;
+function campo(rotulo, id, valor, atributos) {
+    return `<div class="campo"><label>${rotulo}</label><input class="kb-input" id="${id}" autocomplete="off"${atributos ? ' ' + atributos : ''} value="${escapeHtml(valor)}"></div>`;
 }
 
 const UF_LISTA = [
@@ -1055,7 +1055,7 @@ function expCamAtualizarBotao() {
 }
 
 function telaExpQr(titulo, tipo) {
-    return `<div class="titulo">${titulo}</div>
+    return `<div class="titulo titulo-doc doc-${tipo}">${titulo}</div>
         <div class="subtitulo">Encaixe o QR code dentro do quadrado, bem iluminado e sem reflexo.</div>
         <div class="caixa-scanner" id="expCamCaixa">
             <video id="expCamVideo" autoplay playsinline></video>
@@ -1876,11 +1876,16 @@ function telaAjudante() {
             <div class="subtitulo">Dados do ajudante</div>
             <div class="grade-campos">
                 ${campo('Nome completo', 'ajudanteNome', corr ? (aj.nome || '') : '')}
-                ${campo('CPF', 'ajudanteCpf', corr ? (aj.cpf || '') : '')}
+                ${campo('CPF', 'ajudanteCpf', corr ? apenasDigitosCpf(aj.cpf) : '', 'inputmode="numeric" maxlength="11" oninput="filtrarCpfAjudante(this)"')}
             </div>
             <button class="btn-primario${corr ? ' impr-btn-alvo' : ''}" id="ajudanteBtnConfirmar" style="max-width:320px;margin:16px auto 0" onclick="confirmarAjudante()">Confirmar</button>
         </div>
         ${blocoCorrecao}`;
+}
+function apenasDigitosCpf(v) { return String(v || '').replace(/\D/g, '').slice(0, 11); }
+function filtrarCpfAjudante(el) {
+    const limpo = apenasDigitosCpf(el.value);
+    if (el.value !== limpo) el.value = limpo;
 }
 function mostrarCamposAjudante() {
     document.getElementById('ajudantePergunta').style.display = 'none';
@@ -1889,7 +1894,8 @@ function mostrarCamposAjudante() {
 function finalizarSemAjudante() { salvarAjudanteEAvancar(null, null); }
 function confirmarAjudante() {
     const nome = document.getElementById('ajudanteNome').value.trim();
-    const cpf = document.getElementById('ajudanteCpf').value.trim();
+    const cpf = apenasDigitosCpf(document.getElementById('ajudanteCpf').value);
+    if (cpf.length !== 11) return mostrarErroAjudante('O CPF deve ter 11 números');
     salvarAjudanteEAvancar(nome, cpf);
 }
 let ajudanteSalvando = false;
@@ -1927,7 +1933,7 @@ function voltarDaCorrecaoAjudante() {
 
 function telaRecPlacaQtd() {
     return `<div class="titulo">Digite a placa do veículo</div>
-        <input class="campo-texto kb-input" id="inputPlacaRec" autocomplete="off" maxlength="7" placeholder="AAA0A00">
+        <input class="campo-texto kb-input" id="inputPlacaRec" autocomplete="off" maxlength="7">
         <div class="subtitulo">Quantas notas fiscais você possui?</div>
         <div class="grupo-botoes">
             <button class="btn-primario" onclick="iniciarRecebimento(false)">5 ou menos</button>
@@ -3864,7 +3870,7 @@ function recCamAtualizarBotao() {
 }
 
 function telaRecQr(titulo, tipo) {
-    return `<div class="titulo">${titulo}</div>
+    return `<div class="titulo titulo-doc doc-${tipo}">${titulo}</div>
         <div class="subtitulo">Encaixe o QR code dentro do quadrado, bem iluminado e sem reflexo.</div>
         <div class="caixa-scanner" id="recCamCaixa">
             <video id="recCamVideo" autoplay playsinline></video>

@@ -11,7 +11,7 @@
 <div class="gestao-campo">
 <label class="gestao-campo__rotulo" for="login">Login</label>
 <input class="gestao-campo__entrada" id="login" name="login" type="text" value="<?= h($login_digitado) ?>" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="60" aria-describedby="login-ajuda" required<?= $erro === null ? ' autofocus' : '' ?>>
-<span class="gestao-campo__ajuda" id="login-ajuda">Exemplo: bruno.carvalho</span>
+<span class="gestao-campo__ajuda" id="login-ajuda">Formato: nome.sobrenome</span>
 </div>
 <div class="gestao-campo">
 <label class="gestao-campo__rotulo" for="senha">Senha</label>

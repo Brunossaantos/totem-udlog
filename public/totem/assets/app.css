@@ -46,6 +46,9 @@ body {
     gap: 18px;
 }
 .titulo { font-size: 22px; font-weight: 600; text-align: center; color: var(--text-primary); }
+.titulo-doc { width: 100%; max-width: min(92%, 900px); margin: 0 auto; padding: 18px 24px; border-radius: 14px; font-size: 36px; font-weight: 800; line-height: 1.15; color: var(--action-primary-text); overflow-wrap: break-word; }
+.titulo-doc.doc-cnh { background: var(--brand-primary); }
+.titulo-doc.doc-crlv { background: var(--text-primary); }
 .titulo-home { font-size: 34px; font-weight: 800; color: #000000; }
 .subtitulo { font-size: 15px; color: var(--text-primary); text-align: center; }
 
