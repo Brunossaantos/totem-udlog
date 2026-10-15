@@ -28,6 +28,7 @@ Documentação completa do projeto e a mudança de comportamento do check-in no 
 - Totem: os títulos "Leia o QR code da CNH" e "Leia o QR code do CRLV" (Expedição e Recebimento) viram faixas de destaque, CNH em azul UDLOG e CRLV em grafite, para não haver confusão.
 - Totem: removido o texto de exemplo (máscara) dos campos de placa; CPF do ajudante aceita apenas 11 números (não permite digitar mais nem confirmar com menos).
 - Gestão: o texto de ajuda do login passa a "Formato: nome.sobrenome" (sem nome de pessoa).
+- Recebimento: depois de salvar cada nota, o totem mostra uma faixa destacada "Nota N de 5 salva! Coloque a próxima nota no scanner ou toque em Finalizar digitalização." (na 5ª nota: "Limite de 5 notas atingido. Toque em Finalizar digitalização."), que permanece até o motorista tocar em "Capturar nota" ou "Refazer", ou até haver erro ou troca de tela.
 
 ### Removido
 - Do `.env.example`, variáveis sem consumidor no código: `DOCUMENTO_QR_HMAC_KEY`, `VIO_API_BR_CACHE_TTL_DIAS`, `VIO_API_BR_CACHE_HMAC_KEY_V1`, `VIO_API_BR_CACHE_HMAC_VERSION`, `IMPRESSORAS_PERMITIDAS` e `IMPRESSAO_TIMEOUT_MS` (as duas últimas pertencem ao `config.json` do serviço de impressão).
