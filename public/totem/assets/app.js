@@ -740,6 +740,41 @@ async function escolherOrdem(ordem) {
     } catch (e) { mostrarErroTela(e.message); }
 }
 
+const ATTR_NOME = `oninput="aplicarFiltroEntrada(this, 'nome')"`;
+const ATTR_CPF = `inputmode="numeric" maxlength="11" oninput="aplicarFiltroEntrada(this, 'cpf')"`;
+const ATTR_DATA = `inputmode="numeric" maxlength="10" oninput="aplicarFiltroEntrada(this, 'data')"`;
+function apenasLetrasEspaco(v) { return String(v || '').replace(/[^\p{L} ]/gu, ''); }
+function apenasDigitos(v, max) { const d = String(v || '').replace(/\D/g, ''); return max ? d.slice(0, max) : d; }
+function mascaraDataBr(v) {
+    const d = apenasDigitos(v, 8);
+    return d.slice(0, 2) + (d.length > 2 ? '-' + d.slice(2, 4) : '') + (d.length > 4 ? '-' + d.slice(4) : '');
+}
+function dataIsoParaBr(v) {
+    const t = String(v || '').trim();
+    let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    return t;
+}
+function dataBrParaIso(v) {
+    const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(String(v || '').trim());
+    if (!m) return null;
+    const dia = Number(m[1]), mes = Number(m[2]), ano = Number(m[3]);
+    const dt = new Date(Date.UTC(ano, mes - 1, dia));
+    if (ano < 1 || dt.getUTCFullYear() !== ano || dt.getUTCMonth() !== mes - 1 || dt.getUTCDate() !== dia) return null;
+    return `${m[3]}-${m[2]}-${m[1]}`;
+}
+const FILTROS_ENTRADA = {
+    nome: apenasLetrasEspaco,
+    cpf: (v) => apenasDigitos(v, 11),
+    data: mascaraDataBr,
+};
+function aplicarFiltroEntrada(el, tipo) {
+    const limpo = FILTROS_ENTRADA[tipo](el.value);
+    if (el.value !== limpo) el.value = limpo;
+}
+
 function campo(rotulo, id, valor, atributos) {
     return `<div class="campo"><label>${rotulo}</label><input class="kb-input" id="${id}" autocomplete="off"${atributos ? ' ' + atributos : ''} value="${escapeHtml(valor)}"></div>`;
 }
@@ -1193,9 +1228,9 @@ function telaExpCnhManual() {
     return `<div class="titulo">Preencher dados da CNH manualmente</div>
         <div class="subtitulo">Um atendente vai revisar esses dados depois</div>
         <div class="grade-campos">
-            ${campo('Nome completo', 'expManualCnhNome', '')}
-            ${campo('CPF', 'expManualCnhCpf', '')}
-            ${campo('Validade (AAAA-MM-DD)', 'expManualCnhValidade', '')}
+            ${campo('Nome completo', 'expManualCnhNome', '', ATTR_NOME)}
+            ${campo('CPF', 'expManualCnhCpf', '', ATTR_CPF)}
+            ${campo('Validade (DD-MM-AAAA)', 'expManualCnhValidade', '', ATTR_DATA)}
         </div>
         <div class="status-scanner" id="expManualStatus"></div>
         <button class="btn-primario" id="expManualBtn" style="max-width:320px;margin:0 auto" onclick="expConfirmarCnhManual()">Confirmar</button>`;
@@ -1205,12 +1240,14 @@ async function expConfirmarCnhManual() {
     if (state.exp.emAndamento) return;
     const nome = document.getElementById('expManualCnhNome').value.trim();
     const cpf = document.getElementById('expManualCnhCpf').value.trim();
-    const validade = document.getElementById('expManualCnhValidade').value.trim();
+    const validadeBr = document.getElementById('expManualCnhValidade').value.trim();
     const statusEl = document.getElementById('expManualStatus');
 
     if (!nome) return mostrarErroTela('Informe o nome completo');
     if (cpf.replace(/\D/g, '').length !== 11) return mostrarErroTela('CPF inválido');
-    if (!validade) return mostrarErroTela('Informe a validade da CNH');
+    if (!validadeBr) return mostrarErroTela('Informe a validade da CNH');
+    const validade = dataBrParaIso(validadeBr);
+    if (!validade) return mostrarErroTela('Informe a validade no formato DD-MM-AAAA');
 
     state.exp.emAndamento = true;
     const btn = document.getElementById('expManualBtn');
@@ -1637,10 +1674,10 @@ const ICONES_CONFIRMA = {
 function iconeConfirma(nome, classe) {
     return `<svg class="${classe}" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONES_CONFIRMA[nome]}</svg>`;
 }
-function linhaConfirma(rotulo, id, valor, obrigatorio, multilinha, largo) {
+function linhaConfirma(rotulo, id, valor, obrigatorio, multilinha, largo, atributos) {
     const marca = obrigatorio ? ' <span class="obrig-marca" aria-hidden="true">*</span>' : '';
     const req = obrigatorio ? ' aria-required="true" placeholder="obrigatório"' : '';
-    const comum = `class="kb-input conf-valor" id="${id}" autocomplete="off" spellcheck="false"${req}`;
+    const comum = `class="kb-input conf-valor" id="${id}" autocomplete="off" spellcheck="false"${req}${atributos ? ' ' + atributos : ''}`;
     const ctl = multilinha
         ? `<textarea ${comum} rows="1">${escapeHtml(valor)}</textarea>`
         : `<input ${comum} value="${escapeHtml(valor)}">`;
@@ -1798,9 +1835,9 @@ function telaConfirma(tipoTexto) {
             <div class="conf-tipo">${tipoCap}</div>
         </div>
         ${cartaoConfirma('Motorista', 'pessoa',
-            linhaConfirma('Nome do motorista', 'confMotorista', d.motorista_nome, true, true, true)
-            + linhaConfirma('CPF', 'confCpf', d.motorista_cpf, true)
-            + linhaConfirma('Validade da CNH', 'confCnhValidade', d.cnh_validade, true))}
+            linhaConfirma('Nome do motorista', 'confMotorista', d.motorista_nome, true, true, true, ATTR_NOME)
+            + linhaConfirma('CPF', 'confCpf', apenasDigitos(d.motorista_cpf, 11), true, false, false, ATTR_CPF)
+            + linhaConfirma('Validade da CNH (DD-MM-AAAA)', 'confCnhValidade', dataIsoParaBr(d.cnh_validade), true, false, false, ATTR_DATA))}
         ${cartaoConfirma('Veículo', 'caminhao',
             linhaConfirmaLeitura('Placa', 'confPlaca', state.placa)
             + linhaConfirmaUf('confCrlvUf', d.crlv_uf || '')
@@ -1821,10 +1858,16 @@ async function confirmarDados() {
         abrirModalConfirmaIncompleta(vazios, faltaAtendimento);
         return;
     }
+    const validadeBr = document.getElementById('confCnhValidade').value.trim();
+    const validadeIso = dataBrParaIso(validadeBr);
+    if (!validadeIso) {
+        mostrarErroTela('Informe a validade no formato DD-MM-AAAA');
+        return;
+    }
     const dados = {
         motorista_nome: document.getElementById('confMotorista').value,
         motorista_cpf: document.getElementById('confCpf').value,
-        cnh_validade: document.getElementById('confCnhValidade').value,
+        cnh_validade: validadeIso,
         crlv_ano: document.getElementById('confCrlvAno').value,
         crlv_uf: document.getElementById('confCrlvUf').value,
         crlv_rntc: document.getElementById('confCrlvRntc').value,
@@ -1875,7 +1918,7 @@ function telaAjudante() {
         <div id="ajudanteCampos" style="display:none">
             <div class="subtitulo">Dados do ajudante</div>
             <div class="grade-campos">
-                ${campo('Nome completo', 'ajudanteNome', corr ? (aj.nome || '') : '')}
+                ${campo('Nome completo', 'ajudanteNome', corr ? (aj.nome || '') : '', ATTR_NOME)}
                 ${campo('CPF', 'ajudanteCpf', corr ? apenasDigitosCpf(aj.cpf) : '', 'inputmode="numeric" maxlength="11" oninput="filtrarCpfAjudante(this)"')}
             </div>
             <button class="btn-primario${corr ? ' impr-btn-alvo' : ''}" id="ajudanteBtnConfirmar" style="max-width:320px;margin:16px auto 0" onclick="confirmarAjudante()">Confirmar</button>
@@ -3991,9 +4034,9 @@ function telaRecCnhManual() {
     return `<div class="titulo">Preencher dados da CNH manualmente</div>
         <div class="subtitulo">Um atendente vai revisar esses dados depois</div>
         <div class="grade-campos">
-            ${campo('Nome completo', 'recManualCnhNome', '')}
-            ${campo('CPF', 'recManualCnhCpf', '')}
-            ${campo('Validade (AAAA-MM-DD)', 'recManualCnhValidade', '')}
+            ${campo('Nome completo', 'recManualCnhNome', '', ATTR_NOME)}
+            ${campo('CPF', 'recManualCnhCpf', '', ATTR_CPF)}
+            ${campo('Validade (DD-MM-AAAA)', 'recManualCnhValidade', '', ATTR_DATA)}
         </div>
         <div class="status-scanner" id="recManualStatus"></div>
         <button class="btn-primario" id="recManualBtn" style="max-width:320px;margin:0 auto" onclick="recConfirmarCnhManual()">Confirmar</button>`;
@@ -4003,12 +4046,14 @@ async function recConfirmarCnhManual() {
     if (state.rec.emAndamento) return;
     const nome = document.getElementById('recManualCnhNome').value.trim();
     const cpf = document.getElementById('recManualCnhCpf').value.trim();
-    const validade = document.getElementById('recManualCnhValidade').value.trim();
+    const validadeBr = document.getElementById('recManualCnhValidade').value.trim();
     const statusEl = document.getElementById('recManualStatus');
 
     if (!nome) return mostrarErroTela('Informe o nome completo');
     if (cpf.replace(/\D/g, '').length !== 11) return mostrarErroTela('CPF inválido');
-    if (!validade) return mostrarErroTela('Informe a validade da CNH');
+    if (!validadeBr) return mostrarErroTela('Informe a validade da CNH');
+    const validade = dataBrParaIso(validadeBr);
+    if (!validade) return mostrarErroTela('Informe a validade no formato DD-MM-AAAA');
 
     state.rec.emAndamento = true;
     const btn = document.getElementById('recManualBtn');

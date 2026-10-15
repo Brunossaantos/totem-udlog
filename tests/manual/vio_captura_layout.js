@@ -1547,7 +1547,7 @@ async function main() {
                 S.limite = cpf.value;
                 cpf.value = '123.456.789-01x'; notificarInput(cpf); S.colado = cpf.value;
                 cpf.value = '1234567890123'; notificarInput(cpf); S.colado13 = cpf.value;
-                abrirTeclado(nome); for (const c of 'AB1.') digitar(c); S.nomeValor = nome.value;
+                abrirTeclado(nome); for (const c of 'Ana-Çé 1.') digitar(c); S.nomeValor = nome.value;
                 fecharTeclado();
                 nome.value = 'MARIA SOUZA';
                 cpf.value = '1234567890'; chamadas.length = 0; erro = null; confirmarAjudante(); await aguardar();
@@ -1573,12 +1573,97 @@ async function main() {
             });
             ok(cpfAj.max === '11' && cpfAj.inputmode === 'numeric' && cpfAj.nomeMax === false && cpfAj.nomeInputmode === false, `${W}: CPF do ajudante com maxlength=11 e inputmode numerico; Nome completo inalterado`);
             ok(cpfAj.teclado === '12345' && cpfAj.limite === '12345678901' && cpfAj.colado === '12345678901' && cpfAj.colado13 === '12345678901', `${W}: CPF so aceita digitos e no maximo 11 (teclado ${cpfAj.teclado}, limite ${cpfAj.limite}, colado ${cpfAj.colado}, ${cpfAj.colado13})`);
-            ok(cpfAj.nomeValor === 'AB1.', `${W}: Nome completo continua aceitando letras e pontuacao`);
+            ok(cpfAj.nomeValor === 'AnaÇé ', `${W}: Nome completo do ajudante so aceita letras e espaco (${cpfAj.nomeValor})`);
             ok(cpfAj.dez.n === 0 && cpfAj.dez.erro === 'O CPF deve ter 11 números' && cpfAj.vazio === 0, `${W}: CPF com 10 digitos ou vazio nao confirma, nao chama salvar-etapa e mostra a mensagem`);
             ok(cpfAj.onze.n === 1 && cpfAj.onze.acao === 'salvar-etapa' && cpfAj.onze.corpo === JSON.stringify({ id_atendimento: 7, etapa: 'ajudante', dados: { nome: 'MARIA SOUZA', cpf: '12345678901' } }) && cpfAj.onze.tipo === 'string', `${W}: CPF com 11 digitos confirma e envia cpf string de 11 digitos`);
             ok(cpfAj.corr === '52998224725' && cpfAj.corrLongo === '52998224725', `${W}: modo correcao normaliza o CPF pre-preenchido (${cpfAj.corr}, ${cpfAj.corrLongo})`);
             ok(cpfAj.corrDez.n === 0 && cpfAj.corrDez.erro === 'O CPF deve ter 11 números', `${W}: modo correcao com 10 digitos nao chama a API e mostra a mensagem no bloco de erro`);
             ok(cpfAj.sem.n === 1 && cpfAj.sem.corpo === JSON.stringify({ id_atendimento: 7, etapa: 'ajudante', dados: { nome: null, cpf: null } }), `${W}: "Nao" (sem ajudante) continua enviando nome e cpf nulos`);
+            const filtros = await page.evaluate(async () => {
+                const origApi = window.api, origErr = window.mostrarErroTela;
+                const chamadas = []; let erro = null;
+                window.api = async (arq, acao, corpo) => { chamadas.push({ arq, acao, corpo }); return { ok: true, pode_avancar: true }; };
+                window.mostrarErroTela = (m) => { erro = m; };
+                const aguardar = () => new Promise(res => setTimeout(res, 0));
+                const R = {};
+                const attrs = (el) => ({ max: el.getAttribute('maxlength'), im: el.getAttribute('inputmode') });
+                for (const pre of ['exp', 'rec']) {
+                    iniciarApp();
+                    Object.assign(state, { idAtendimento: 7, tipo: pre === 'exp' ? 'expedicao' : 'recebimento', tela: pre + '_cnh_manual' });
+                    state.exp = estadoExpVazio(); state.rec = estadoRecVazio();
+                    document.getElementById('tela').innerHTML = pre === 'exp' ? telaExpCnhManual() : telaRecCnhManual();
+                    const nome = document.getElementById(pre + 'ManualCnhNome'), cpf = document.getElementById(pre + 'ManualCnhCpf'), val = document.getElementById(pre + 'ManualCnhValidade');
+                    const S = R[pre] = {};
+                    S.rotulo = val.parentElement.querySelector('label').textContent;
+                    S.cpfAttr = attrs(cpf); S.valAttr = attrs(val); S.nomeAttr = attrs(nome);
+                    abrirTeclado(nome); for (const c of "José d'Ávila-Sá 9.!") digitar(c); S.nomeTec = nome.value;
+                    nome.value = 'Çélia 2 Müller_@'; notificarInput(nome); S.nomeColado = nome.value;
+                    abrirTeclado(cpf); for (const c of '12A.3-4 b5') digitar(c); S.cpfTec = cpf.value;
+                    cpf.value = '123.456.789-09x'; notificarInput(cpf); S.cpfColado = cpf.value;
+                    abrirTeclado(val); for (const c of '20082035') digitar(c); S.dataTec = val.value;
+                    digitar('9'); S.dataExtra = val.value;
+                    val.value = ''; S.passos = [];
+                    for (const c of '20082') { digitar(c); S.passos.push(val.value); }
+                    for (let i = 0; i < 6; i++) { apagar(); S.passos.push(val.value); }
+                    val.value = ''; for (const c of 'ab2-0/x') digitar(c); S.dataLetras = val.value;
+                    val.value = '20082035'; notificarInput(val); S.dataColada = val.value;
+                    fecharTeclado();
+                    nome.value = 'Maria de Souza'; cpf.value = '12345678909';
+                    const enviar = async (v) => { val.value = v; chamadas.length = 0; erro = null; await (pre === 'exp' ? expConfirmarCnhManual() : recConfirmarCnhManual()); await aguardar(); return { n: chamadas.filter(c => c.arq === 'documento.php').length, erro, corpo: chamadas[0] && JSON.stringify(chamadas[0].corpo) }; };
+                    S.ok = await enviar('20-08-2035');
+                    S.incompleta = await enviar('20-08-20');
+                    S.inexistente = await enviar('31-02-2030');
+                    S.mes13 = await enviar('10-13-2030');
+                    S.vazio = await enviar('');
+                }
+                iniciarApp();
+                Object.assign(state, { idAtendimento: 7, tipo: 'expedicao', tela: 'exp_confirmacao', placa: 'ABC1D23', exp: estadoExpVazio(), rec: estadoRecVazio() });
+                state.dados = { numero: 'OC1', cliente_nome: 'ACME', motorista_nome: 'Fulano de Tal', motorista_cpf: '111.444.777-35', cnh_validade: '2035-08-20', crlv_ano: '2020', crlv_uf: 'SP', crlv_rntc: '123', crlv_tipo_veiculo: 'Truck' };
+                document.getElementById('tela').innerHTML = telaConfirma('expedição');
+                const cn = document.getElementById('confMotorista'), cc = document.getElementById('confCpf'), cv = document.getElementById('confCnhValidade');
+                const C = R.conf = {};
+                C.nomeTag = cn.tagName; C.cpfAttr = attrs(cc); C.valAttr = attrs(cv);
+                C.cpfInicial = cc.value; C.valInicial = cv.value; C.rotulo = cv.closest('.conf-campo').querySelector('label').textContent;
+                abrirTeclado(cn); cn.value = ''; for (const c of 'Ana 3 Çá!') digitar(c); C.nomeTec = cn.value;
+                cn.value = 'Fulano de Tal';
+                abrirTeclado(cc); cc.value = ''; for (const c of '12A.3-4 b5') digitar(c); C.cpfTec = cc.value;
+                cc.value = '11144477735';
+                abrirTeclado(cv); cv.value = ''; for (const c of '20x08-2035') digitar(c); C.dataTec = cv.value;
+                fecharTeclado();
+                cv.value = '20-08-2035'; chamadas.length = 0; await confirmarDados(); await aguardar();
+                C.ok = { n: chamadas.filter(c => c.acao === 'salvar-etapa').length, dados: chamadas[0] && chamadas[0].corpo.dados };
+                state.dados.cnh_validade = '2035-08-20'; document.getElementById('tela').innerHTML = telaConfirma('expedição'); state.tela = 'exp_confirmacao';
+                const cv2 = document.getElementById('confCnhValidade');
+                const tenta = async (v) => { cv2.value = v; chamadas.length = 0; erro = null; await confirmarDados(); await aguardar(); return { n: chamadas.length, erro }; };
+                C.incompleta = await tenta('20-08'); C.inexistente = await tenta('31-02-2030');
+                C.vazio = await tenta(''); C.vazioModal = !!document.getElementById('modalCaixa') && document.getElementById('modalCaixa').textContent.includes('CNH validade');
+                state.dados.cnh_validade = '20/08/2035'; document.getElementById('tela').innerHTML = telaConfirma('expedição');
+                C.barra = document.getElementById('confCnhValidade').value;
+                state.dados.cnh_validade = 'texto livre'; document.getElementById('tela').innerHTML = telaConfirma('expedição');
+                C.livre = document.getElementById('confCnhValidade').value;
+                fecharModal(); fecharTeclado();
+                window.api = origApi; window.mostrarErroTela = origErr;
+                return R;
+            });
+            for (const pre of ['exp', 'rec']) {
+                const S = filtros[pre], tg = `${W}: manual CNH ${pre}`;
+                ok(S.rotulo === 'Validade (DD-MM-AAAA)' && S.valAttr.max === '10' && S.valAttr.im === 'numeric', `${tg} rotulo Validade (DD-MM-AAAA), maxlength 10 e inputmode numerico`);
+                ok(S.cpfAttr.max === '11' && S.cpfAttr.im === 'numeric' && S.nomeAttr.max === null && S.nomeAttr.im === null, `${tg} CPF maxlength 11/numerico; nome sem maxlength novo`);
+                ok(S.nomeTec === 'José dÁvilaSá ' && S.nomeColado === 'Çélia  Müller', `${tg} nome so letras e espaco, aceita acentos e ç (${S.nomeTec}|${S.nomeColado})`);
+                ok(S.cpfTec === '12345' && S.cpfColado === '12345678909', `${tg} CPF so digitos (${S.cpfTec}|${S.cpfColado})`);
+                ok(S.dataTec === '20-08-2035' && S.dataExtra === '20-08-2035' && S.dataLetras === '20' && S.dataColada === '20-08-2035', `${tg} data mascarada DD-MM-AAAA, no maximo 8 digitos, letras ignoradas (${S.dataTec}|${S.dataExtra}|${S.dataLetras})`);
+                ok(S.passos.join(',') === '2,20,20-0,20-08,20-08-2,20-08,20-0,20,2,,', `${tg} Apagar remove sem travar no hifen (${S.passos.join(',')})`);
+                ok(S.ok.n === 1 && S.ok.corpo === JSON.stringify({ id_atendimento: 7, tipo: 'cnh', nome: 'Maria de Souza', cpf: '12345678909', validade: '2035-08-20' }), `${tg} envia validade em AAAA-MM-DD (${S.ok.corpo})`);
+                ok(S.incompleta.n === 0 && S.incompleta.erro === 'Informe a validade no formato DD-MM-AAAA' && S.inexistente.n === 0 && S.inexistente.erro === 'Informe a validade no formato DD-MM-AAAA' && S.mes13.n === 0 && S.mes13.erro === 'Informe a validade no formato DD-MM-AAAA', `${tg} data incompleta/inexistente/mes 13 nao chama a API e mostra o erro`);
+                ok(S.vazio.n === 0 && S.vazio.erro === 'Informe a validade da CNH', `${tg} validade vazia mantem a mensagem atual`);
+            }
+            const C = filtros.conf;
+            ok(C.nomeTag === 'TEXTAREA' && C.cpfAttr.max === '11' && C.cpfAttr.im === 'numeric' && C.valAttr.max === '10' && C.valAttr.im === 'numeric' && /DD-MM-AAAA/.test(C.rotulo), `${W}: confirmacao com atributos de CPF e data e rotulo DD-MM-AAAA`);
+            ok(C.cpfInicial === '11144477735' && C.valInicial === '20-08-2035' && C.barra === '20-08-2035' && C.livre === 'texto livre', `${W}: confirmacao exibe CPF so digitos e validade em DD-MM-AAAA (${C.cpfInicial}|${C.valInicial}|${C.barra}|${C.livre})`);
+            ok(C.nomeTec === 'Ana  Çá' && C.cpfTec === '12345' && C.dataTec === '20-08-2035', `${W}: confirmacao filtra nome, CPF e data (${C.nomeTec}|${C.cpfTec}|${C.dataTec})`);
+            ok(C.ok.n === 1 && C.ok.dados.cnh_validade === '2035-08-20' && C.ok.dados.motorista_cpf === '11144477735' && C.ok.dados.motorista_nome === 'Fulano de Tal', `${W}: confirmacao reenvia validade 2035-08-20 (round-trip)`);
+            ok(C.incompleta.n === 0 && C.incompleta.erro === 'Informe a validade no formato DD-MM-AAAA' && C.inexistente.n === 0 && C.inexistente.erro === 'Informe a validade no formato DD-MM-AAAA', `${W}: confirmacao com data incompleta/inexistente nao chama a API`);
+            ok(C.vazio.n === 0 && C.vazio.erro === null && C.vazioModal, `${W}: confirmacao com validade vazia mantem o modal de obrigatorios`);
             // feedback visual ao toque (:active, cor solida) e nenhum :hover no bloco novo
             await page.evaluate(() => { document.getElementById('tela').innerHTML = telaPlacaExpedicao(); abrirTeclado(document.getElementById('inputPlaca')); });
             const fbTecla = await medirFeedbackToque(page, '#teclado .tecla:not(.tecla-ok):not(.tecla-apagar):not(.tecla-espaco)');
