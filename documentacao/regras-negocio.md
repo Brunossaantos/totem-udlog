@@ -202,7 +202,7 @@ Na Expedição, as edições da tela "Dados da ordem" (cliente, CNPJ, placa, ve�
 
 ### 5.7 Ajudante
 
-Nome até 150 caracteres e CPF de **11 dígitos sem verificação de DV** (decisão do usuário; o CPF do motorista é validado com DV). "Sem ajudante" grava nome e CPF nulos. Salvar ou corrigir só é aceito com `em_andamento`, etapa de confirmação e `talent_checkin_status` em `NAO_ENVIADO`/`ERRO_REPROCESSAVEL` (sob `FOR UPDATE`); senão 409. O CPF do ajudante nunca é impresso. **[C]** [T: teste_talent_correcao_ajudante]
+Nome até 150 caracteres e CPF de **11 dígitos sem verificação de DV** (decisão do usuário; o CPF do motorista é validado com DV). No totem, o campo do CPF do ajudante aceita só números, no máximo 11, e "Confirmar" exige exatamente 11 (mensagem "O CPF deve ter 11 números", sem chamar a API); o backend continua exigindo 11 dígitos. "Sem ajudante" grava nome e CPF nulos. Salvar ou corrigir só é aceito com `em_andamento`, etapa de confirmação e `talent_checkin_status` em `NAO_ENVIADO`/`ERRO_REPROCESSAVEL` (sob `FOR UPDATE`); senão 409. O CPF do ajudante nunca é impresso. **[C]** [T: teste_talent_correcao_ajudante]
 
 ---
 

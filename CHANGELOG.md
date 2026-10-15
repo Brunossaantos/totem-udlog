@@ -25,6 +25,9 @@ Documentação completa do projeto e a mudança de comportamento do check-in no 
 - Correção da documentação (2026-10-10): registrados como confirmados pelo responsável do projeto os 5 crons em execução, PHP web 8.3, `TALENT_CHECKIN_ATIVO=true` em produção, instalação de dependências por `composer install --no-dev --optimize-autoloader` e `display_errors=Off`; removida a pendência de contrato da vio.api.br (só o comportamento comprovado por código e testes é documentado); validação de método HTTP nas APIs do totem e política de retenção de atendimentos, fotos e aceites LGPD passam a decisão de produto "não será tratado"; contagem de telas do front corrigida para 26; dump do banco externo atualizado (somente estrutura, 2026-10-10).
 - Recebimento: o campo de placa passa a aceitar no máximo 7 caracteres (o front exige exatamente 7; o backend não valida o formato).
 - Recebimento: a busca manual de cliente (quando o OCR não identifica) mostra no máximo uma sugestão, apenas quando o texto digitado corresponde a um único cliente ativo (CNPJ por prefixo, nome por trecho, normalizados); o motorista confirma tocando; a rota não expõe mais de um cliente nem as demais colunas.
+- Totem: os títulos "Leia o QR code da CNH" e "Leia o QR code do CRLV" (Expedição e Recebimento) viram faixas de destaque, CNH em azul UDLOG e CRLV em grafite, para não haver confusão.
+- Totem: removido o texto de exemplo (máscara) dos campos de placa; CPF do ajudante aceita apenas 11 números (não permite digitar mais nem confirmar com menos).
+- Gestão: o texto de ajuda do login passa a "Formato: nome.sobrenome" (sem nome de pessoa).
 
 ### Removido
 - Do `.env.example`, variáveis sem consumidor no código: `DOCUMENTO_QR_HMAC_KEY`, `VIO_API_BR_CACHE_TTL_DIAS`, `VIO_API_BR_CACHE_HMAC_KEY_V1`, `VIO_API_BR_CACHE_HMAC_VERSION`, `IMPRESSORAS_PERMITIDAS` e `IMPRESSAO_TIMEOUT_MS` (as duas últimas pertencem ao `config.json` do serviço de impressão).
