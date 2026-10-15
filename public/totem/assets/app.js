@@ -2399,8 +2399,23 @@ function mostrarStatusScanner(msg, isErro) {
     const el = document.getElementById('scannerStatus');
     if (!el) return;
     el.textContent = msg;
+    el.classList.remove('proxima-nota');
+    el.removeAttribute('role');
+    el.removeAttribute('aria-live');
     el.classList.toggle('erro', !!isErro);
     el.classList.toggle('ok', !isErro && (msg === 'Scanner pronto' || msg === 'Documento salvo'));
+}
+
+function mostrarAvisoProximaNota() {
+    const total = (state.notasNumeros || []).length;
+    const el = document.getElementById('scannerStatus');
+    if (!el || total < 1) return;
+    mostrarStatusScanner(total >= NOTAS_LIMITE
+        ? 'Limite de ' + NOTAS_LIMITE + ' notas atingido. Toque em Finalizar digitalização.'
+        : 'Nota ' + total + ' de ' + NOTAS_LIMITE + ' salva! Coloque a próxima nota no scanner ou toque em Finalizar digitalização.');
+    el.classList.add('proxima-nota');
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
 }
 
 function ajustarProporcaoScanner(largura, altura) {
@@ -2824,7 +2839,7 @@ async function confirmarUsoImagemNota() {
                 if (btnCap) btnCap.disabled = true;
                 const contadorCheio = document.getElementById('contadorNotas');
                 if (contadorCheio) contadorCheio.textContent = state.notasNumeros.length;
-                mostrarStatusScanner('Limite de 5 notas atingido');
+                mostrarAvisoProximaNota();
                 state.capturaNotaEmAndamento = false;
                 atualizarBotaoFinalizarDigitalizacao();
                 notificarFimDeTrabalhoNotas();
@@ -2859,13 +2874,12 @@ async function confirmarUsoImagemNota() {
         const contador = document.getElementById('contadorNotas');
         if (contador) contador.textContent = state.notasNumeros.length;
         atualizarIndicadorNumerosNota();
-        mostrarStatusScanner('Documento salvo');
         voltarParaVideoAoVivo();
+        mostrarAvisoProximaNota();
         marca('liberado', notaSeq);
         if (state.notasNumeros.length >= NOTAS_LIMITE) {
             const btn = document.getElementById('btnCapturarNota');
             if (btn) btn.disabled = true;
-            mostrarStatusScanner('Limite de 5 notas atingido');
         }
     } catch (e) {
         marca('falha_upload', notaSeq);

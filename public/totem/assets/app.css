@@ -141,6 +141,7 @@ input.campo-texto {
 #previaNota { height: auto !important; max-height: 70vh; }
 .status-scanner { font-size: 13px; color: var(--text-primary); text-align: center; }
 .status-scanner.ok { color: #1d7a5f; font-weight: 600; }
+.status-scanner.proxima-nota { font-size: 24px; font-weight: 700; line-height: 1.3; color: #FFFFFF; background: #0179AD; border-radius: 16px; padding: 16px 20px; margin: 0 auto; max-width: min(92%, 900px); }
 .status-scanner.erro { color: #a32d2d; font-weight: 600; }
 
 .senha-caixa { border: 2px dashed var(--border); border-radius: 10px; padding: 16px 32px; text-align: center; margin: 0 auto; }

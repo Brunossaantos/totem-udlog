@@ -1076,6 +1076,85 @@ async function exercitarAlvosToque(page) {
 }
 
 // Estado ao toque (:active) com o mouse pressionado: cor solida de feedback.
+async function exercitarProximaNota(page) {
+    return page.evaluate(async () => {
+        const esperar = ms => new Promise(res => setTimeout(res, ms));
+        const app = document.getElementById('app');
+        const origApi = window.api, origOcr = window.processarOcrNota, origFoto = window.capturarFotoScannerNota;
+        const origNotas = state.notasNumeros, origId = state.idAtendimento;
+        const out = {};
+        const IMG = 'data:image/jpeg;base64,QUJD';
+        const preparar = (n) => {
+            state.notasNumeros = [];
+            state.idAtendimento = 99;
+            uploadPendente = null;
+            app.innerHTML = telaDigitaliza();
+            for (let i = 0; i < n; i++) state.notasNumeros.push(novaNotaLocal({ clientUid: 'u' + i, ordem: i + 1, idNota: i + 1, imagem: IMG }));
+            const v = document.getElementById('videoScanner');
+            Object.defineProperty(v, 'readyState', { value: 4, configurable: true });
+            Object.defineProperty(v, 'videoWidth', { value: 640, configurable: true });
+            Object.defineProperty(v, 'videoHeight', { value: 480, configurable: true });
+            scannerVideoPronto = true;
+            document.getElementById('contadorNotas').textContent = n;
+            atualizarIndicadorNumerosNota();
+            mostrarStatusScanner('Scanner pronto');
+            atualizarBotaoCaptura();
+        };
+        const previa = (img) => { state.previewNotaAtual = img; exibirPreviaNota(img); };
+        const statusEl = () => document.getElementById('scannerStatus');
+        const medir = () => {
+            const st = statusEl(), cap = document.getElementById('btnCapturarNota'), fin = document.getElementById('btnFinalizarDigitalizacao');
+            const dentro = el => { const c = el.getBoundingClientRect(); return c.width > 0 && c.top >= 0 && c.bottom <= innerHeight && c.left >= 0 && c.right <= innerWidth; };
+            const cs = getComputedStyle(st);
+            return {
+                texto: st.textContent, classe: st.className, role: st.getAttribute('role'), live: st.getAttribute('aria-live'),
+                fonte: parseFloat(cs.fontSize), peso: cs.fontWeight, fundo: cs.backgroundColor, cor: cs.color, raio: cs.borderTopLeftRadius, pad: parseFloat(cs.paddingTop),
+                msgVisivel: dentro(st), capVisivel: dentro(cap), finVisivel: dentro(fin), capDesab: cap.disabled,
+                semOverflowX: document.documentElement.scrollWidth <= innerWidth, semOverflowMsg: st.scrollWidth <= st.clientWidth + 1,
+                contador: document.getElementById('contadorNotas').textContent,
+            };
+        };
+        const enviar = async () => { const p = confirmarUsoImagemNota(); await esperar(20); return p; };
+        let chamadas = 0;
+        const apiOk = async (arq, acao, dados) => { chamadas++; return { ordem: chamadas, id_nota: chamadas, uid: dados.uid }; };
+        window.processarOcrNota = () => {};
+        window.capturarFotoScannerNota = () => IMG;
+        preparar(0);
+        previa(IMG);
+        let liberar;
+        window.api = (arq, acao, dados) => new Promise(res => { liberar = () => res({ ordem: 1, id_nota: 1, uid: dados.uid }); });
+        const pEnvio = confirmarUsoImagemNota();
+        await esperar(20);
+        out.durante = { classe: statusEl().className, texto: statusEl().textContent };
+        liberar(); await pEnvio;
+        out.n1 = medir();
+        await esperar(1500);
+        out.n1aposEspera = statusEl().textContent;
+        document.getElementById('btnCapturarNota').click();
+        out.aposCapturar = { classe: statusEl().className, texto: statusEl().textContent, role: statusEl().getAttribute('role') };
+        document.getElementById('btnRefazer').click();
+        out.aposRefazer = { classe: statusEl().className, texto: statusEl().textContent };
+        window.api = apiOk;
+        preparar(3);
+        previa(IMG);
+        await enviar(); out.n4 = medir();
+        previa('data:image/jpeg;base64,QUJE');
+        await enviar(); out.n5 = medir();
+        preparar(1);
+        previa(IMG);
+        window.api = async () => { throw Object.assign(new Error('x'), { status: 500 }); };
+        await enviar();
+        out.erro = { classe: statusEl().className, texto: statusEl().textContent, role: statusEl().getAttribute('role'), n: state.notasNumeros.length, previa: !!state.previewNotaAtual, usar: !document.getElementById('btnUsarImagem').disabled };
+        preparar(0);
+        previa(IMG);
+        window.api = async () => { throw new TypeError('rede'); };
+        await enviar();
+        out.erroRede = { classe: statusEl().className, n: state.notasNumeros.length };
+        window.api = origApi; window.processarOcrNota = origOcr; window.capturarFotoScannerNota = origFoto;
+        state.notasNumeros = origNotas; state.idAtendimento = origId; uploadPendente = null; state.previewNotaAtual = null;
+        return out;
+    });
+}
 async function medirFeedbackToque(page, seletor) {
     const alvo = await page.evaluate(sel => {
         const k = document.querySelector(sel); if (!k) return null;
@@ -1139,6 +1218,21 @@ async function main() {
             page.on('pageerror', erro => erros.push(erro.message));
             await page.goto('http://127.0.0.1:' + porta + '/');
             const r = await exercitarQr(page);
+            const pn = await exercitarProximaNota(page);
+            const vp = viewport.width;
+            ok(!/proxima-nota/.test(pn.durante.classe) && pn.durante.texto === 'Enviando documento...', `${vp}: durante o envio nao aparece a mensagem de proxima nota`);
+            ok(pn.n1.texto === 'Nota 1 de 5 salva! Coloque a próxima nota no scanner ou toque em Finalizar digitalização.' && /proxima-nota/.test(pn.n1.classe), `${vp}: apos salvar a 1a nota aparece a mensagem exata`);
+            ok(pn.n1.role === 'status' && pn.n1.live === 'polite', `${vp}: mensagem com role=status e aria-live=polite`);
+            ok(pn.n1.fonte >= 24 && pn.n1.peso === '700' && pn.n1.pad >= 16 && pn.n1.fundo === 'rgb(1, 121, 173)' && pn.n1.cor === 'rgb(255, 255, 255)' && parseFloat(pn.n1.raio) >= 12, `${vp}: mensagem destacada (${pn.n1.fonte}px, peso ${pn.n1.peso}, fundo UDLOG, texto branco)`);
+            ok(pn.n1.msgVisivel && pn.n1.capVisivel && pn.n1.finVisivel && pn.n1.semOverflowX && pn.n1.semOverflowMsg, `${vp}: mensagem, Capturar nota e Finalizar digitalizacao visiveis no viewport e sem overflow`);
+            ok(pn.n1.contador === '1' && pn.n1.capDesab === false, `${vp}: contador 1 e Capturar nota habilitado apos a 1a nota`);
+            ok(pn.n1aposEspera === pn.n1.texto, `${vp}: mensagem permanece sem timer`);
+            ok(!/proxima-nota/.test(pn.aposCapturar.classe) && pn.aposCapturar.role === null && !/próxima nota/.test(pn.aposCapturar.texto), `${vp}: ao tocar em Capturar nota a mensagem some`);
+            ok(!/proxima-nota/.test(pn.aposRefazer.classe) && pn.aposRefazer.texto === 'Scanner pronto', `${vp}: Refazer volta ao status normal`);
+            ok(pn.n4.texto === 'Nota 4 de 5 salva! Coloque a próxima nota no scanner ou toque em Finalizar digitalização.' && pn.n4.msgVisivel && pn.n4.capVisivel && pn.n4.finVisivel, `${vp}: 4a nota com mensagem e botoes visiveis`);
+            ok(pn.n5.texto === 'Limite de 5 notas atingido. Toque em Finalizar digitalização.' && /proxima-nota/.test(pn.n5.classe) && pn.n5.capDesab === true && pn.n5.contador === '5' && pn.n5.msgVisivel && pn.n5.capVisivel && pn.n5.finVisivel && pn.n5.fonte >= 24, `${vp}: 5a nota mostra a mensagem de limite, Capturar nota desabilitado e contador 5`);
+            ok(!/proxima-nota/.test(pn.erro.classe) && /erro/.test(pn.erro.classe) && pn.erro.role === null && !/salva/.test(pn.erro.texto) && pn.erro.n === 1 && pn.erro.previa && pn.erro.usar, `${vp}: erro de upload nao mostra a mensagem de sucesso e mantem a previa`);
+            ok(!/proxima-nota/.test(pn.erroRede.classe) && /erro/.test(pn.erroRede.classe) && pn.erroRede.n === 0, `${vp}: erro de rede nao mostra a mensagem de sucesso`);
             console.log(`${viewport.width}x${viewport.height}: exp ${r.expCnh.caixa.w}x${r.expCnh.caixa.h}; rec ${r.recCrlv.caixa.w}x${r.recCrlv.caixa.h}`);
             for (const item of [r.expCnh, r.expCrlv, r.recCnh, r.recCrlv]) {
                 ok(item.guia && item.botao === 'Ler QR code', `${viewport.width}: tela QR-only possui guia e acao de leitura`);
